@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Счёт по вердиктам и гейт M0.
+#
+#   corpus/score.sh --ua honest              # посчитать
+#   corpus/score.sh --ua honest --approve    # + сложить читаемые в corpus/expected/
+#
+# Вердикты берутся из corpus/out/verdict-<ua>.tsv: y — читаемо, n — нет,
+# ? — ещё не смотрел. Знаменатель — весь корпус, а не только то, что скачалось:
+# читателю не легче от того, что страницу не отдал Cloudflare.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ua=honest
+approve=0
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --ua) ua=$2; shift 2 ;;
+        --approve) approve=1; shift ;;
+        -h|--help) sed -n '2,9p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        *) echo "score.sh: неизвестный аргумент $1" >&2; exit 1 ;;
+    esac
+done
+
+verdict="$root/corpus/out/verdict-$ua.tsv"
+report="$root/corpus/out/report-$ua.tsv"
+[[ -f "$verdict" ]] || { echo "нет $verdict — сначала corpus/run.sh --ua $ua" >&2; exit 1; }
+
+total=$(($(wc -l <"$report") - 1))
+yes=$(awk -F'\t' 'NR>1 && $1=="y"' "$verdict" | wc -l)
+no=$(awk -F'\t' 'NR>1 && $1=="n"' "$verdict" | wc -l)
+todo=$(awk -F'\t' 'NR>1 && $1!="y" && $1!="n"' "$verdict" | wc -l)
+
+echo "UA=$ua: читаемых $yes из $total"
+echo "  нечитаемых по рубрике: $no"
+echo "  не размечено:          $todo"
+[[ $total -gt 0 ]] && awk -v y="$yes" -v t="$total" 'BEGIN {
+    p = 100 * y / t
+    printf "  доля: %.0f%% — гейт M0 (70%%) %s\n", p, (p >= 70 ? "пройден" : "НЕ пройден")
+}'
+[[ $todo -gt 0 ]] && echo "  (число предварительное: $todo страниц ещё не размечено)"
+
+if [[ $approve -eq 1 ]]; then
+    mkdir -p "$root/corpus/expected"
+    n=0
+    while IFS=$'\t' read -r v _ file; do
+        [[ "$v" == "y" ]] || continue
+        cp "$root/corpus/out/$ua/$file" "$root/corpus/expected/$file"
+        n=$((n + 1))
+    done < <(tail -n +2 "$verdict")
+    echo "в corpus/expected/ положено эталонов: $n"
+fi

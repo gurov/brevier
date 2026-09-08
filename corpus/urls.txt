@@ -1,0 +1,38 @@
+# Корпус M0 — по одной ссылке в строке, `#` — комментарий.
+#
+# ВАЖНО: это заготовка на 18 ссылок, чтобы проверить сам инструмент.
+# Гейт M0 требует 50 ссылок на сайты, которые ты читаешь на самом деле:
+# число имеет смысл только если корпус — твоё реальное чтение, а не витрина
+# удобных случаев. Заменяй и дополняй.
+#
+# Ссылки должны вести на конкретные статьи, а не на главные страницы.
+
+# блоги
+https://danluu.com/everything-is-broken/
+https://without.boats/blog/why-async-rust/
+https://matklad.github.io/2023/03/26/zig-and-rust.html
+https://rachelbythebay.com/w/2024/05/01/fd/
+https://fasterthanli.me/articles/a-rust-match-made-in-hell
+https://tonsky.me/blog/unicode/
+
+# документация
+https://doc.rust-lang.org/book/ch01-01-installation.html
+https://www.sqlite.org/whentouse.html
+https://github.com/rust-lang/rust/blob/master/README.md
+
+# новости и агрегаторы
+https://blog.rust-lang.org/2024/09/05/Rust-1.81.0/
+https://lwn.net/Articles/974752/
+https://arstechnica.com/gadgets/2024/09/
+https://www.opennet.ru/opennews/art.shtml?num=61000
+
+# справочники
+https://en.wikipedia.org/wiki/Rust_(programming_language)
+
+# русскоязычное
+https://habr.com/ru/articles/915604/
+
+# заведомо трудные: на честный UA отвечают 403 — это тоже результат
+https://medium.com/@nikitonsky/why-i-hate-medium-b0f3a86bf9e6
+https://nplus1.ru/news/2024/09/05/quantum-computing
+https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array
