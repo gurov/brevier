@@ -38,9 +38,23 @@ const HEADING_LINE_HEIGHT: f32 = 1.15;
 /// в 34 пункта, который спорит с текстом, а не ведёт к нему.
 const HEADINGS: [f32; 6] = [1.75, 1.45, 1.28, 1.14, 1.05, 1.0];
 
+/// Гарнитуры едут в комплекте, а не берутся из системы. Продукт обещает,
+/// что типографику задаёт читатель, а не сайт; если шрифт выбирает
+/// операционная система, обещание не выполняется ни на одной из трёх.
+/// PT Serif сделан ParaType под кириллицу с латиницей и предназначен
+/// для чтения, PT Mono — парный к нему. Обе под OFL, лицензии рядом
+/// с файлами. Смена гарнитуры — это две константы и файлы в `assets/fonts`.
+const BODY_FAMILY: &str = "PT Serif";
+const MONO_FAMILY: &str = "PT Mono";
+
 /// Оглавление показываем, только если оно что-то даёт.
 const MIN_HEADINGS: usize = 3;
 const TOC_WIDTH: f32 = 240.0;
+/// Ниже этой высоты оглавление не нужно: страница и так вся под рукой.
+const MIN_DOC_HEIGHT: f32 = 1800.0;
+/// Через сколько высоты ставить веху, когда заголовков в статье нет.
+const WAYPOINT_EVERY: f32 = 900.0;
+const MAX_WAYPOINTS: usize = 14;
 /// На сколько прокручивает стрелка и на сколько — страница.
 const STEP: f32 = 60.0;
 const PAGE: f32 = 520.0;
@@ -54,6 +68,12 @@ fn main() -> iced::Result {
         Reader::update,
         Reader::view,
     )
+    .font(include_bytes!("../../assets/fonts/PTSerif-Regular.ttf").as_slice())
+    .font(include_bytes!("../../assets/fonts/PTSerif-Italic.ttf").as_slice())
+    .font(include_bytes!("../../assets/fonts/PTSerif-Bold.ttf").as_slice())
+    .font(include_bytes!("../../assets/fonts/PTSerif-BoldItalic.ttf").as_slice())
+    .font(include_bytes!("../../assets/fonts/PTMono-Regular.ttf").as_slice())
+    .default_font(iced::Font::with_name(BODY_FAMILY))
     .title(Reader::title)
     .theme(Reader::theme)
     .subscription(Reader::subscription)
@@ -418,7 +438,7 @@ impl Reader {
 
         let reading = scrollable(page).id(page_id()).height(Fill);
 
-        let body: Element<'_, Message> = if self.outline.len() >= MIN_HEADINGS {
+        let body: Element<'_, Message> = if !self.outline.is_empty() {
             row![reading, contents(&self.outline)].into()
         } else {
             reading.into()
@@ -473,25 +493,124 @@ const CHARS_PER_LINE: f32 = MEASURE_IN_EMS * 2.0;
 /// Высота блока-картинки: кнопка-заглушка плюс подпись.
 const IMAGE_BLOCK: f32 = 90.0;
 
-/// Оглавление статьи с местом каждого заголовка.
+/// Блок разметки с его местом по высоте.
+struct Block {
+    at: f32,
+    kind: Kind,
+}
+
+enum Kind {
+    Heading { level: u8, title: String },
+    Paragraph { lead: String },
+}
+
+/// Оглавление статьи.
+///
+/// Заголовки есть не везде: половина статей в вебе — сплошной текст без
+/// единого `##`. Оглавление там всё равно нужно, иначе длинную статью
+/// не с чего листать, — только вехами служат не заголовки, а начала
+/// абзацев, расставленные примерно через экран. На короткой странице
+/// не нужно ни то, ни другое: она и так вся под рукой.
 ///
 /// Прыгать по документу iced умеет только долями от полной высоты
-/// (`snap_to`), а спросить, где лежит конкретный виджет, нечем: операции
-/// вроде `visible_bounds` в 0.14 нет. Поэтому высоту считаем сами
-/// по разметке — так же, как её потом разложит рендерер: абзац занимает
-/// столько строк, сколько знаков в нём не влезло в меру, у кода строка
-/// своя, у картинки фиксированный блок.
-///
-/// Это оценка, а не измерение. Систематическая ошибка масштаба не страшна:
-/// в долю она не входит, потому что делится сама на себя. Врёт оценка там,
-/// где блок ведёт себя не как текст, — на широких таблицах и длинных
-/// списках. Промах в полэкрана заголовок всё равно оставляет на виду.
+/// (`snap_to`), а спросить, где лежит виджет, нечем: `visible_bounds`
+/// в 0.14 нет. Поэтому высоту считаем сами по разметке — так же, как её
+/// потом разложит рендерер. Это оценка, а не измерение; систематическая
+/// ошибка масштаба безвредна, она сокращается в доле.
 fn outline(source: &str) -> Vec<Entry> {
+    let (blocks, height) = scan(source);
+
+    if height < MIN_DOC_HEIGHT {
+        return Vec::new();
+    }
+
+    let mut headings: Vec<Entry> = blocks
+        .iter()
+        .filter_map(|block| match &block.kind {
+            Kind::Heading { level, title } => Some(Entry {
+                level: *level,
+                title: title.clone(),
+                at: block.at,
+            }),
+            Kind::Paragraph { .. } => None,
+        })
+        .collect();
+
+    // Название статьи — не раздел: оно и так наверху, и в счёт разделов
+    // не идёт. Иначе статья с двумя разделами считалась бы за три.
+    if matches!(headings.first(), Some(first) if first.level == 1 && first.at == 0.0) {
+        headings.remove(0);
+    }
+
+    let entries = if headings.len() >= MIN_HEADINGS {
+        headings
+    } else {
+        waypoints(&blocks, height)
+    };
+
+    into_fractions(entries, height)
+}
+
+/// Перевести высоты в доли от полной.
+fn into_fractions(mut entries: Vec<Entry>, height: f32) -> Vec<Entry> {
+    let total = height.max(1.0);
+    for entry in &mut entries {
+        entry.at = (entry.at / total).clamp(0.0, 1.0);
+    }
+    entries
+}
+
+/// Вехи по началам абзацев — примерно через экран.
+fn waypoints(blocks: &[Block], height: f32) -> Vec<Entry> {
+    let leads: Vec<&Block> = blocks
+        .iter()
+        .filter(|block| matches!(block.kind, Kind::Paragraph { .. }))
+        .collect();
+    if leads.is_empty() {
+        return Vec::new();
+    }
+
+    let wanted = ((height / WAYPOINT_EVERY).round() as usize).clamp(2, MAX_WAYPOINTS);
+    let mut entries: Vec<Entry> = Vec::with_capacity(wanted);
+    let mut taken = 0usize;
+
+    for step in 0..wanted {
+        let target = height * (step as f32 + 0.5) / wanted as f32;
+        // Ближайший абзац к цели, но не тот, что уже взяли.
+        let Some((index, block)) = leads
+            .iter()
+            .enumerate()
+            .skip(taken)
+            .min_by(|(_, a), (_, b)| {
+                (a.at - target)
+                    .abs()
+                    .total_cmp(&(b.at - target).abs())
+            })
+        else {
+            break;
+        };
+        taken = index + 1;
+
+        if let Kind::Paragraph { lead } = &block.kind {
+            entries.push(Entry {
+                level: 1,
+                title: lead.clone(),
+                at: block.at,
+            });
+        }
+    }
+    entries
+}
+
+/// Разложить разметку на блоки и посчитать высоту так, как её разложит
+/// рендерер: абзац занимает столько строк, сколько знаков не влезло
+/// в меру, у кода строка своя, у картинки — фиксированный блок.
+fn scan(source: &str) -> (Vec<Block>, f32) {
     let line_px = TEXT_SIZE * LINE_HEIGHT;
     let gap = TEXT_SIZE * 0.95;
     let code_line = TEXT_SIZE * 0.88 * 1.35;
 
-    let mut entries: Vec<Entry> = Vec::new();
+    let mut blocks = Vec::new();
     let mut height = 0.0f32;
     let mut in_code = false;
 
@@ -512,10 +631,9 @@ fn outline(source: &str) -> Vec<Entry> {
             continue;
         }
         if let Some((level, title)) = heading(text) {
-            entries.push(Entry {
-                level,
-                title,
+            blocks.push(Block {
                 at: height,
+                kind: Kind::Heading { level, title },
             });
             height += TEXT_SIZE * HEADINGS[usize::from(level - 1)] * HEADING_LINE_HEIGHT
                 + TEXT_SIZE * 1.4;
@@ -527,19 +645,37 @@ fn outline(source: &str) -> Vec<Entry> {
         }
 
         let rows = (text.chars().count() as f32 / CHARS_PER_LINE).ceil().max(1.0);
+        if rows >= 2.0 {
+            // Вехой может быть только настоящий абзац, а не строка списка
+            // или подпись: у коротких строк начало ничего не говорит.
+            blocks.push(Block {
+                at: height,
+                kind: Kind::Paragraph { lead: lead(text) },
+            });
+        }
         height += rows * line_px;
     }
 
-    // Первый заголовок первого уровня — название статьи, оно и так наверху.
-    if matches!(entries.first(), Some(first) if first.level == 1 && first.at == 0.0) {
-        entries.remove(0);
-    }
+    (blocks, height)
+}
 
-    let total = height.max(1.0);
-    for entry in &mut entries {
-        entry.at = (entry.at / total).clamp(0.0, 1.0);
+/// Начало абзаца как подпись к вехе: до первой границы слова после сорока
+/// знаков. Смысл в том, чтобы читатель узнал место, а не прочитал абзац.
+fn lead(text: &str) -> String {
+    let plain = plain(text);
+    let mut out = String::new();
+
+    for word in plain.split_whitespace() {
+        if out.chars().count() + word.chars().count() > 40 {
+            out.push('…');
+            return out;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
     }
-    entries
+    out
 }
 
 /// `## Заголовок` → уровень и текст без разметки.
@@ -583,13 +719,14 @@ fn plain(text: &str) -> String {
 
 /// Оглавление сбоку.
 fn contents(entries: &[Entry]) -> Element<'_, Message> {
-    let mut list = column![].spacing(2);
+    let mut list = column![].spacing(2).width(Fill);
 
     for entry in entries {
         let indent = f32::from(entry.level.saturating_sub(1)) * 12.0;
         list = list.push(
-            button(text(&entry.title).size(TEXT_SIZE * 0.8))
+            button(text(&entry.title).size(TEXT_SIZE * 0.8).width(Fill))
                 .on_press(Message::JumpTo(entry.at))
+                .width(Fill)
                 .style(button::text)
                 .padding(iced::Padding {
                     left: 6.0 + indent,
@@ -757,7 +894,12 @@ fn markdown_settings(theme: &Theme) -> markdown::Settings {
         h6_size: heading(5),
         code_size: (TEXT_SIZE * 0.88).into(),
         spacing: (TEXT_SIZE * 0.95).into(),
-        style: markdown::Style::from_palette(theme.palette()),
+        style: markdown::Style {
+            font: iced::Font::with_name(BODY_FAMILY),
+            inline_code_font: iced::Font::with_name(MONO_FAMILY),
+            code_block_font: iced::Font::with_name(MONO_FAMILY),
+            ..markdown::Style::from_palette(theme.palette())
+        },
     }
 }
 
@@ -834,23 +976,62 @@ mod tests {
         ));
     }
 
+    /// Достаточно длинный кусок текста, чтобы страница не считалась короткой.
+    fn filler() -> String {
+        let para = "Длинный абзац статьи, в котором знаков хватает на несколько \
+строк нашей меры, иначе страница выйдет короткой и оглавления не получит.";
+        vec![para; 12].join("\n\n")
+    }
+
     #[test]
     fn outline_skips_the_article_title() {
-        let doc = "# Название статьи\n\nАбзац.\n\n## Первый раздел\n\nАбзац.\n\n## Второй раздел\n";
-        let entries = outline(doc);
-        assert_eq!(entries.len(), 2, "название в оглавление не идёт: {entries:?}");
-        assert_eq!(entries[0].title, "Первый раздел");
-        assert_eq!(entries[1].level, 2);
+        let text = filler();
+        let doc = format!(
+            "# Название статьи\n\n{text}\n\n## Первый\n\n{text}\n\n## Второй\n\n{text}\n\n## Третий\n"
+        );
+        let entries = outline(&doc);
+        assert_eq!(entries.len(), 3, "название в оглавление не идёт: {entries:?}");
+        assert_eq!(entries[0].title, "Первый");
+        assert_eq!(entries[0].level, 2);
+    }
+
+    #[test]
+    fn a_short_page_gets_no_contents() {
+        let doc = "# Заметка\n\nОдин абзац, и на этом всё.\n";
+        assert!(outline(doc).is_empty(), "короткой странице оглавление не нужно");
+    }
+
+    #[test]
+    fn a_long_page_without_headings_gets_waypoints() {
+        let para = "Длинный абзац статьи, в котором достаточно знаков, чтобы \
+он занял несколько строк на нашей мере и попал в разметку вехой.";
+        let doc = format!("# Название\n\n{}\n", vec![para; 40].join("\n\n"));
+        let entries = outline(&doc);
+        assert!(entries.len() >= 2, "вехи должны появиться: {}", entries.len());
+        assert!(entries.len() <= MAX_WAYPOINTS);
+        assert!(entries.windows(2).all(|w| w[0].at <= w[1].at), "порядок вех нарушен");
+        assert!(entries.iter().all(|e| !e.title.is_empty()));
+    }
+
+    #[test]
+    fn a_waypoint_label_is_short() {
+        let long = "Это очень длинное начало абзаца, которое ни в какое оглавление целиком не влезет";
+        let label = lead(long);
+        assert!(label.chars().count() <= 42, "подпись слишком длинная: {label:?}");
+        assert!(label.ends_with('…'));
     }
 
     #[test]
     fn outline_places_headings_in_order() {
-        let filler = vec!["Длинный абзац статьи, который занимает место."; 30].join("\n\n");
-        let doc = format!("# Название\n\n{filler}\n\n## Середина\n\n{filler}\n\n## Конец\n");
+        let text = filler();
+        let doc = format!(
+            "# Название\n\n{text}\n\n## Начало\n\n{text}\n\n## Середина\n\n{text}\n\n## Конец\n\n{text}\n"
+        );
         let entries = outline(&doc);
-        assert_eq!(entries.len(), 2);
-        assert!(entries[0].at < entries[1].at, "порядок нарушен: {entries:?}");
-        assert!(entries[0].at > 0.3 && entries[0].at < 0.7, "середина не в середине: {entries:?}");
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        assert!(entries.windows(2).all(|w| w[0].at < w[1].at), "порядок нарушен: {entries:?}");
+        let middle = entries[1].at;
+        assert!((0.35..0.7).contains(&middle), "середина не в середине: {middle}");
         assert!(entries.iter().all(|e| (0.0..=1.0).contains(&e.at)));
     }
 
@@ -866,10 +1047,14 @@ mod tests {
 
     #[test]
     fn code_fences_do_not_become_headings() {
-        let doc = "# Название\n\n```\n# это комментарий, а не заголовок\n```\n\n## Раздел\n";
-        let entries = outline(doc);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].title, "Раздел");
+        let text = filler();
+        let doc = format!(
+            "# Название\n\n```\n# это комментарий, а не заголовок\n```\n\n\
+## Первый\n\n{text}\n\n## Второй\n\n{text}\n\n## Третий\n\n{text}\n"
+        );
+        let entries = outline(&doc);
+        assert_eq!(entries.len(), 3, "комментарий в коде — не заголовок: {entries:?}");
+        assert!(entries.iter().all(|e| e.title != "это комментарий, а не заголовок"));
     }
 
     #[test]
