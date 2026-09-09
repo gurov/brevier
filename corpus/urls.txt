@@ -51,8 +51,6 @@ https://danluu.com/keyboard-latency/
 https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/
 
 https://journal.tinkoff.ru/diary-proffession-frontend/
-https://vc.ru/tribuna/890123-kak-ya-sdelal-svoy-pet-proekt-i-zarabotal-pervye-1000-dollarov
-https://pikabu.ru/story/istoriya_odnogo_pereezda_iz_siberia_v_europe_654987
 https://www.reddit.com/r/IAmA/comments/z1385/i_am_a_professional_chef_ask_me_anything/
 https://journal.tinkoff.ru/flat-renovation-experience/
 
@@ -63,20 +61,14 @@ https://sive.rs/hellyeah
 https://nav.al/rich
 https://jamesclear.com/four-burners-theory
 
-https://vc.ru/finance/678901-kak-rabotaet-yunit-ekonomika-dlya-novichkov
-https://habr.com/ru/companies/stratoplan/blog/456789/
 https://journal.tinkoff.ru/guide/ip-opening/
-https://rb.ru/story/how-to-pitch-investors/
-https://vc.ru/marketing/543210-razbor-marketatiga-apple-pochemu-ih-reklama-rabotaet
 
 https://nplus1.ru/material/2023/11/15/quantum-supremacy
 https://postnauka.org/longreads/156789
-https://elementy.ru/novosti_nauki/434123/kak_rabotaet_crispr_cas9
 https://arzamas.academy/materials/1234
 https://theideas.ru/posts/evolution-of-human-brain
 https://nplus1.ru/material/2022/05/10/climate-change-models
 
-https://dtf.ru/gamedev/987654-kak-ustroena-procedurnaya-generaciya-mira
 https://www.kinopoisk.ru/media/article/4001234/
 
 https://www.nngroup.com/articles/ten-usability-heuristics/
@@ -125,10 +117,8 @@ https://every.to/superorganizers/how-to-build-a-second-brain
 
 # 4. Наука, технологии и космос (Science & Deep Tech)
 
-https://www.theatlantic.com/magazine/archive/2022/09/mri-brain-neuroscience-memory/670597/
 
 # 5. Дизайн, Игры и Поп-культура (Design, Gaming & Culture)
 
 https://www.nngroup.com/articles/f-shaped-pattern-reading-web-content/
-https://www.gamedeveloper.com/design/the-art-of-level-design-in-dark-souls
 https://alistapart.com/article/responsive-web-design/
