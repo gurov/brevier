@@ -182,6 +182,7 @@ fn to_markdown(html: &str) -> Result<String, Error> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(SKIP.to_vec())
         .add_handler(vec!["code"], code_handler)
+        .add_handler(vec!["span"], span_handler)
         .add_handler(vec!["a"], anchor_handler)
         .options(HtmdOptions {
             heading_style: HeadingStyle::Atx,
@@ -220,6 +221,21 @@ fn code_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResu
     let language = language_from_attrs(&element).unwrap_or_default();
 
     Some(format!("\n\n{fence}{language}\n{code}\n{fence}\n\n").into())
+}
+
+/// `<span>` с переводом строки внутри.
+///
+/// htmd срезает переводы строк по краям каждого span'а (`span.rs`), а подсветка
+/// синтаксиса верстает строку кода цепочкой span'ов, где перевод строки —
+/// последний из них: without.boats отдавал блок кода, склеенный в одну строку.
+/// Вне блоков кода терять нечего — там переводы строк давно схлопнуты в пробелы,
+/// а лишние пустые строки уберёт `tidy`.
+fn span_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
+    let content = handlers.walk_children(element.node).content;
+    if !content.contains('\n') {
+        return handlers.fallback(element);
+    }
+    Some(content.into())
 }
 
 /// Ссылка без текста — мусор, а не ссылка.
@@ -301,6 +317,16 @@ mod tests {
         let md = from_html("<figure><code>fn main() {\n    println!(\"hi\");\n}</code></figure>")
             .unwrap();
         assert_eq!(md, "```\nfn main() {\n    println!(\"hi\");\n}\n```\n");
+    }
+
+    #[test]
+    fn highlighted_code_keeps_its_line_breaks() {
+        let md = from_html(
+            "<pre><code><span><span>enum</span> <span>Foo</span><span> {</span><span>\n</span></span>\
+             <span><span>    Bar,</span><span>\n</span></span><span><span>}</span></span></code></pre>",
+        )
+        .unwrap();
+        assert_eq!(md, "```\nenum Foo {\n    Bar,\n}\n```\n");
     }
 
     #[test]
