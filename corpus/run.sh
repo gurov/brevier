@@ -23,6 +23,12 @@ if [[ "${1:-}" == "--one" ]]; then
     file="$outdir/$slug.md"
     errfile="$outdir/.$slug.err"
     if "$bin" --ua "$ua" "$url" >"$file" 2>"$errfile"; then code=0; else code=$?; fi
+    # Сетевые обрывы случайны и шумят прямо в числе на гейте: одна повторная
+    # попытка. Отказы доступа (403, сертификат) не повторяем — они устойчивы.
+    if [[ $code -eq 2 ]]; then
+        sleep 2
+        if "$bin" --ua "$ua" "$url" >"$file" 2>"$errfile"; then code=0; else code=$?; fi
+    fi
     printf '%s\t%s\t%s\t%s\t%s\n' "$code" "$(wc -c <"$file")" "$url" "$slug.md" \
         "$(tr -d '\t\n' <"$errfile")"
     rm -f "$errfile"

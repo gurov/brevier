@@ -31,5 +31,3 @@ distribute this content, or a modified version of it, you must provide
 attribution to Red Hat Inc. and provide a link to the original.
 
 Original: [https://access.redhat.com/security/data/csaf/v2/advisories/2024/rhsa-2024_3128.json](https://access.redhat.com/security/data/csaf/v2/advisories/2024/rhsa-2024_3128.json)
-
-* * *

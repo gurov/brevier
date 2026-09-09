@@ -209,5 +209,3 @@ Finally, there is the factor of team skill. New techniques tend to be adopted by
 One reasonable argument we've heard is that you shouldn't start with a microservices architecture. Instead [begin with a monolith](https://martinfowler.com/bliki/MonolithFirst.html), keep it modular, and split it into microservices once the monolith becomes a problem. (Although [this advice isn't ideal](https://martinfowler.com/articles/dont-start-monolith.html), since a good in-process interface is usually not a good service interface.)
 
 So we write this with cautious optimism. So far, we've seen enough about the microservice style to feel that it can be [a worthwhile road to tread](https://martinfowler.com/microservices/). We can't say for sure where we'll end up, but one of the challenges of software development is that you can only make decisions based on the imperfect information that you currently have to hand.
-
-* * *

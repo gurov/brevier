@@ -50,7 +50,7 @@ pub fn from_article(article: &Article) -> Result<String, Error> {
 
     let doc = tidy(&doc);
     match strip_teasers(&doc) {
-        Teasers::Article(text) => Ok(text),
+        Teasers::Article(text) => Ok(strip_chrome(&text)),
         Teasers::Listing => Err(Error::EmptyExtraction),
     }
 }
@@ -146,6 +146,164 @@ fn unwrap_single_column_tables(md: &str) -> String {
     }
 
     out
+}
+
+/// Подписи кнопок, которые Readability приносит вместе со статьёй.
+const UI_LABELS: &[&str] = &[
+    "поделиться",
+    "сохранить в закладки",
+    "добавить в закладки",
+    "в закладки",
+    "share",
+    "share this",
+    "skip to content",
+];
+
+/// Метки, которые считаем интерфейсом только с двоеточием: «Автор» без него —
+/// это может быть подпись, а не подпись кнопки.
+const UI_LABELS_WITH_COLON: &[&str] = &["автор", "материалы по теме", "читайте также"];
+
+/// Единицы, которые превращают число в счётчик: просмотры и время чтения.
+const COUNTER_UNITS: &[&str] = &[
+    "",
+    "k",
+    "к",
+    "m",
+    "тыс",
+    "тыс.",
+    "мин",
+    "мин.",
+    "минута",
+    "минуты",
+    "минут",
+    "min",
+    "min read",
+    "мин чтения",
+];
+
+/// Обрезки интерфейса вокруг статьи.
+///
+/// Readability вырезает боковые колонки и подвал, но мелочь, прижатую к тексту,
+/// оставляет: счётчик голосов в конце поста (dtf, vc.ru), «5 мин» и «6.9K»
+/// под заголовком (habr), «Поделиться:» и «Материалы по теме:» (rb.ru),
+/// «Добавить в закладки» (postnauka). Каждая мелочь по отдельности пустяк,
+/// но по рубрике это футер, и на нём падают страницы.
+fn strip_chrome(md: &str) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    let mut in_code = false;
+
+    for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if in_code || !is_chrome(line) {
+            lines.push(line);
+        }
+    }
+
+    drop_link_quotes(&mut lines);
+    drop_dangling_tail(&mut lines);
+
+    // На месте выброшенных строк остались дыры из пустых — их схлопывает tidy.
+    tidy(&lines.join("\n"))
+}
+
+fn is_chrome(line: &str) -> bool {
+    let line = strip_leading_image(line.trim());
+    let line = line.trim().trim_start_matches('#').trim();
+    let line = line.trim_matches('*').trim();
+    let (line, had_colon) = match line.strip_suffix(':') {
+        Some(without) => (without.trim(), true),
+        None => (line, false),
+    };
+
+    if line.is_empty() || line.chars().count() > 40 {
+        return false;
+    }
+
+    let lowered = line.to_lowercase();
+    if had_colon {
+        // «1:» и «3:» — сноски в тексте (martinfowler.com), а не счётчики.
+        // С двоеточием бывают только подписи кнопок.
+        return UI_LABELS.contains(&lowered.as_str())
+            || UI_LABELS_WITH_COLON.contains(&lowered.as_str());
+    }
+    is_counter(&lowered) || UI_LABELS.contains(&lowered.as_str())
+}
+
+/// `![Время прочтения](url) 5 минут` — картинка плюс счётчик; картинку
+/// отбрасываем и смотрим, что осталось.
+fn strip_leading_image(line: &str) -> &str {
+    let Some(rest) = line.strip_prefix("![") else {
+        return line;
+    };
+    let Some(after_alt) = rest.split_once("](") else {
+        return line;
+    };
+    match after_alt.1.split_once(')') {
+        Some((_, tail)) => tail,
+        None => line,
+    }
+}
+
+/// «20», «6.9K», «5 мин» — число со счётчиковой единицей и ничего больше.
+fn is_counter(line: &str) -> bool {
+    let digits_end = line
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ',' || c == ' '))
+        .unwrap_or(line.len());
+    let (number, unit) = line.split_at(digits_end);
+
+    number.chars().any(|c| c.is_ascii_digit()) && COUNTER_UNITS.contains(&unit.trim())
+}
+
+/// Цитата, собранная из одних ссылок, — это «читайте также», а не цитата.
+/// Так habr дописывает к статье подборку чужих материалов.
+fn drop_link_quotes(lines: &mut Vec<&str>) {
+    let mut result: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+
+    while i < lines.len() {
+        if !lines[i].starts_with('>') {
+            result.push(lines[i]);
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        while i < lines.len() && lines[i].starts_with('>') {
+            i += 1;
+        }
+        let quote = &lines[start..i];
+
+        let lead_in = quote[0]
+            .trim_start_matches('>')
+            .trim()
+            .trim_matches('*')
+            .trim()
+            .ends_with(':');
+        let links = quote.iter().filter(|l| l.contains("](http")).count();
+
+        if !(lead_in && links >= 2) {
+            result.extend_from_slice(quote);
+        }
+    }
+
+    *lines = result;
+}
+
+/// Подводка, у которой отняли продолжение: «Материалы по теме:» и ничего после.
+fn drop_dangling_tail(lines: &mut Vec<&str>) {
+    while let Some(last) = lines.last() {
+        let raw = last.trim();
+        let divider = matches!(raw, "" | "* * *" | "***" | "---" | "___" | "-----");
+        let text = raw.trim_matches('*').trim();
+        let dangling = text.ends_with(':') && text.chars().count() <= 80;
+        if dangling || divider {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
 }
 
 /// Что осталось от страницы после вычитания анонсов чужих статей.
@@ -495,6 +653,57 @@ mod tests {
             md,
             "| очень длинный заголовок столбца | б |\n| --- | --- |\n| к | д |\n"
         );
+    }
+
+    #[test]
+    fn counters_and_button_labels_are_dropped() {
+        let md = "# Статья\n\nАвтор\n\n5 мин\n\n6.9K\n\nПоделиться:\n\nТекст статьи.\n\n20\n";
+        assert_eq!(strip_chrome(md), "# Статья\n\nАвтор\n\nТекст статьи.\n");
+    }
+
+    #[test]
+    fn reading_time_with_an_icon_is_a_counter_too() {
+        let md = "# Статья\n\n![Время прочтения](https://e.com/clock.svg) 5 минут\n\nТекст.\n";
+        assert_eq!(strip_chrome(md), "# Статья\n\nТекст.\n");
+    }
+
+    #[test]
+    fn numbered_footnote_markers_survive() {
+        // martinfowler.com размечает сноски строкой «1:» — это не счётчик.
+        let md = "# Статья\n\n1:\n\nПервая сноска.\n\n3:\n\nТретья.\n";
+        assert_eq!(strip_chrome(md), md);
+    }
+
+    #[test]
+    fn numbers_inside_the_text_survive() {
+        // Счётчик — это отдельная строка, а не число в абзаце или в списке.
+        let md = "# Статья\n\nВ 2024 году было 20 попыток.\n\n- 20\n";
+        assert_eq!(strip_chrome(md), md.trim_end().to_owned() + "\n");
+    }
+
+    #[test]
+    fn a_quote_of_links_is_a_read_also_block() {
+        let md = "# Статья\n\n> **Возможно, вас заинтересуют:**\n>\n> → [Раз](https://e.com/1)\n> → [Два](https://e.com/2)\n\nПоследний абзац.\n";
+        assert_eq!(strip_chrome(md), "# Статья\n\nПоследний абзац.\n");
+    }
+
+    #[test]
+    fn an_ordinary_quote_with_a_link_survives() {
+        let md =
+            "# Статья\n\n> Цитата с мыслью и [ссылкой](https://e.com/1) внутри.\n\nДальше текст.\n";
+        assert_eq!(strip_chrome(md), md);
+    }
+
+    #[test]
+    fn dangling_lead_in_at_the_end_is_cut() {
+        let md = "# Статья\n\nТекст.\n\n* * *\n\n**Материалы по теме:**\n";
+        assert_eq!(strip_chrome(md), "# Статья\n\nТекст.\n");
+    }
+
+    #[test]
+    fn code_is_not_touched_by_chrome_cleanup() {
+        let md = "# Статья\n\n```\n20\nПоделиться:\n```\n\nТекст.\n";
+        assert_eq!(strip_chrome(md), md);
     }
 
     #[test]
