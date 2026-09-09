@@ -4,11 +4,48 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+# Ядро — библиотека, интерфейс и cli — потребители. Разделение записано
+# в архитектуре: тулкит должен сидеть на краю.
+[lib]
+name = "brevier"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brevier"
+path = "src/main.rs"
+
+# Окно — отдельный бинарник за фичей: ядро и cli собираются без iced,
+# и корпус M0 продолжает гонять тот же `brevier`, что и раньше.
+[[bin]]
+name = "brevier-ui"
+path = "src/ui/main.rs"
+required-features = ["ui"]
+
+[features]
+ui = ["dep:iced"]
+
 [dependencies]
 comrak = { version = "0.55", default-features = false }
 dom_query = "0.28"
 dom_smoothie = "0.18.1"
 htmd = "0.5.5"
+# Набор фич iced собран вручную: это умолчания минус `wgpu`. Читалке нечего
+# считать на видеокарте, а программный рендерер снимает и зависимость от GPU,
+# и заметный кусок поверхности для CVE. `advanced-shaping` — не украшение:
+# без него не работают арабица, иврит и сложные индийские письменности.
+# x11/wayland — линуксовые; при выходе на macOS и Windows набор станет
+# зависимым от целевой платформы.
+iced = { version = "0.14.0", default-features = false, optional = true, features = [
+    "tiny-skia",
+    "markdown",
+    "advanced-shaping",
+    "thread-pool",
+    "linux-theme-detection",
+    "web-colors",
+    "crisp",
+    "x11",
+    "wayland",
+] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
 url = "2.5.8"

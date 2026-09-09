@@ -2,16 +2,12 @@
 //!
 //!     brevier https://example.com/article | less
 
-mod error;
-mod extract;
-mod fetch;
-mod markdown;
-
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-use error::Error;
-use fetch::{ContentKind, UserAgent};
+use brevier::error::Error;
+use brevier::fetch::{ContentKind, UserAgent};
+use brevier::{extract, fetch, markdown};
 
 const HELP: &str = "\
 brevier — a JavaScript-free reader: fetches a page, extracts the article,
@@ -56,8 +52,7 @@ fn main() -> ExitCode {
         }
     };
 
-    // rustls собран без встроенного провайдера, выбираем явно.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    brevier::init_crypto();
 
     match run(&args) {
         Ok(text) => out(&text),
