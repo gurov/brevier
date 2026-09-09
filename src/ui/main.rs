@@ -88,6 +88,8 @@ struct Reader {
     page: Page,
     content: markdown::Content,
     outline: Vec<Entry>,
+    /// Показывать ли оглавление. Решение читателя, и оно переживает переходы.
+    show_toc: bool,
     /// Ручка текущей загрузки. Нужна, чтобы ответ брошенной страницы
     /// не приезжал поверх новой.
     loading: Option<iced::task::Handle>,
@@ -232,6 +234,7 @@ enum Message {
     Unfocus,
     JumpTo(f32),
     OpenInBrowser,
+    ToggleContents,
     OpenExternal(String),
     ToggleTheme,
 }
@@ -244,6 +247,7 @@ impl Reader {
             page: Page::Blank,
             content: markdown::Content::new(),
             outline: Vec::new(),
+            show_toc: true,
             loading: None,
             dark: true,
         };
@@ -322,6 +326,10 @@ impl Reader {
             Message::Unfocus => unfocus(),
             Message::JumpTo(at) => {
                 operation::snap_to(page_id(), scrollable::RelativeOffset { x: 0.0, y: at })
+            }
+            Message::ToggleContents => {
+                self.show_toc = !self.show_toc;
+                Task::none()
             }
             Message::ToggleTheme => {
                 self.dark = !self.dark;
@@ -407,8 +415,8 @@ impl Reader {
                 .padding([6, 10])
                 .size(15),
             go(
-                "в браузере",
-                (!self.history.is_empty()).then_some(Message::OpenInBrowser)
+                "☰",
+                (!self.outline.is_empty()).then_some(Message::ToggleContents)
             ),
             go(
                 if self.dark { "☀" } else { "☾" },
@@ -438,7 +446,7 @@ impl Reader {
 
         let reading = scrollable(page).id(page_id()).height(Fill);
 
-        let body: Element<'_, Message> = if !self.outline.is_empty() {
+        let body: Element<'_, Message> = if self.show_toc && !self.outline.is_empty() {
             row![reading, contents(&self.outline)].into()
         } else {
             reading.into()
@@ -463,6 +471,10 @@ fn keys(key: &key::Key, modifiers: Modifiers) -> Option<Message> {
     let named = match key.as_ref() {
         key::Key::Named(named) => named,
         key::Key::Character("l") if modifiers.command() => return Some(Message::FocusAddress),
+        // Кнопки в панели больше нет, но выход в системный браузер обязан
+        // оставаться под рукой: на открытом вебе это частый путь, а не
+        // крайний случай.
+        key::Key::Character("o") if modifiers.command() => return Some(Message::OpenInBrowser),
         _ => return None,
     };
 
@@ -1055,6 +1067,16 @@ mod tests {
         let entries = outline(&doc);
         assert_eq!(entries.len(), 3, "комментарий в коде — не заголовок: {entries:?}");
         assert!(entries.iter().all(|e| e.title != "это комментарий, а не заголовок"));
+    }
+
+    #[test]
+    fn the_way_out_to_the_browser_survives_as_a_shortcut() {
+        // Кнопку из панели убрали, клавиша осталась — требование M1 в силе.
+        assert!(matches!(
+            keys(&key::Key::Character("o".into()), Modifiers::COMMAND),
+            Some(Message::OpenInBrowser)
+        ));
+        assert!(keys(&key::Key::Character("o".into()), Modifiers::default()).is_none());
     }
 
     #[test]
