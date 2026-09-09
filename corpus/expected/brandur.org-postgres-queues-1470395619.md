@@ -10,8 +10,6 @@ The figure below shows a simulation of the effect. With a relatively high rate o
 
 ![Number of jobs in queue. One hour into a long-lived transaction, we're at 60k jobs.](https://brandur.org/assets/images/postgres-queues/pre-queue-count.png)
 
-Number of jobs in queue. One hour into a long-lived transaction, we're at 60k jobs.
-
 ## [Why put a job queue in Postgres?](#why)
 
 Your first question may be: why put a job queue in Postgres at all? The answer is that although it may be far from the use case that databases are designed for, storing jobs in a database allows a program to take advantage of its transactional consistency; when an operation fails and rolls back, an injected job rolls back with it. Postgres transactional isolation also keeps jobs invisible to workers until their transactions commit and are ready to be worked.
@@ -35,8 +33,6 @@ Like we hoped, the program was easily able to reproduce the problem and in a rel
 The first step into figuring out exactly what’s going wrong is to find out what exactly about the long running transaction is slowing the job queue down. By looking around at a few queue metrics, we quickly find a promising candidate. During stable operation, a worker locking a job to make sure that it can be worked exclusively takes on the order of < 0.01 seconds. As we can see in the figure below though, as the oldest transaction gets older, this lock time escalates quickly until it’s 15x that level at times of 0.1 s and above. As the difficulty to lock a job increases, workers can lock fewer of them in the same amount of time. Left long enough, the queue will eventually reach a point where more jobs are being produced than being worked, leading to a runaway queue.
 
 ![Median lock time. Normally < 0.01 s, locks are taking 15x longer than that one hour in.](https://brandur.org/assets/images/postgres-queues/pre-lock-time.png)
-
-Median lock time. Normally < 0.01 s, locks are taking 15x longer than that one hour in.
 
 ### [Locking algorithms](#locking-algorithms)
 
@@ -102,8 +98,6 @@ Taking a closer look at the [jobs table DDL](https://github.com/chanks/que/blob/
 By continuing to examine test data, we quickly notice another strong correlation. As the age of the oldest transaction increases, the number of dead tuples in the jobs table grows continually. The figure below shows how by the end of our experiment, we’re approaching an incredible 100,000 dead rows.
 
 ![Number of dead tuples in the jobs table. The curve flattens out as jobs get harder to work.](https://brandur.org/assets/images/postgres-queues/pre-dead-tuples.png)
-
-Number of dead tuples in the jobs table. The curve flattens out as jobs get harder to work.
 
 Automated Postgres VACUUM processes are supposed to clean these up, but by running a manual VACUUM, we can see that they can’t be removed:
 
@@ -243,13 +237,9 @@ Illustrated visually, a lock under ideal conditions searches the job queue’s B
 
 ![Que finding a job under ideal conditions.](https://brandur.org/assets/images/postgres-queues/index.svg)
 
-Que finding a job under ideal conditions.
-
 In the degenerate case, a search turns up a series of dead tuples that must be scanned through until a live job is reached:
 
 ![Que trying to find a lock in a bloated heap.](https://brandur.org/assets/images/postgres-queues/index-bloated.svg)
-
-Que trying to find a lock in a bloated heap.
 
 A job queue’s access pattern is particularly susceptible to this kind of degradation because all this work gets thrown out between every job that’s worked. To minimize the amount of time that a job sits in the queue, queueing systems tend to only grab one job at a time which leads to short waiting periods during optimal performance, but particularly pathologic behavior during the worse case scenario.
 
@@ -272,8 +262,6 @@ Illustrated visually, the locking function is able to skip the bulk of the dead 
 
 ![Que finding a lock with a greater index specificity despite a bloated heap.](https://brandur.org/assets/images/postgres-queues/index-corrected.svg)
 
-Que finding a lock with a greater index specificity despite a bloated heap.
-
 Because Que works jobs in the order that they came into the queue, having workers re-use the identifier of the last job they worked might be a simple and effective way to accomplish this. Here’s the basic pseudocode for a modified work loop:
 
 ```
@@ -292,13 +280,9 @@ Let’s [apply an equivalent patch to Que](https://github.com/chanks/que/compare
 
 ![Number of jobs in the queue with patched version of Que. 30k one hour in.](https://brandur.org/assets/images/postgres-queues/post-queue-count.png)
 
-Number of jobs in the queue with patched version of Que. 30k one hour in.
-
 And for comparison, here’s what it looked like *before* the patch:
 
 ![Number of jobs in the queue on vanilla Que. 60k one hour in.](https://brandur.org/assets/images/postgres-queues/pre-queue-count.png)
-
-Number of jobs in the queue on vanilla Que. 60k one hour in.
 
 We can see above that the patched version of Que performs optimally for roughly twice as long under degraded conditions. It eventually hockeysticks as well, but only after maintaining a stable queue for a considerable amount of time [3](#footnote-3). We found that a database’s capacity to work under degraded conditions was partly a function of database size too: the tests above were run on a `heroku-postgresql:standard-2`, but a `heroku-postgresql:standard-7` with the patched version of Que was able to maintain near zero queue for the entire duration of the experimental run, while the unpatched version degraded nearly identically to its companion on the smaller database.
 

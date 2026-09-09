@@ -456,8 +456,6 @@ Remember Snapchat's original Best Friends list? I'm going to guess many of my re
 
 ![I’m glad this didn’t exist when I was in high school, I really didn’t need metrics on how much of a loser I was](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550959149363-SJ0KLMM2XCYZVC19LDJV/snapchat-best-friends-score-early.png)
 
-I’m glad this didn’t exist when I was in high school, I really didn’t need metrics on how much of a loser I was
-
 You don’t want to know what the proof of work is to achieve Super BFF-dom
 
 As with aggregate follower counts and likes, the Best Friends list was a mechanism for people to accumulate a very specific form of social capital. From a platform perspective, however, there's a big problem with this feature: each user could only have one best friend. It put an artificial ceiling on the amount of social capital one could compete for and accumulate.

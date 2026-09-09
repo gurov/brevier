@@ -221,6 +221,7 @@ fn strip_chrome(md: &str) -> String {
     }
 
     drop_link_quotes(&mut lines);
+    drop_repeated_captions(&mut lines);
     drop_repeats(&mut lines);
     drop_dangling_tail(&mut lines);
 
@@ -309,6 +310,58 @@ fn drop_link_quotes(lines: &mut Vec<&str>) {
     }
 
     *lines = result;
+}
+
+/// Короче этого подпись не считаем повтором: у коротких совпадений
+/// слишком велика вероятность, что они случайны.
+const CAPTION_MIN: usize = 12;
+
+/// Подпись под картинкой, дословно повторяющая её `alt`.
+///
+/// Сайты кладут один и тот же текст и в атрибут, и отдельным абзацем — так
+/// делает habr. В окне это выходит дважды подряд: сначала подписью
+/// к заглушке картинки, потом обычным абзацем. Правило про повторы
+/// такое не ловит: строки со скобками оно не трогает, иначе рвутся
+/// многострочные ссылки.
+fn drop_repeated_captions(lines: &mut Vec<&str>) {
+    let mut drop = vec![false; lines.len()];
+
+    for i in 0..lines.len() {
+        let Some(alt) = image_alt(lines[i]) else {
+            continue;
+        };
+        if alt.chars().count() < CAPTION_MIN {
+            continue;
+        }
+        let above = lines[..i].iter().rposition(|line| !line.trim().is_empty());
+        let below = lines[i + 1..]
+            .iter()
+            .position(|line| !line.trim().is_empty())
+            .map(|offset| i + 1 + offset);
+
+        for neighbour in [above, below].into_iter().flatten() {
+            if lines[neighbour].trim() == alt {
+                drop[neighbour] = true;
+            }
+        }
+    }
+
+    let mut kept = lines.iter().enumerate();
+    *lines = std::iter::from_fn(|| kept.next())
+        .filter(|(i, _)| !drop[*i])
+        .map(|(_, line)| *line)
+        .collect();
+}
+
+/// `![подпись](url)` целой строкой — вернуть подпись.
+fn image_alt(line: &str) -> Option<&str> {
+    let text = line.trim();
+    let rest = text.strip_prefix("![")?;
+    if !text.ends_with(')') {
+        return None;
+    }
+    let (alt, _) = rest.rsplit_once("](")?;
+    (!alt.is_empty()).then_some(alt)
 }
 
 /// На сколько строк назад смотрит поиск повтора.
@@ -993,6 +1046,21 @@ mod tail_tests {
         let line = "Название курса, повторённое в двух разных списках страницы.";
         let doc = format!("# Заголовок\n\n{line}{far}\n\n{line}\n");
         assert_eq!(article(&doc).matches(line).count(), 2);
+    }
+
+    #[test]
+    fn caption_repeating_the_alt_text_is_dropped() {
+        let caption = "Это Тристан Бакмастер, математик, и он очень зол";
+        let doc = format!("# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![{caption}](https://cdn.example.com/i.jpg)\n\n{caption}\n\nСледующий абзац статьи.\n");
+        let out = article(&doc);
+        assert_eq!(out.matches(caption).count(), 1, "подпись должна остаться одна:\n{out}");
+        assert!(out.contains("![" ), "сама картинка остаётся:\n{out}");
+    }
+
+    #[test]
+    fn a_short_caption_is_left_alone() {
+        let doc = "# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![Схема](https://cdn.example.com/i.jpg)\n\nСхема\n";
+        assert_eq!(article(doc).matches("Схема").count(), 2);
     }
 
     #[test]

@@ -66,8 +66,6 @@ If you find yourself consistently giving too many fucks about trivial shit that 
 
 ![Way too many fucks given.](https://markmanson.net/wp-content/uploads/2017/01/woman-giving-a-fuck-over-spilled-milk.jpg)
 
-Way too many fucks given.
-
 In life, our fucks must be spent on something. There really is no such thing as not giving a fuck. The question is simply how we each choose to allot our fucks. You only get a limited number of fucks to give over your lifetime, so you must spend them with care.
 
 As my father used to say, “Fucks don’t grow on trees, Mark.” OK, he never actually said that. But fuck it, pretend like he did. The point is that fucks have to be earned and then invested wisely. Fucks are cultivated like a beautiful fucking garden, where if you fuck shit up and the fucks get fucked, then you’ve fucking fucked your fucks all the fuck up.
@@ -77,8 +75,6 @@ When we’re young, we have tons of energy. Everything is new and exciting. And 
 As we get older, we gain experience and begin to notice that most of these things have little lasting impact on our lives. Those people’s opinions we cared about so much before have long been removed from our lives. We’ve found the love we need and so those embarrassing romantic rejections cease to mean much anymore. We realize how little people pay attention to the superficial details about us and we focus on doing things more for ourselves rather than for others.
 
 ![Bunk Moreland, not giving a fuck since 2002.](https://markmanson.net/wp-content/uploads/2015/01/bunk_250_optimized.gif)
-
-Bunk Moreland, not giving a fuck since 2002.
 
 Essentially, we become more selective about the fucks we’re willing to give. This is something called ‘maturity.’ It’s nice, you should try it sometime. Maturity is what happens when one learns to only give a fuck about what’s truly fuckworthy. As Bunk Moreland said in *The Wire* (which, fuck you, I still downloaded) to his partner Detective McNulty: “That’s what you get for giving a fuck when it wasn’t your turn to give a fuck.”
 

@@ -51,13 +51,9 @@ Your browser does not support the video tag.
 
 *This gaze replay shows a mobile user scanning in the F-pattern as he researches portrait camera lenses. The red hollow circle represents where he is fixating. (In most browsers, hover over the video to display the controls if they're not already visible.)*
 
-Your browser does not support the video tag.
-
 *Another example of an F-pattern on mobile came from a study participant who was using  http://bacnyc.org to learn where Mikhail Baryshnikov studied dance. The text columns were wider than the screen, so she swiped horizontally as she was reading. (In most browsers, hover over the video to display the controls if they're not already visible.)*
 
 Our recent round of eyetracking research also showed that in right-to-left languages such as Arabic, people read in a flipped F-shaped pattern (as we had predicted but had not seen prior to this research).
-
-Your browser does not support the video tag.
 
 *The F-pattern is mirrored in right-to-left languages, such as Arabic, as shown in this gaze replay of a user reading an article about a skeet-shooting competition on an Arabic news site. (In most browsers, hover over the video to display the controls if they're not already visible.)*
 
