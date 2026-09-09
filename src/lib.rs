@@ -7,10 +7,12 @@
 
 pub mod address;
 pub mod error;
+pub mod failure;
 pub mod extract;
 pub mod fetch;
 pub mod history;
 pub mod markdown;
+pub mod outline;
 
 use std::path::Path;
 
