@@ -17,18 +17,22 @@ use gtk::pango;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow};
 
+use comrak::nodes::{ListType, NodeValue, TableAlignment};
+
 use brevier::address::{self, Address};
+use brevier::code;
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
 use brevier::save;
 use brevier::outline::{
-    HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE, anchor, clip, lead,
+    HEADING_WEIGHTS, HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE,
+    anchor, clip, lead,
 };
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
-const BODY_FAMILY: &str = "PT Serif";
-const MONO_FAMILY: &str = "PT Mono";
+const BODY_FAMILY: &str = "Noto Sans";
+const MONO_FAMILY: &str = "Noto Sans Mono";
 /// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
 const BOLD: i32 = 700;
 const TOC_WIDTH: i32 = 260;
@@ -40,6 +44,10 @@ const TAB_LABEL: usize = 24;
 const MAX_HITS: usize = 2000;
 /// Метка, которой прокручивают буфер: одна на все прыжки.
 const JUMP: &str = "brevier-jump";
+/// Сколько кадров ждём, пока картинки и таблицы займут своё место.
+const SETTLE_FRAMES: u8 = 45;
+/// Глубже этого вложенные списки не отступают: место кончается.
+const LIST_LEVELS: i32 = 3;
 
 /// Цвета страницы. Заданы здесь, а не взяты у темы GTK, по той же причине,
 /// по которой в комплекте едут гарнитуры: вид задаёт читатель, а не система.
@@ -217,7 +225,6 @@ fn build(app: &Application, start: Vec<String>) {
         dark_mode: gtk::ToggleButton::builder()
             .icon_name("weather-clear-night-symbolic")
             .tooltip_text("Dark theme")
-            .active(true)
             .build(),
         save: gtk::Button::from_icon_name("document-save-symbolic"),
         notice: gtk::Label::builder()
@@ -298,7 +305,9 @@ fn build(app: &Application, start: Vec<String>) {
     let state = Rc::new(RefCell::new(State {
         tabs: Vec::new(),
         next_id: 0,
-        dark: true,
+        // Светлая по умолчанию: бумага белая, и читатель, которому нужно иначе,
+        // жмёт кнопку.
+        dark: false,
         search: Search::default(),
     }));
     apply_theme(&ui, &state);
@@ -832,6 +841,9 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 for shot in &page.shots {
                     place_shot(&ui, &state, id, shot, None);
                 }
+                for cell in &page.cells {
+                    follow_cell_links(&ui, &state, id, cell);
+                }
             }
             Ok(Err(error)) => {
                 let problem = describe(&error);
@@ -927,34 +939,80 @@ fn page_css(dark: bool) -> String {
     } else {
         (PAPER_LIGHT, INK_LIGHT, SHELF_LIGHT)
     };
-    let (_, dim) = palette(dark);
+    let colors = colors(dark);
+    let (dim, rule) = (colors.dim, colors.rule);
 
     format!(
         ".page, .page text {{ background-color: {paper}; color: {ink}; }}\n\
          .shelf, .shelf > viewport, .shelf list, .shelf row {{ background-color: {shelf}; }}\n\
          .shot {{ border: 1px dashed {dim}; border-radius: 6px; padding: 20px 14px; \
                   color: {dim}; margin: 6px 0; }}\n\
-         .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n"
+         .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n\
+         .table {{ margin: 10px 0 14px 0; }}\n\
+         .table separator {{ background-color: {rule}; min-height: 1px; }}\n\
+         .th {{ font-weight: 500; }}\n"
     )
 }
 
 fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
     let table = buffer.tag_table();
-    let (link, dim) = palette(dark);
-    if let Some(tag) = table.lookup("link") {
-        tag.set_property("foreground", link);
-    }
-    if let Some(tag) = table.lookup("dim") {
-        tag.set_property("foreground", dim);
-    }
+    let colors = colors(dark);
+    let paint = |name: &str, property: &str, value: &str| {
+        if let Some(tag) = table.lookup(name) {
+            tag.set_property(property, value);
+        }
+    };
+
+    paint("link", "foreground", colors.link);
+    paint("dim", "foreground", colors.dim);
+    paint("code", "background", colors.panel);
+    paint("codeblock", "paragraph-background", colors.panel);
+    paint("pad", "paragraph-background", colors.panel);
+    paint("kw", "foreground", colors.keyword);
+    paint("lit", "foreground", colors.literal);
+    paint("num", "foreground", colors.number);
+    paint("com", "foreground", colors.comment);
 }
 
-/// Цвет ссылки и приглушённого текста под тему.
-fn palette(dark: bool) -> (&'static str, &'static str) {
+/// Краски, зависящие от темы. Всё, что не бумага и не краска текста:
+/// ссылка, приглушённое, подложка кода, четыре цвета подсветки и линейка
+/// таблицы. Собраны в одном месте, потому что меняются вместе.
+struct Colors {
+    link: &'static str,
+    dim: &'static str,
+    /// Подложка блока кода и кода в строке.
+    panel: &'static str,
+    keyword: &'static str,
+    literal: &'static str,
+    number: &'static str,
+    comment: &'static str,
+    /// Линейки таблицы.
+    rule: &'static str,
+}
+
+fn colors(dark: bool) -> Colors {
     if dark {
-        ("#88c0d0", "#8b98a5")
+        Colors {
+            link: "#88c0d0",
+            dim: "#8b98a5",
+            panel: "#24272c",
+            keyword: "#c79bd4",
+            literal: "#8fbf8f",
+            number: "#dda15e",
+            comment: "#7c8894",
+            rule: "#3a3f45",
+        }
     } else {
-        ("#0b6ea8", "#6b7480")
+        Colors {
+            link: "#0b6ea8",
+            dim: "#6b7480",
+            panel: "#f1efe9",
+            keyword: "#7b3fa0",
+            literal: "#1f7a3d",
+            number: "#9a5518",
+            comment: "#767f8a",
+            rule: "#d8d4cc",
+        }
     }
 }
 
@@ -995,12 +1053,14 @@ fn open_in_system_browser(target: &str) {
 /// На Windows и macOS механизм другой (`AddFontResourceEx`,
 /// `CTFontManagerRegisterFontsForURL`) — это отдельная работа при упаковке.
 fn use_bundled_fonts() {
-    const FONTS: [(&str, &[u8]); 5] = [
-        ("PTSerif-Regular.ttf", include_bytes!("../../assets/fonts/PTSerif-Regular.ttf")),
-        ("PTSerif-Italic.ttf", include_bytes!("../../assets/fonts/PTSerif-Italic.ttf")),
-        ("PTSerif-Bold.ttf", include_bytes!("../../assets/fonts/PTSerif-Bold.ttf")),
-        ("PTSerif-BoldItalic.ttf", include_bytes!("../../assets/fonts/PTSerif-BoldItalic.ttf")),
-        ("PTMono-Regular.ttf", include_bytes!("../../assets/fonts/PTMono-Regular.ttf")),
+    const FONTS: [(&str, &[u8]); 7] = [
+        ("NotoSans-Light.ttf", include_bytes!("../../assets/fonts/NotoSans-Light.ttf")),
+        ("NotoSans-Regular.ttf", include_bytes!("../../assets/fonts/NotoSans-Regular.ttf")),
+        ("NotoSans-Italic.ttf", include_bytes!("../../assets/fonts/NotoSans-Italic.ttf")),
+        ("NotoSans-Medium.ttf", include_bytes!("../../assets/fonts/NotoSans-Medium.ttf")),
+        ("NotoSans-Bold.ttf", include_bytes!("../../assets/fonts/NotoSans-Bold.ttf")),
+        ("NotoSans-BoldItalic.ttf", include_bytes!("../../assets/fonts/NotoSans-BoldItalic.ttf")),
+        ("NotoSansMono-Regular.ttf", include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf")),
     ];
 
     let home = glib::user_cache_dir().join("brevier");
@@ -1079,7 +1139,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
             &[
                 ("family", &BODY_FAMILY),
                 ("size-points", &(body * f64::from(*scale))),
-                ("weight", &BOLD),
+                ("weight", &HEADING_WEIGHTS[index]),
                 // Воздух сверху, а не снизу: заголовок принадлежит тому,
                 // что под ним.
                 ("pixels-above-lines", &(extra * 3)),
@@ -1090,24 +1150,74 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
 
     buffer.create_tag(Some("em"), &[("style", &pango::Style::Italic)]);
     buffer.create_tag(Some("strong"), &[("weight", &BOLD)]);
+    let colors = colors(dark);
+
+    // Код в строке отличается не только гарнитурой: подложка отделяет его
+    // от текста там, где моноширинного мало — в одном-двух знаках.
     buffer.create_tag(
         Some("code"),
-        &[("family", &MONO_FAMILY), ("size-points", &(body * 0.88))],
+        &[
+            ("family", &MONO_FAMILY),
+            ("size-points", &(body * 0.9)),
+            ("background", &colors.panel),
+        ],
     );
+    // Блок кода — панель: подложка во всю меру, поля по краям, строки плотнее,
+    // чем в тексте. `paragraph-background` красит строку целиком, поэтому
+    // панель получается без единого виджета.
     buffer.create_tag(
         Some("codeblock"),
         &[
             ("family", &MONO_FAMILY),
-            ("size-points", &(body * 0.88)),
-            ("left-margin", &24),
+            ("size-points", &(body * 0.9)),
+            // Висячий отступ наоборот: продолжение длинной строки уходит
+            // правее её начала, и перенос видно. Строку кода не перенести
+            // нельзя — колонок в буфере нет.
+            ("left-margin", &40),
+            ("indent", &-18),
+            ("right-margin", &22),
+            ("pixels-below-lines", &2),
+            ("paragraph-background", &colors.panel),
+        ],
+    );
+    // Пустая строка с той же подложкой — это поля панели сверху и снизу.
+    buffer.create_tag(
+        Some("pad"),
+        &[
+            ("size-points", &(body * 0.4)),
+            ("paragraph-background", &colors.panel),
+            ("pixels-above-lines", &extra),
             ("pixels-below-lines", &extra),
         ],
+    );
+
+    buffer.create_tag(Some("kw"), &[("foreground", &colors.keyword)]);
+    buffer.create_tag(Some("lit"), &[("foreground", &colors.literal)]);
+    buffer.create_tag(Some("num"), &[("foreground", &colors.number)]);
+    buffer.create_tag(
+        Some("com"),
+        &[("foreground", &colors.comment), ("style", &pango::Style::Italic)],
     );
     buffer.create_tag(
         Some("quote"),
         &[("style", &pango::Style::Italic), ("left-margin", &24)],
     );
-    let (link, dim) = palette(dark);
+
+    // Список: маркер выступает влево, перенос строки встаёт под текст,
+    // а не под маркер. Уровни вложенности — свой отступ каждому.
+    for level in 1..=LIST_LEVELS {
+        buffer.create_tag(
+            Some(&format!("list{level}")),
+            &[
+                ("left-margin", &(26 * level)),
+                ("indent", &-18),
+                // Пункты стоят плотнее абзацев: список — одна мысль, разбитая
+                // на части, а не несколько абзацев подряд.
+                ("pixels-below-lines", &(extra / 2)),
+            ],
+        );
+    }
+    let (link, dim) = (colors.link, colors.dim);
     buffer.create_tag(
         Some("link"),
         &[("underline", &pango::Underline::Single), ("foreground", &link)],
@@ -1133,6 +1243,7 @@ struct Page {
     marks: Vec<Mark>,
     anchors: Vec<(String, i32)>,
     shots: Vec<Shot>,
+    cells: Vec<gtk::Label>,
 }
 
 fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Page {
@@ -1153,6 +1264,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
     let mut marks = Vec::new();
     let mut anchors = Vec::new();
     let mut shots = Vec::new();
+    let mut cells = Vec::new();
     let mut writer = Writer {
         buffer: &buffer,
         view,
@@ -1161,6 +1273,8 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
         marks: &mut marks,
         anchors: &mut anchors,
         shots: &mut shots,
+        cells: &mut cells,
+        depth: 0,
     };
 
     for node in root.children() {
@@ -1179,13 +1293,17 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
         let offset = target
             .and_then(|want| places.iter().find(|(name, _)| *name == want))
             .map(|(_, offset)| *offset);
-        scroll_to(&view, offset.unwrap_or(0), if offset.is_some() { 0.05 } else { 0.0 });
+        match offset {
+            Some(offset) => settle(&view, offset, 0.05),
+            None => scroll_to(&view, 0, 0.0),
+        }
     });
     Page {
         links,
         marks,
         anchors,
         shots,
+        cells,
     }
 }
 
@@ -1208,6 +1326,41 @@ fn scroll_to(view: &gtk::TextView, offset: i32, align: f64) {
     view.scroll_to_mark(&mark, 0.0, true, 0.0, align);
 }
 
+/// Прокрутка, которая доводит дело до конца.
+///
+/// В тексте живут виджеты — картинки и таблицы, — и свой размер они получают
+/// не сразу: раскладка буфера готова, а высота документа ещё растёт. Одного
+/// прыжка поэтому мало, он оказывается выше цели. Повторяем несколько кадров,
+/// пока высота не перестанет меняться.
+fn settle(view: &gtk::TextView, offset: i32, align: f64) {
+    scroll_to(view, offset, align);
+
+    let left = Cell::new(SETTLE_FRAMES);
+    let was = Cell::new(-1.0);
+    let stable = Cell::new(0u8);
+    view.add_tick_callback(move |view, _| {
+        let height = view.vadjustment().map(|bar| bar.upper()).unwrap_or_default();
+        if (height - was.get()).abs() > 0.5 {
+            was.set(height);
+            stable.set(0);
+            scroll_to(view, offset, align);
+        } else {
+            stable.set(stable.get() + 1);
+        }
+
+        let left_now = left.get().saturating_sub(1);
+        left.set(left_now);
+        // Кончаем, когда высота устоялась несколько кадров подряд, — или
+        // по исчерпании терпения: держать окно на поводке дольше нельзя,
+        // читатель уже мог прокрутить страницу сам.
+        if left_now == 0 || (height > 0.0 && stable.get() >= 4) {
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+}
+
 /// Ссылка внутрь открытой страницы: `#anchor` или полный адрес с решёткой,
 /// совпадающий с тем, что уже открыто.
 fn fragment_of(target: &str, here: Option<&str>) -> Option<String> {
@@ -1228,7 +1381,7 @@ fn jump(view: &gtk::TextView, anchors: &[(String, i32)], fragment: &str) -> bool
     let Some((_, offset)) = anchors.iter().find(|(name, _)| *name == want) else {
         return false;
     };
-    scroll_to(view, *offset, 0.05);
+    settle(view, *offset, 0.05);
     true
 }
 
@@ -1333,6 +1486,11 @@ struct Writer<'a> {
     marks: &'a mut Vec<Mark>,
     anchors: &'a mut Vec<(String, i32)>,
     shots: &'a mut Vec<Shot>,
+    /// Ячейки таблиц: ссылки внутри них живут в разметке `GtkLabel`,
+    /// и вешать на них переход приходится снаружи.
+    cells: &'a mut Vec<gtk::Label>,
+    /// Глубина вложенности списка: от неё отступ пункта.
+    depth: i32,
 }
 
 impl Writer<'_> {
@@ -1356,11 +1514,93 @@ impl Writer<'_> {
         self.buffer.text(&from, &to, false).to_string()
     }
 
+    /// Таблица — сетка виджетов на якоре.
+    ///
+    /// Текстом её не набрать: в буфере нет колонок, и раньше строки
+    /// склеивались палками в моноширинном — читать это нельзя. Цена решения
+    /// записана честно: текст таблицы лежит в виджетах, а не в буфере,
+    /// поэтому поиск по странице и «скопировать всё» её не видят. В markdown
+    /// при сохранении таблица цела.
+    fn table<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, alignments: &[TableAlignment]) {
+        let mut rows: Vec<(bool, Vec<String>)> = Vec::new();
+        for row in node.children() {
+            let NodeValue::TableRow(header) = row.data.borrow().value else {
+                continue;
+            };
+            let cells: Vec<String> = row.children().map(markup_of).collect();
+            if !cells.is_empty() {
+                rows.push((header, cells));
+            }
+        }
+        if rows.is_empty() {
+            return;
+        }
+        let columns = rows.iter().map(|(_, cells)| cells.len()).max().unwrap_or(1);
+
+        let grid = gtk::Grid::builder()
+            .column_spacing(20)
+            .row_spacing(7)
+            .hexpand(true)
+            .build();
+        let mut line = 0;
+        for (header, cells) in &rows {
+            for (column, markup) in cells.iter().enumerate() {
+                let cell = gtk::Label::builder()
+                    .wrap(true)
+                    .wrap_mode(pango::WrapMode::WordChar)
+                    .max_width_chars(30)
+                    .valign(gtk::Align::Start)
+                    .selectable(true)
+                    .can_focus(false)
+                    .build();
+                cell.set_markup(markup);
+                // Выравнивание берём из самой таблицы: колонка чисел, объявленная
+                // правой, должна стоять справа.
+                let align = match alignments.get(column) {
+                    Some(TableAlignment::Right) => 1.0,
+                    Some(TableAlignment::Center) => 0.5,
+                    _ => 0.0,
+                };
+                cell.set_xalign(align);
+                // Остаток меры отдаём последнему столбцу: обычно там текст,
+                // а не число, и ему перенос дороже.
+                cell.set_hexpand(column + 1 == columns);
+                cell.add_css_class(if *header { "th" } else { "td" });
+                grid.attach(&cell, column as i32, line, 1, 1);
+                self.cells.push(cell);
+            }
+            line += 1;
+            if *header {
+                let rule = gtk::Separator::new(gtk::Orientation::Horizontal);
+                grid.attach(&rule, 0, line, columns as i32, 1);
+                line += 1;
+            }
+        }
+
+        let frame = self.anchor();
+        frame.add_css_class("table");
+        frame.append(&grid);
+    }
+
     /// Поставить в текст место под картинку.
     ///
     /// Картинка — блок: своя строка сверху и снизу. Внутри абзаца её ставят
     /// редко, а разорванная надвое строка читается плохо.
     fn shot(&mut self, source: Source, alt: String) {
+        let frame = self.anchor();
+        self.shots.push(Shot {
+            source,
+            alt,
+            frame,
+            busy: Rc::new(Cell::new(false)),
+        });
+    }
+
+    /// Место под виджет в тексте: своя строка, рамка в меру.
+    ///
+    /// Картинка и таблица — блоки: строка с ними своя. Внутри абзаца их ставят
+    /// редко, а разорванная надвое строка читается плохо.
+    fn anchor(&mut self) -> gtk::Box {
         if !self.buffer.end_iter().starts_line() {
             self.put("\n", &[]);
         }
@@ -1373,18 +1613,11 @@ impl Writer<'_> {
             .width_request(measure_px())
             .build();
         self.view.add_child_at_anchor(&frame, &place);
-
-        self.shots.push(Shot {
-            source,
-            alt,
-            frame,
-            busy: Rc::new(Cell::new(false)),
-        });
+        self.put("\n", &["body"]);
+        frame
     }
 
     fn block<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, outer: &[&str]) {
-        use comrak::nodes::NodeValue;
-
         match &node.data.borrow().value {
             NodeValue::Heading(heading) => {
                 let level = usize::from(heading.level).clamp(1, 6);
@@ -1422,8 +1655,29 @@ impl Writer<'_> {
                 self.put("\n", &["body"]);
             }
             NodeValue::CodeBlock(code) => {
-                self.put(code.literal.trim_end_matches('\n'), &["codeblock"]);
+                let text = code.literal.trim_end_matches('\n');
+                self.put("\n", &["pad"]);
+
+                let mut at = 0;
+                for span in code::spans(text, &code.info) {
+                    if span.start > at {
+                        self.put(&text[at..span.start], &["codeblock"]);
+                    }
+                    let paint = match span.kind {
+                        code::Kind::Comment => "com",
+                        code::Kind::Literal => "lit",
+                        code::Kind::Number => "num",
+                        code::Kind::Keyword => "kw",
+                    };
+                    self.put(&text[span.start..span.end], &["codeblock", paint]);
+                    at = span.end;
+                }
+                if at < text.len() {
+                    self.put(&text[at..], &["codeblock"]);
+                }
+
                 self.put("\n", &["codeblock"]);
+                self.put("\n", &["pad"]);
             }
             NodeValue::BlockQuote => {
                 let mut tags = outer.to_vec();
@@ -1432,34 +1686,62 @@ impl Writer<'_> {
                     self.block(child, &tags);
                 }
             }
-            NodeValue::List(_) => {
+            NodeValue::List(list) => {
+                let ordered = matches!(list.list_type, ListType::Ordered);
+                let mut number = list.start;
+
+                self.depth += 1;
+                let level = format!("list{}", self.depth.min(LIST_LEVELS));
                 for item in node.children() {
                     let mut tags = outer.to_vec();
                     tags.push("body");
-                    self.put("  •  ", &tags);
+                    tags.push(&level);
+
+                    let marker = match &item.data.borrow().value {
+                        // Пункт списка задач: галочка вместо маркера — так его
+                        // и рисуют везде, где markdown вообще про них знает.
+                        NodeValue::TaskItem(done) => {
+                            if done.symbol.is_some() {
+                                "☑  ".to_owned()
+                            } else {
+                                "☐  ".to_owned()
+                            }
+                        }
+                        _ if ordered => {
+                            let marker = format!("{number}.  ");
+                            number += 1;
+                            marker
+                        }
+                        _ => "•  ".to_owned(),
+                    };
+                    self.put(&marker, &tags);
+
+                    let start = self.offset();
                     for child in item.children() {
-                        self.inlines(child, &tags);
+                        match &child.data.borrow().value {
+                            NodeValue::Paragraph => {
+                                self.inlines(child, &tags);
+                                self.put("\n", &tags);
+                            }
+                            // Вложенный список, блок кода или цитата внутри
+                            // пункта — обычный блок, только глубже.
+                            _ => self.block(child, outer),
+                        }
                     }
-                    self.put("\n", &tags);
+                    if self.offset() == start {
+                        self.put("\n", &tags);
+                    }
                 }
-                self.put("\n", &["body"]);
+                self.depth -= 1;
+
+                if self.depth == 0 {
+                    self.put("\n", &["body"]);
+                }
             }
             NodeValue::ThematicBreak => self.put("* * *\n\n", &["dim"]),
-            NodeValue::Table(_) => {
-                // Таблицы в буфере честно вырождаются в столбцы моноширинным:
-                // настоящая таблица потребует виджетов на якорях, и это
-                // отдельная работа.
-                for row in node.descendants() {
-                    if let NodeValue::TableRow(_) = row.data.borrow().value {
-                        let cells: Vec<String> = row
-                            .children()
-                            .map(|cell| plain_text(cell).trim().to_owned())
-                            .collect();
-                        self.put(&cells.join("  │  "), &["codeblock"]);
-                        self.put("\n", &["codeblock"]);
-                    }
-                }
-                self.put("\n", &["body"]);
+            NodeValue::Table(table) => {
+                let alignments = table.alignments.clone();
+                self.table(node, &alignments);
             }
             _ => {
                 for child in node.children() {
@@ -1470,8 +1752,6 @@ impl Writer<'_> {
     }
 
     fn inlines<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, tags: &[&str]) {
-        use comrak::nodes::NodeValue;
-
         for child in node.children() {
             match &child.data.borrow().value {
                 NodeValue::Text(text) => self.put(text, tags),
@@ -1899,10 +2179,61 @@ fn first_visible(view: &gtk::TextView, hits: &[(i32, i32)]) -> usize {
         .unwrap_or(0)
 }
 
+/// Ячейка таблицы разметкой Pango: курсив, полужирный, код и ссылки.
+///
+/// `GtkLabel` понимает подмножество разметки и сам делает ссылки живыми —
+/// иначе пришлось бы городить виджет на каждую ячейку.
+fn markup_of<'n>(node: &'n comrak::nodes::AstNode<'n>) -> String {
+    let mut out = String::new();
+    for child in node.children() {
+        match &child.data.borrow().value {
+            NodeValue::Text(text) => out.push_str(&glib::markup_escape_text(text)),
+            NodeValue::Code(code) => {
+                out.push_str("<tt>");
+                out.push_str(&glib::markup_escape_text(&code.literal));
+                out.push_str("</tt>");
+            }
+            NodeValue::Emph => out.push_str(&format!("<i>{}</i>", markup_of(child))),
+            NodeValue::Strong => out.push_str(&format!("<b>{}</b>", markup_of(child))),
+            NodeValue::Link(link) => out.push_str(&format!(
+                "<a href=\"{}\">{}</a>",
+                glib::markup_escape_text(&link.url),
+                markup_of(child)
+            )),
+            NodeValue::Image(_) => out.push_str(&glib::markup_escape_text(&plain_text(child))),
+            NodeValue::SoftBreak | NodeValue::LineBreak => out.push(' '),
+            _ => out.push_str(&markup_of(child)),
+        }
+    }
+    out
+}
+
+/// Ссылка в ячейке ведёт туда же, куда вела бы в тексте.
+fn follow_cell_links(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, cell: &gtk::Label) {
+    let ui = ui.clone();
+    let state = state.clone();
+    cell.connect_activate_link(move |_, target| {
+        let jumped = {
+            let mut borrowed = state.borrow_mut();
+            match borrowed.find(id) {
+                Some(tab) => {
+                    let here = tab.history.current().map(Address::display);
+                    let view = tab.view.clone();
+                    fragment_of(target, here.as_deref())
+                        .is_some_and(|fragment| jump(&view, &tab.anchors, &fragment))
+                }
+                None => false,
+            }
+        };
+        if !jumped && let Ok(address) = address::parse(target) {
+            open(&ui, &state, id, address, true);
+        }
+        glib::Propagation::Stop
+    });
+}
+
 /// Текст узла без разметки — для подписей картинок и ячеек таблицы.
 fn plain_text<'n>(node: &'n comrak::nodes::AstNode<'n>) -> String {
-    use comrak::nodes::NodeValue;
-
     let mut out = String::new();
     for child in node.descendants() {
         match &child.data.borrow().value {

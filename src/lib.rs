@@ -6,6 +6,7 @@
 //! должна стоить «переписать вид», а не «переписать всё».
 
 pub mod address;
+pub mod code;
 pub mod error;
 pub mod failure;
 pub mod extract;
