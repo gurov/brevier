@@ -54,10 +54,20 @@ grep -vE '^\s*(#|$)' "$urls" \
 { printf 'exit\tbytes\turl\tfile\terror\n'; cat "$report.body"; } > "$report"
 rm -f "$report.body"
 
-# Заготовка вердиктов: только то, что вообще выкачалось и извлеклось.
+# Вердикты — ручная работа, и потерять её нельзя: файл не перезаписываем,
+# а дополняем. Уже проставленные `y` и `n` остаются, новые страницы приходят
+# с `?`. (Однажды перезаписали — разметку спасли только эталоны в git.)
+previous=$(mktemp); trap 'rm -f "$previous"' EXIT
+[[ -f "$verdict" ]] && tr -d '\r' < "$verdict" > "$previous"
+
 {
     printf 'verdict\turl\tfile\n'
-    awk -F'\t' 'NR>1 && $1==0 { printf "?\t%s\t%s\n", $3, $4 }' "$report"
+    awk -F'\t' -v prev="$previous" '
+        BEGIN { while ((getline line < prev) > 0) { split(line, f, "\t"); mark[f[2]] = f[1] } }
+        NR > 1 && $1 == 0 {
+            v = ($3 in mark && mark[$3] != "?" && mark[$3] != "verdict") ? mark[$3] : "?"
+            printf "%s\t%s\t%s\n", v, $3, $4
+        }' "$report"
 } > "$verdict"
 
 total=$(($(wc -l <"$report") - 1))

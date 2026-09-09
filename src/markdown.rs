@@ -48,7 +48,11 @@ pub fn from_article(article: &Article) -> Result<String, Error> {
     doc.push_str(body.trim());
     doc.push('\n');
 
-    Ok(tidy(&doc))
+    let doc = tidy(&doc);
+    match strip_teasers(&doc) {
+        Teasers::Article(text) => Ok(text),
+        Teasers::Listing => Err(Error::EmptyExtraction),
+    }
 }
 
 /// Страница целиком, без Readability (`--raw`). Нужен, чтобы отличать
@@ -93,6 +97,7 @@ fn tidy(md: &str) -> String {
         out.push('\n');
     }
 
+    let out = unwrap_single_column_tables(&out);
     let trimmed = out.trim_end().to_owned();
     if trimmed.is_empty() {
         trimmed
@@ -101,12 +106,126 @@ fn tidy(md: &str) -> String {
     }
 }
 
+/// Таблица в один столбец — не данные, а рамка вёрстки: так сделан инфобокс
+/// википедии. В markdown она превращается в колонку из палок и дефисов,
+/// читать которую невозможно. Разворачиваем в обычные абзацы.
+fn unwrap_single_column_tables(md: &str) -> String {
+    let lines: Vec<&str> = md.lines().collect();
+    let mut out = String::with_capacity(md.len());
+    let mut i = 0;
+
+    while i < lines.len() {
+        if !is_table_row(lines[i]) {
+            out.push_str(lines[i]);
+            out.push('\n');
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        while i < lines.len() && is_table_row(lines[i]) {
+            i += 1;
+        }
+        let table = &lines[start..i];
+
+        if table.iter().all(|row| split_cells(row).len() == 1) {
+            for row in table {
+                let cell = split_cells(row)[0].trim();
+                if cell.is_empty() || is_separator(cell) {
+                    continue;
+                }
+                out.push_str(cell);
+                out.push_str("\n\n");
+            }
+        } else {
+            for row in table {
+                out.push_str(row);
+                out.push('\n');
+            }
+        }
+    }
+
+    out
+}
+
+/// Что осталось от страницы после вычитания анонсов чужих статей.
+enum Teasers {
+    Article(String),
+    /// Не статья, а лента: одни анонсы. Честнее сказать «статьи нет».
+    Listing,
+}
+
+/// Доля документа, после которой заголовок-ссылка считается уже не частью
+/// статьи, а хвостовым виджетом «читайте ещё».
+const TAIL_STARTS_AT: f32 = 0.6;
+
+/// Вырезать анонсы чужих статей.
+///
+/// Признак один: заголовок, который целиком является ссылкой на другую
+/// страницу. В статье так не пишут — там заголовки либо простые, либо ссылаются
+/// на якорь внутри страницы (`#anchor`), а вот витрины анонсов устроены именно
+/// так. Дальше решает место: три и больше таких заголовка с самого начала —
+/// это лента (habr отдавал ленту блога компании как статью); один в хвосте —
+/// виджет «читайте ещё», которым fasterthanli.me дописывал к статье кусок
+/// другой статьи.
+fn strip_teasers(md: &str) -> Teasers {
+    let lines: Vec<&str> = md.lines().collect();
+    let teasers: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| is_teaser_heading(line))
+        .map(|(i, _)| i)
+        .collect();
+
+    let Some(&first) = teasers.first() else {
+        return Teasers::Article(md.to_owned());
+    };
+
+    let tail_starts = (lines.len() as f32 * TAIL_STARTS_AT) as usize;
+    if teasers.len() >= 3 && first < tail_starts {
+        return Teasers::Listing;
+    }
+
+    let mut cut = first;
+    // Подводка к виджету («Here's another article just for you:») остаётся
+    // висеть без продолжения — убираем и её.
+    while cut > 0 {
+        let previous = lines[cut - 1].trim_end();
+        if previous.is_empty() || previous.ends_with(':') {
+            cut -= 1;
+        } else {
+            break;
+        }
+    }
+
+    let kept = lines[..cut].join("\n");
+    Teasers::Article(kept.trim_end().to_owned() + "\n")
+}
+
+fn is_teaser_heading(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix('#') else {
+        return false;
+    };
+    let text = rest.trim_start_matches('#').trim();
+    let Some(inner) = text.strip_prefix('[') else {
+        return false;
+    };
+    // Ровно одна ссылка на другую страницу и ничего кроме неё.
+    let Some((_, target)) = inner.split_once("](") else {
+        return false;
+    };
+    let Some(url) = target.strip_suffix(')') else {
+        return false;
+    };
+    !url.contains(&['[', ']'][..]) && (url.starts_with("http://") || url.starts_with("https://"))
+}
+
 /// htmd выравнивает столбцы по самой длинной ячейке. В инфобоксе википедии это
 /// строка-разделитель в шестьсот дефисов: в `less` не читается, а в диффе
 /// корпуса правка одной ячейки переписывает таблицу целиком. GFM выравнивания
 /// не требует — сжимаем.
 fn squeeze_table_row(line: &str) -> Cow<'_, str> {
-    if !(line.starts_with('|') && line.ends_with('|') && line.len() > 1) {
+    if !is_table_row(line) {
         return Cow::Borrowed(line);
     }
 
@@ -130,8 +249,16 @@ fn squeeze_table_row(line: &str) -> Cow<'_, str> {
     Cow::Owned(format!("| {} |", cells.join(" | ")))
 }
 
+/// Строка таблицы: палки по краям и хоть что-то между ними.
+fn is_table_row(line: &str) -> bool {
+    line.len() > 1 && line.starts_with('|') && line.ends_with('|')
+}
+
 /// Ячейки разделяет `|`; экранированный `\|` — часть содержимого.
 fn split_cells(line: &str) -> Vec<&str> {
+    if !is_table_row(line) {
+        return Vec::new();
+    }
     let inner = &line[1..line.len() - 1];
     let mut cells = Vec::new();
     let mut start = 0;
@@ -368,6 +495,58 @@ mod tests {
             md,
             "| очень длинный заголовок столбца | б |\n| --- | --- |\n| к | д |\n"
         );
+    }
+
+    #[test]
+    fn trailing_teaser_widget_is_cut() {
+        let md = "# Статья\n\nТекст статьи, ради которого всё затевалось.\n\nЕщё абзац.\n\n                  Здесь текст, а дальше начинается витрина.\n\nHere's another article just for you:\n\n                  ## [Другая статья](https://e.com/other)\n\nАнонс другой статьи.\n";
+        let Teasers::Article(kept) = strip_teasers(md) else {
+            panic!("статью приняли за ленту");
+        };
+        assert!(
+            kept.ends_with("а дальше начинается витрина.\n"),
+            "не отрезано:\n{kept}"
+        );
+        assert!(!kept.contains("another article"));
+    }
+
+    #[test]
+    fn a_page_of_teasers_is_not_an_article() {
+        let md = "# Блог компании\n\n## [Первая](https://e.com/1)\n\nанонс\n\n                  ## [Вторая](https://e.com/2)\n\nанонс\n\n## [Третья](https://e.com/3)\n\nанонс\n";
+        assert!(matches!(strip_teasers(md), Teasers::Listing));
+    }
+
+    #[test]
+    fn anchor_headings_are_not_teasers() {
+        // Так размечены заголовки в документации Rust и на fasterthanli.me.
+        let md = "# Статья\n\n## [Раздел](#section)\n\nтекст\n\n## [Другой](#other)\n\nтекст\n\n                  ## [Третий](#third)\n\nтекст\n";
+        let Teasers::Article(kept) = strip_teasers(md) else {
+            panic!("якоря приняли за анонсы");
+        };
+        assert_eq!(kept, md);
+    }
+
+    #[test]
+    fn single_column_tables_become_paragraphs() {
+        // Инфобокс википедии: рамка вёрстки, а не данные.
+        let md =
+            from_html("<table><tr><th>Rust</th></tr><tr><td>2012 год</td></tr></table>").unwrap();
+        assert_eq!(md, "Rust\n\n2012 год\n");
+    }
+
+    #[test]
+    fn a_lone_pipe_is_not_a_table() {
+        // gamedeveloper.com отдавал строку из одной палки, и на ней всё падало.
+        assert_eq!(tidy("текст\n|\nещё текст\n"), "текст\n|\nещё текст\n");
+        assert!(split_cells("|").is_empty());
+    }
+
+    #[test]
+    fn real_tables_stay_tables() {
+        let md =
+            from_html("<table><tr><th>а</th><th>б</th></tr><tr><td>1</td><td>2</td></tr></table>")
+                .unwrap();
+        assert!(md.contains("| а | б |"), "таблица развалилась:\n{md}");
     }
 
     #[test]
