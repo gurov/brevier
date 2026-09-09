@@ -21,13 +21,22 @@ name = "brevier-ui"
 path = "src/ui/main.rs"
 required-features = ["ui"]
 
+# Переезд на GTK4 идёт вторым бинарником рядом с первым: iced остаётся
+# рабочим, пока новый интерфейс не догонит его, и сравнивать можно вживую.
+[[bin]]
+name = "brevier-gtk"
+path = "src/ui/gtk.rs"
+required-features = ["gtk"]
+
 [features]
 ui = ["dep:iced"]
+gtk = ["dep:gtk"]
 
 [dependencies]
 comrak = { version = "0.55", default-features = false }
 dom_query = "0.28"
 dom_smoothie = "0.18.1"
+gtk = { version = "0.11.4", package = "gtk4", optional = true }
 htmd = "0.5.5"
 # Набор фич iced собран вручную: это умолчания минус `wgpu`. Читалке нечего
 # считать на видеокарте, а программный рендерер снимает и зависимость от GPU,
