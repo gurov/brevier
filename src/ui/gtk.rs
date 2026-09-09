@@ -11,6 +11,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+mod article;
+
+use article::Article;
+
 use gtk::gio;
 use gtk::glib;
 use gtk::pango;
@@ -48,18 +52,26 @@ const JUMP: &str = "brevier-jump";
 const SETTLE_FRAMES: u8 = 45;
 /// Глубже этого вложенные списки не отступают: место кончается.
 const LIST_LEVELS: i32 = 3;
+/// Куда по высоте окна ставить заголовок, к которому прыгнули: вплотную
+/// к кромке он выглядит обрезанным.
+const ANCHOR_ALIGN: f64 = 0.1;
 
 /// Цвета страницы. Заданы здесь, а не взяты у темы GTK, по той же причине,
 /// по которой в комплекте едут гарнитуры: вид задаёт читатель, а не система.
 /// Заодно уходит разнобой, из-за которого поля вокруг колонки текста красила
 /// тема, а саму колонку — виджет текста.
-const PAPER_DARK: &str = "#1b1d20";
-const INK_DARK: &str = "#d7d3cc";
-const PAPER_LIGHT: &str = "#fbfaf8";
-const INK_LIGHT: &str = "#22201d";
+///
+/// Бумага цвета слоновой кости, а не белая: чистый белый на экране светится,
+/// а тёплый тон это свечение снимает, не трогая контраст — краска остаётся
+/// почти чёрной. Тёмная тема подобрана в тот же тёплый ряд, иначе переключение
+/// выглядит сменой продукта, а не света.
+const PAPER_DARK: &str = "#1d1b19";
+const INK_DARK: &str = "#ded8cf";
+const PAPER_LIGHT: &str = "#faf5ea";
+const INK_LIGHT: &str = "#23201c";
 /// Оглавлению отличаться можно: это не страница, а полка рядом с ней.
-const SHELF_DARK: &str = "#15171a";
-const SHELF_LIGHT: &str = "#f1efeb";
+const SHELF_DARK: &str = "#171514";
+const SHELF_LIGHT: &str = "#f3ecdd";
 /// Найденное поиском. Цвета одни на обе темы: подсветка обязана читаться
 /// и там и там, а жёлтый маркер узнаётся без объяснений.
 const FOUND: &str = "#f2d47e";
@@ -535,14 +547,18 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
 
 /// Открыть новую вкладку и, если дали адрес, сразу читать.
 fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
-    let view = gtk::TextView::builder()
-        .editable(false)
-        .cursor_visible(false)
-        .wrap_mode(gtk::WrapMode::Word)
-        .halign(gtk::Align::Center)
-        .top_margin(28)
-        .bottom_margin(80)
-        .build();
+    // Виджет статьи — свой: `GtkTextView`, который дорисовывает линейку
+    // слева от цитаты. Настраиваем его уже как `TextView`, чтобы не спорить
+    // с одноимёнными методами других интерфейсов GTK.
+    let article = Article::new();
+    article.set_rule_color(rule_color(state.borrow().dark));
+    let view: gtk::TextView = article.upcast();
+    view.set_editable(false);
+    view.set_cursor_visible(false);
+    view.set_wrap_mode(gtk::WrapMode::Word);
+    view.set_halign(gtk::Align::Center);
+    view.set_top_margin(28);
+    view.set_bottom_margin(80);
     tags(&view.buffer(), state.borrow().dark);
     view.set_width_request(measure_px());
 
@@ -925,7 +941,22 @@ fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
     ui.paint.load_from_data(&page_css(dark));
     for tab in &state.borrow().tabs {
         recolor(&tab.view.buffer(), dark);
+        if let Some(article) = tab.view.downcast_ref::<Article>() {
+            article.set_rule_color(rule_color(dark));
+        }
     }
+}
+
+/// Цвет линейки цитаты: приглушённая краска вполсилы. Линейка отмечает
+/// чужую речь, а не спорит с ней, поэтому берёт не цвет текста и не цвет
+/// линеек таблицы, а середину между ними.
+fn rule_color(dark: bool) -> gtk::gdk::RGBA {
+    let mut color = colors(dark)
+        .dim
+        .parse::<gtk::gdk::RGBA>()
+        .unwrap_or_else(|_| gtk::gdk::RGBA::new(0.6, 0.6, 0.6, 1.0));
+    color.set_alpha(0.5);
+    color
 }
 
 /// Цвета страницы одной таблицей.
@@ -943,7 +974,11 @@ fn page_css(dark: bool) -> String {
     let (dim, rule) = (colors.dim, colors.rule);
 
     format!(
-        ".page, .page text {{ background-color: {paper}; color: {ink}; }}\n\
+        // Шапка и окно — в тот же тёплый ряд, что и бумага. Иначе слоновая
+        // кость соседствует с холодно-белой панелью GTK, и окно выглядит
+        // склеенным из двух разных.
+        "window, headerbar {{ background-color: {shelf}; }}\n\
+         .page, .page text {{ background-color: {paper}; color: {ink}; }}\n\
          .shelf, .shelf > viewport, .shelf list, .shelf row {{ background-color: {shelf}; }}\n\
          .shot {{ border: 1px dashed {dim}; border-radius: 6px; padding: 20px 14px; \
                   color: {dim}; margin: 6px 0; }}\n\
@@ -993,27 +1028,38 @@ struct Colors {
 fn colors(dark: bool) -> Colors {
     if dark {
         Colors {
-            link: "#88c0d0",
-            dim: "#8b98a5",
-            panel: "#24272c",
+            link: "#8ec4d4",
+            dim: "#958c80",
+            panel: "#26231f",
             keyword: "#c79bd4",
             literal: "#8fbf8f",
             number: "#dda15e",
-            comment: "#7c8894",
-            rule: "#3a3f45",
+            comment: "#8a8175",
+            rule: "#3d3833",
         }
     } else {
         Colors {
-            link: "#0b6ea8",
-            dim: "#6b7480",
-            panel: "#f1efe9",
+            link: "#0d6a9e",
+            dim: "#7a7266",
+            panel: "#f2ead9",
             keyword: "#7b3fa0",
             literal: "#1f7a3d",
             number: "#9a5518",
-            comment: "#767f8a",
-            rule: "#d8d4cc",
+            comment: "#857c6e",
+            rule: "#e2d9c6",
         }
     }
+}
+
+/// `#rrggbb` в три байта. Цвета записаны так, как их читают глазами,
+/// а декодеру картинок нужны числа.
+fn rgb(hex: &str) -> [u8; 3] {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() < 6 {
+        return [255, 255, 255];
+    }
+    let byte = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).unwrap_or(255);
+    [byte(0), byte(2), byte(4)]
 }
 
 /// Мера в пикселях. В GTK кегль задаётся пунктами, а ширина виджета
@@ -1198,9 +1244,11 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         Some("com"),
         &[("foreground", &colors.comment), ("style", &pango::Style::Italic)],
     );
+    // Поле слева пошире обычного: в нём стоит линейка, которую рисует
+    // виджет статьи.
     buffer.create_tag(
         Some("quote"),
-        &[("style", &pango::Style::Italic), ("left-margin", &24)],
+        &[("style", &pango::Style::Italic), ("left-margin", &26)],
     );
 
     // Список: маркер выступает влево, перенос строки встаёт под текст,
@@ -1294,7 +1342,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
             .and_then(|want| places.iter().find(|(name, _)| *name == want))
             .map(|(_, offset)| *offset);
         match offset {
-            Some(offset) => settle(&view, offset, 0.05),
+            Some(offset) => settle(&view, offset, ANCHOR_ALIGN),
             None => scroll_to(&view, 0, 0.0),
         }
     });
@@ -1339,11 +1387,16 @@ fn settle(view: &gtk::TextView, offset: i32, align: f64) {
     let was = Cell::new(-1.0);
     let stable = Cell::new(0u8);
     view.add_tick_callback(move |view, _| {
+        // Прыгаем каждый кадр, а не только когда высота изменилась: пока
+        // раскладка неполная, `GtkTextView` честно уезжает к нижнему краю
+        // документа, и одного удачного прыжка мало — нужен последний,
+        // когда высота уже настоящая.
+        scroll_to(view, offset, align);
+
         let height = view.vadjustment().map(|bar| bar.upper()).unwrap_or_default();
         if (height - was.get()).abs() > 0.5 {
             was.set(height);
             stable.set(0);
-            scroll_to(view, offset, align);
         } else {
             stable.set(stable.get() + 1);
         }
@@ -1353,7 +1406,7 @@ fn settle(view: &gtk::TextView, offset: i32, align: f64) {
         // Кончаем, когда высота устоялась несколько кадров подряд, — или
         // по исчерпании терпения: держать окно на поводке дольше нельзя,
         // читатель уже мог прокрутить страницу сам.
-        if left_now == 0 || (height > 0.0 && stable.get() >= 4) {
+        if left_now == 0 || (height > 0.0 && stable.get() >= 5) {
             glib::ControlFlow::Break
         } else {
             glib::ControlFlow::Continue
@@ -1381,7 +1434,7 @@ fn jump(view: &gtk::TextView, anchors: &[(String, i32)], fragment: &str) -> bool
     let Some((_, offset)) = anchors.iter().find(|(name, _)| *name == want) else {
         return false;
     };
-    settle(view, *offset, 0.05);
+    settle(view, *offset, ANCHOR_ALIGN);
     true
 }
 
@@ -1472,7 +1525,7 @@ fn fill_contents(list: &gtk::ListBox, marks: &[Mark], view: &gtk::TextView) {
             return;
         };
         // Точное попадание: заголовок встаёт под верх окна.
-        scroll_to(&view, offset, 0.05);
+        scroll_to(&view, offset, ANCHOR_ALIGN);
     });
 }
 
@@ -1866,13 +1919,18 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
 
     let width = measure_px().max(1) as u32;
     let source = shot.source.clone();
+    // Прозрачное кладём на светлую бумагу, а не на белое: белая карточка
+    // посреди слоновой кости заметна, а схеме нужен только светлый фон —
+    // на тёмной теме тем более.
+    let paper = rgb(PAPER_LIGHT);
     let ui = ui.clone();
     let state = state.clone();
     let shot = shot.clone();
 
     glib::spawn_future_local(async move {
         let loaded =
-            gio::spawn_blocking(move || media::load(&source, UserAgent::Honest, width)).await;
+            gio::spawn_blocking(move || media::load(&source, UserAgent::Honest, width, paper))
+                .await;
 
         // Вкладку успели увести на другую страницу — рамки уже нет.
         if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {

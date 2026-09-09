@@ -117,7 +117,9 @@ fn has_scheme(src: &str) -> bool {
 }
 
 /// Достать и разобрать картинку, ужав её до ширины `width` в точках.
-pub fn load(source: &Source, ua: UserAgent, width: u32) -> Result<Raster, Error> {
+///
+/// `paper` — цвет, на который ложится прозрачное; см. [`flatten`].
+pub fn load(source: &Source, ua: UserAgent, width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
     let (bytes, mime) = match source {
         Source::Web(url) => {
             let blob = fetch::binary(url, ua, ACCEPT, MAX_IMAGE)?;
@@ -125,19 +127,24 @@ pub fn load(source: &Source, ua: UserAgent, width: u32) -> Result<Raster, Error>
         }
         Source::File(path) => (std::fs::read(path).map_err(Error::Convert)?, None),
     };
-    decode(&bytes, mime.as_deref(), width)
+    decode(&bytes, mime.as_deref(), width, paper)
 }
 
 /// Разобрать байты картинки. Тип берём из заголовка, но не верим ему
 /// на слово: сервер ошибается, а подпись svg видна в самих байтах.
-pub fn decode(bytes: &[u8], mime: Option<&str>, width: u32) -> Result<Raster, Error> {
+pub fn decode(
+    bytes: &[u8],
+    mime: Option<&str>,
+    width: u32,
+    paper: [u8; 3],
+) -> Result<Raster, Error> {
     if bytes.is_empty() {
         return Err(Error::Media("the server sent nothing".to_owned()));
     }
     if is_svg(bytes, mime) {
-        vector(bytes, width)
+        vector(bytes, width, paper)
     } else {
-        raster(bytes, width)
+        raster(bytes, width, paper)
     }
 }
 
@@ -151,7 +158,7 @@ fn is_svg(bytes: &[u8], mime: Option<&str>) -> bool {
     head.starts_with("<svg") || (head.starts_with("<?xml") && head.contains("<svg"))
 }
 
-fn raster(bytes: &[u8], width: u32) -> Result<Raster, Error> {
+fn raster(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| Error::Media(e.to_string()))?;
@@ -174,7 +181,7 @@ fn raster(bytes: &[u8], width: u32) -> Result<Raster, Error> {
     Ok(Raster {
         width,
         height,
-        rgba: flatten(rgba.into_raw()),
+        rgba: flatten(rgba.into_raw(), paper),
     })
 }
 
@@ -191,7 +198,7 @@ fn limits() -> image::Limits {
 ///
 /// Тёмную тему схемы не увидят: `@media (prefers-color-scheme: dark)` внутри
 /// svg resvg не разбирает. Поэтому вектор кладём на белое, как и всё остальное.
-fn vector(bytes: &[u8], width: u32) -> Result<Raster, Error> {
+fn vector(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
     let options = usvg::Options {
         fontdb: fonts(),
         ..Default::default()
@@ -208,9 +215,9 @@ fn vector(bytes: &[u8], width: u32) -> Result<Raster, Error> {
 
     let mut pixmap =
         tiny_skia::Pixmap::new(w, h).ok_or_else(|| Error::Media("no room for the canvas".to_owned()))?;
-    // Белым — до отрисовки: дальше по всему холсту альфа единица, и премножение
+    // Бумагой — до отрисовки: дальше по всему холсту альфа единица, и премножение
     // tiny-skia совпадает с обычным RGBA. Иначе пришлось бы делить обратно.
-    pixmap.fill(tiny_skia::Color::WHITE);
+    pixmap.fill(tiny_skia::Color::from_rgba8(paper[0], paper[1], paper[2], 255));
     resvg::render(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
@@ -239,13 +246,17 @@ fn fonts() -> Arc<usvg::fontdb::Database> {
         .clone()
 }
 
-/// Прозрачное кладём на белое.
+/// Прозрачное кладём на бумагу.
 ///
 /// Схемы и логотипы верстают с прозрачным фоном и чёрными линиями: в браузере
-/// под ними белая страница. На тёмной теме такая картинка превращается
-/// в чёрное на чёрном — то есть исчезает. Белая подложка — то же, что делает
-/// браузер, только явно.
-fn flatten(mut rgba: Vec<u8>) -> Vec<u8> {
+/// под ними светлая страница. На тёмной теме такая картинка превращается
+/// в чёрное на чёрном — то есть исчезает. Подложка — то же, что делает браузер,
+/// только явно и цветом нашей бумаги, а не белым: белая карточка посреди
+/// слоновой кости заметна.
+///
+/// Цвет всегда светлый, даже когда читатель выбрал тёмную тему: схема
+/// нарисована тёмным по светлому, и другого выхода у неё нет.
+fn flatten(mut rgba: Vec<u8>, paper: [u8; 3]) -> Vec<u8> {
     for pixel in rgba.chunks_exact_mut(4) {
         let alpha = u32::from(pixel[3]);
         if alpha == 255 {
@@ -253,7 +264,8 @@ fn flatten(mut rgba: Vec<u8>) -> Vec<u8> {
         }
         for channel in 0..3 {
             let value = u32::from(pixel[channel]);
-            pixel[channel] = ((value * alpha + 255 * (255 - alpha)) / 255) as u8;
+            let under = u32::from(paper[channel]);
+            pixel[channel] = ((value * alpha + under * (255 - alpha)) / 255) as u8;
         }
         pixel[3] = 255;
     }
@@ -263,6 +275,9 @@ fn flatten(mut rgba: Vec<u8>) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Бумага, на которую в окне ложатся картинки.
+    const PAPER: [u8; 3] = [250, 245, 234];
 
     fn web(url: &str) -> Address {
         Address::Web(url.to_owned())
@@ -303,18 +318,18 @@ mod tests {
     }
 
     #[test]
-    fn transparency_ends_up_on_white() {
-        // Чёрный, полностью прозрачный, — на белом становится белым.
-        assert_eq!(flatten(vec![0, 0, 0, 0]), vec![255, 255, 255, 255]);
+    fn transparency_ends_up_on_the_paper() {
+        // Чёрный, полностью прозрачный, — становится цветом бумаги.
+        assert_eq!(flatten(vec![0, 0, 0, 0], PAPER), PAPER.iter().copied().chain([255]).collect::<Vec<u8>>());
         // Непрозрачное не трогаем.
-        assert_eq!(flatten(vec![10, 20, 30, 255]), vec![10, 20, 30, 255]);
+        assert_eq!(flatten(vec![10, 20, 30, 255], PAPER), vec![10, 20, 30, 255]);
     }
 
     #[test]
     fn a_vector_is_drawn_at_the_asked_width() {
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"
                        viewBox="0 0 100 50"><rect width="100" height="50" fill="#333"/></svg>"##;
-        let raster = decode(svg, Some("image/svg+xml"), 200).unwrap();
+        let raster = decode(svg, Some("image/svg+xml"), 200, PAPER).unwrap();
         // Растягиваем не более чем вдвое.
         assert_eq!((raster.width, raster.height), (200, 100));
         assert_eq!(raster.rgba.len() as u32, raster.width * raster.height * 4);
