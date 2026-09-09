@@ -13,10 +13,11 @@
 
 use comrak::nodes::NodeValue;
 use comrak::{Arena, Options};
-use htmd::HtmlToMarkdown;
+use htmd::element_handler::{HandlerResult, Handlers};
 use htmd::options::{
     BulletListMarker, CodeBlockStyle, HeadingStyle, LinkStyle, Options as HtmdOptions,
 };
+use htmd::{Element, HtmlToMarkdown};
 
 use crate::error::Error;
 use crate::extract::Article;
@@ -106,6 +107,8 @@ pub fn links(md: &str) -> Vec<String> {
 fn to_markdown(html: &str) -> Result<String, Error> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(SKIP.to_vec())
+        .add_handler(vec!["code"], code_handler)
+        .add_handler(vec!["a"], anchor_handler)
         .options(HtmdOptions {
             heading_style: HeadingStyle::Atx,
             bullet_list_marker: BulletListMarker::Dash,
@@ -116,6 +119,71 @@ fn to_markdown(html: &str) -> Result<String, Error> {
         .build();
 
     converter.convert(html).map_err(Error::Convert)
+}
+
+/// Блок кода, свёрстанный без `<pre>`.
+///
+/// htmd считает блоком только `<code>` внутри `<pre>`, всё остальное — код-спан.
+/// Но верстают и иначе: fasterthanli.me заворачивает код в
+/// `<figure><code>…</code></figure>`, и статья на 65 КБ приходила без единого
+/// ``` — зато с 198 строками непарных бэктиков. Признак блока берём по
+/// содержимому: перевод строки внутри. Инлайновый код с переносом внутри
+/// теоретически поймается ложно, но так верстают редко, а цена ошибки в другую
+/// сторону — нечитаемая статья в техническом блоге.
+fn code_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
+    let content = handlers.walk_children(element.node).content;
+    let code = content.trim_matches('\n');
+
+    if !code.contains('\n') {
+        return handlers.fallback(element);
+    }
+
+    let fence = "`".repeat(3.max(longest_backtick_run(code) + 1));
+    let language = language_from_attrs(&element).unwrap_or_default();
+
+    Some(format!("\n\n{fence}{language}\n{code}\n{fence}\n\n").into())
+}
+
+/// Ссылка без текста — мусор, а не ссылка.
+///
+/// Такие оставляют якоря заголовков (github, fasterthanli.me): `[](#why-rust)`.
+/// Нажать не на что, читать нечего.
+fn anchor_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
+    if handlers
+        .walk_children(element.node)
+        .content
+        .trim()
+        .is_empty()
+    {
+        return None;
+    }
+    handlers.fallback(element)
+}
+
+fn longest_backtick_run(content: &str) -> usize {
+    let mut longest = 0;
+    let mut run = 0;
+    for ch in content.chars() {
+        if ch == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    longest
+}
+
+fn language_from_attrs(element: &Element) -> Option<String> {
+    let class = element
+        .attrs
+        .iter()
+        .find(|attr| &attr.name.local == "class")?;
+    class
+        .value
+        .split(' ')
+        .find_map(|cls| cls.strip_prefix("language-"))
+        .map(str::to_owned)
 }
 
 /// CommonMark + GFM. Таблицы — обязательная часть, из-за них GFM и выбран.
@@ -148,6 +216,34 @@ mod tests {
         let md = from_html(r#"<h2>Titl</h2><p>text <a href="https://e.com">link</a></p>"#).unwrap();
         assert!(md.contains("## Titl"));
         assert!(md.contains("[link](https://e.com)"));
+    }
+
+    #[test]
+    fn code_without_pre_becomes_a_fenced_block() {
+        let md = from_html("<figure><code>fn main() {\n    println!(\"hi\");\n}</code></figure>")
+            .unwrap();
+        assert_eq!(md, "```\nfn main() {\n    println!(\"hi\");\n}\n```\n");
+    }
+
+    #[test]
+    fn short_inline_code_stays_inline() {
+        let md = from_html("<p>вызов <code>main()</code> тут</p>").unwrap();
+        assert_eq!(md, "вызов `main()` тут\n");
+    }
+
+    #[test]
+    fn pre_code_still_works_and_keeps_language() {
+        let md =
+            from_html("<pre><code class=\"language-rust\">let x = 1;\nlet y = 2;</code></pre>")
+                .unwrap();
+        assert_eq!(md, "```rust\nlet x = 1;\nlet y = 2;\n```\n");
+    }
+
+    #[test]
+    fn empty_anchors_are_dropped() {
+        let html = r##"<p>текст <a href="#anchor"></a> и <a href="https://e.com">ссылка</a></p>"##;
+        let md = from_html(html).unwrap();
+        assert_eq!(md, "текст и [ссылка](https://e.com)\n");
     }
 
     #[test]

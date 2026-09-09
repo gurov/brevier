@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 comrak = { version = "0.55", default-features = false }
+dom_query = "0.28"
 dom_smoothie = "0.18.1"
 htmd = "0.5.5"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
