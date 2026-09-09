@@ -61,7 +61,8 @@ const PAGE: f32 = 520.0;
 
 fn main() -> iced::Result {
     brevier::init_crypto();
-    let start = std::env::args().nth(1);
+    // Каждый адрес из командной строки — своя вкладка.
+    let start: Vec<String> = std::env::args().skip(1).collect();
 
     iced::application(
         move || Reader::new(start.clone()),
@@ -82,18 +83,61 @@ fn main() -> iced::Result {
 }
 
 struct Reader {
-    /// Что напечатано в адресной строке прямо сейчас.
+    tabs: Vec<Tab>,
+    active: usize,
+    /// Счётчик имён вкладок. Ответ загрузки адресуется по нему, а не
+    /// по месту в списке: пока страница едет, соседнюю вкладку могли закрыть.
+    next_id: u64,
+    /// Показывать ли оглавление. Решение читателя, общее для всех вкладок.
+    show_toc: bool,
+    dark: bool,
+}
+
+/// Вкладка: своя статья, своя история и своё место в тексте.
+///
+/// Место хранится здесь, а не в самом `scrollable`: виджет один на все
+/// вкладки, и без сохранения переключение бросало бы читателя туда, где
+/// он остановился в прошлой.
+struct Tab {
+    id: u64,
+    /// Что напечатано в адресной строке этой вкладки.
     input: String,
     history: History,
     page: Page,
     content: markdown::Content,
     outline: Vec<Entry>,
-    /// Показывать ли оглавление. Решение читателя, и оно переживает переходы.
-    show_toc: bool,
-    /// Ручка текущей загрузки. Нужна, чтобы ответ брошенной страницы
-    /// не приезжал поверх новой.
+    /// Ручка загрузки. У каждой вкладки своя: фоновая догружается сама
+    /// и переключение на соседнюю её не отменяет.
     loading: Option<iced::task::Handle>,
-    dark: bool,
+    scroll: f32,
+}
+
+impl Tab {
+    fn new(id: u64, input: String) -> Self {
+        Self {
+            id,
+            input,
+            history: History::new(),
+            page: Page::Blank,
+            content: markdown::Content::new(),
+            outline: Vec::new(),
+            loading: None,
+            scroll: 0.0,
+        }
+    }
+
+    /// Подпись на корешке вкладки.
+    fn label(&self) -> String {
+        match &self.page {
+            Page::Shown(title) if !title.trim().is_empty() => title.clone(),
+            Page::Loading => "Загружаю…".to_owned(),
+            Page::Failed(problem) => problem.headline.to_owned(),
+            _ => match self.history.current() {
+                Some(address) => address.display(),
+                None => "Новая вкладка".to_owned(),
+            },
+        }
+    }
 }
 
 enum Page {
@@ -222,7 +266,18 @@ fn is_certificate_problem(message: &str) -> bool {
 enum Message {
     InputChanged(String),
     Go,
-    Loaded(Box<Result<Document, Failure>>),
+    /// Страница доехала. Имя вкладки — потому что доехать она могла
+    /// и в фоновую, пока читатель смотрит соседнюю.
+    Loaded(u64, Box<Result<Document, Failure>>),
+    NewTab,
+    SelectTab(usize),
+    CloseTab(usize),
+    /// То же, но по клавише: раскладка не знает, какая вкладка сейчас открыта.
+    CloseActiveTab,
+    /// Следующая вкладка (`true`) или предыдущая.
+    CycleTab(bool),
+    /// Читатель прокрутил страницу — запоминаем место для этой вкладки.
+    ScrollChanged(f32),
     LinkClicked(markdown::Uri),
     Back,
     Forward,
@@ -240,29 +295,52 @@ enum Message {
 }
 
 impl Reader {
-    fn new(start: Option<String>) -> (Self, Task<Message>) {
-        let reader = Self {
-            input: start.clone().unwrap_or_default(),
-            history: History::new(),
-            page: Page::Blank,
-            content: markdown::Content::new(),
-            outline: Vec::new(),
+    fn new(start: Vec<String>) -> (Self, Task<Message>) {
+        let addresses = if start.is_empty() {
+            vec![String::new()]
+        } else {
+            start
+        };
+        let tabs: Vec<Tab> = addresses
+            .iter()
+            .enumerate()
+            .map(|(index, address)| Tab::new(index as u64, address.clone()))
+            .collect();
+        let next_id = tabs.len() as u64;
+
+        let mut reader = Self {
+            tabs,
+            active: 0,
+            next_id,
             show_toc: true,
-            loading: None,
             dark: true,
         };
-        match start {
-            Some(_) => {
-                let mut reader = reader;
-                let task = reader.go();
-                (reader, task)
+
+        // Грузим все сразу: фоновая вкладка приезжает сама, для этого
+        // у каждой своя ручка загрузки.
+        let mut tasks = Vec::new();
+        for index in 0..reader.tabs.len() {
+            if reader.tabs[index].input.is_empty() {
+                continue;
             }
-            None => (reader, Task::none()),
+            reader.active = index;
+            tasks.push(reader.go());
         }
+        reader.active = 0;
+
+        (reader, Task::batch(tasks))
+    }
+
+    fn tab(&self) -> &Tab {
+        &self.tabs[self.active]
+    }
+
+    fn tab_mut(&mut self) -> &mut Tab {
+        &mut self.tabs[self.active]
     }
 
     fn title(&self) -> String {
-        match &self.page {
+        match &self.tab().page {
             Page::Shown(title) if !title.is_empty() => format!("{title} — Brevier"),
             _ => "Brevier".to_owned(),
         }
@@ -279,21 +357,21 @@ impl Reader {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::InputChanged(value) => {
-                self.input = value;
+                self.tab_mut().input = value;
                 Task::none()
             }
             // После Enter фокус уходит со строки: дальше человек читает,
             // а не правит адрес, и клавиши должны листать страницу.
             Message::Go => Task::batch([unfocus(), self.go()]),
             Message::LinkClicked(uri) => {
-                self.input = uri.to_string();
+                self.tab_mut().input = uri.to_string();
                 self.go()
             }
-            Message::Back => match self.history.back().cloned() {
+            Message::Back => match self.tab_mut().history.back().cloned() {
                 Some(address) => self.load(address),
                 None => Task::none(),
             },
-            Message::Forward => match self.history.forward().cloned() {
+            Message::Forward => match self.tab_mut().history.forward().cloned() {
                 Some(address) => self.load(address),
                 None => Task::none(),
             },
@@ -302,7 +380,7 @@ impl Reader {
                 Task::none()
             }
             Message::OpenInBrowser => {
-                if let Some(address) = self.history.current() {
+                if let Some(address) = self.tab().history.current() {
                     open_in_system_browser(&address.display());
                 }
                 Task::none()
@@ -318,6 +396,10 @@ impl Reader {
                 } else {
                     scroll.task()
                 }
+            }
+            Message::ScrollChanged(y) => {
+                self.tab_mut().scroll = y;
+                Task::none()
             }
             Message::FocusAddress => Task::batch([
                 operation::focus(address_id()),
@@ -335,37 +417,106 @@ impl Reader {
                 self.dark = !self.dark;
                 Task::none()
             }
-            Message::Loaded(result) => {
-                self.loading = None;
+            Message::NewTab => {
+                let id = self.next_id;
+                self.next_id += 1;
+                self.tabs.push(Tab::new(id, String::new()));
+                self.active = self.tabs.len() - 1;
+                // Новая вкладка пуста, читать в ней нечего — курсор в адрес.
+                Task::batch([
+                    operation::focus(address_id()),
+                    operation::select_all(address_id()),
+                ])
+            }
+            Message::SelectTab(index) => self.switch_to(index),
+            Message::CycleTab(forward) => {
+                let count = self.tabs.len();
+                let next = if forward {
+                    (self.active + 1) % count
+                } else {
+                    (self.active + count - 1) % count
+                };
+                self.switch_to(next)
+            }
+            Message::CloseActiveTab => {
+                let index = self.active;
+                self.update(Message::CloseTab(index))
+            }
+            Message::CloseTab(index) => {
+                if index >= self.tabs.len() {
+                    return Task::none();
+                }
+                let mut closed = self.tabs.remove(index);
+                // Закрыли — значит и грузить незачем.
+                if let Some(handle) = closed.loading.take() {
+                    handle.abort();
+                }
+                // Последняя вкладка не закрывается в пустоту: окно без
+                // единой вкладки показывать нечем, поэтому заводим чистую.
+                if self.tabs.is_empty() {
+                    let id = self.next_id;
+                    self.next_id += 1;
+                    self.tabs.push(Tab::new(id, String::new()));
+                }
+                let landing = if index <= self.active {
+                    self.active.saturating_sub(1)
+                } else {
+                    self.active
+                };
+                self.switch_to(landing)
+            }
+            Message::Loaded(id, result) => {
+                let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) else {
+                    // Вкладку закрыли, пока страница ехала.
+                    return Task::none();
+                };
+                tab.loading = None;
                 match *result {
                     Ok(document) => {
-                        self.input = document.address.display();
-                        self.outline = outline(&document.markdown);
-                        self.content = markdown::Content::parse(&document.markdown);
-                        self.page = Page::Shown(document.title);
+                        tab.input = document.address.display();
+                        tab.outline = outline(&document.markdown);
+                        tab.content = markdown::Content::parse(&document.markdown);
+                        tab.page = Page::Shown(document.title);
                     }
                     Err(failure) => {
-                        self.content = markdown::Content::new();
-                        self.outline = Vec::new();
-                        self.page = Page::Failed(failure);
+                        tab.content = markdown::Content::new();
+                        tab.outline = Vec::new();
+                        tab.page = Page::Failed(failure);
                     }
                 }
-                // Новая страница начинается сверху. Без этого переход по ссылке
-                // открывает статью с той же высоты, на которой бросили прошлую.
-                operation::scroll_to(page_id(), AbsoluteOffset { x: 0.0, y: 0.0 })
+                tab.scroll = 0.0;
+
+                // Новая страница начинается сверху — но только если читатель
+                // на неё смотрит. Догрузка фоновой вкладки чужую прокрутку
+                // трогать не смеет.
+                if self.tab().id == id {
+                    operation::scroll_to(page_id(), AbsoluteOffset { x: 0.0, y: 0.0 })
+                } else {
+                    Task::none()
+                }
             }
         }
     }
 
+    /// Переключиться на вкладку и вернуть читателя туда, где он её бросил.
+    fn switch_to(&mut self, index: usize) -> Task<Message> {
+        if index >= self.tabs.len() {
+            return Task::none();
+        }
+        self.active = index;
+        let y = self.tab().scroll;
+        operation::scroll_to(page_id(), AbsoluteOffset { x: 0.0, y })
+    }
+
     /// Открыть то, что напечатано в адресной строке.
     fn go(&mut self) -> Task<Message> {
-        match address::parse(&self.input) {
+        match address::parse(&self.tab().input) {
             Ok(address) => {
-                self.history.visit(address.clone());
+                self.tab_mut().history.visit(address.clone());
                 self.load(address)
             }
             Err(e) => {
-                self.page = Page::Failed(describe(&e));
+                self.tab_mut().page = Page::Failed(describe(&e));
                 Task::none()
             }
         }
@@ -375,23 +526,26 @@ impl Reader {
         // Уходя со страницы, бросаем её загрузку: иначе медленный сайт
         // догоняет читателя и подменяет уже открытую статью своей.
         self.abort_loading();
-        self.page = Page::Loading;
-        self.input = address.display();
+
+        let id = self.tab().id;
+        let tab = self.tab_mut();
+        tab.page = Page::Loading;
+        tab.input = address.display();
 
         let (task, handle) = Task::perform(
             async move {
                 brevier::open(&address, UserAgent::Honest).map_err(|e| describe(&e))
             },
-            |result| Message::Loaded(Box::new(result)),
+            move |result| Message::Loaded(id, Box::new(result)),
         )
         .abortable();
 
-        self.loading = Some(handle);
+        self.tab_mut().loading = Some(handle);
         task
     }
 
     fn abort_loading(&mut self) {
-        if let Some(handle) = self.loading.take() {
+        if let Some(handle) = self.tab_mut().loading.take() {
             handle.abort();
         }
     }
@@ -404,19 +558,21 @@ impl Reader {
             }
             b
         };
+        let tab = self.tab();
 
         let bar = row![
-            go("←", self.history.can_go_back().then_some(Message::Back)),
-            go("→", self.history.can_go_forward().then_some(Message::Forward)),
-            text_input("адрес, gh:owner/repo или путь к .md", &self.input)
+            go("←", tab.history.can_go_back().then_some(Message::Back)),
+            go("→", tab.history.can_go_forward().then_some(Message::Forward)),
+            text_input("адрес, gh:owner/repo или путь к .md", &tab.input)
                 .id(address_id())
                 .on_input(Message::InputChanged)
                 .on_submit(Message::Go)
                 .padding([6, 10])
                 .size(15),
+            go("+", Some(Message::NewTab)),
             go(
                 "☰",
-                (!self.outline.is_empty()).then_some(Message::ToggleContents)
+                (!tab.outline.is_empty()).then_some(Message::ToggleContents)
             ),
             go(
                 if self.dark { "☀" } else { "☾" },
@@ -427,12 +583,12 @@ impl Reader {
         .padding(8)
         .align_y(Center);
 
-        let body: Element<'_, Message> = match &self.page {
+        let body: Element<'_, Message> = match &tab.page {
             Page::Blank => hint("Введите адрес и нажмите Enter."),
             Page::Loading => hint("Загружаю…"),
             Page::Failed(problem) => failed(problem),
             Page::Shown(_) => markdown::view_with(
-                self.content.items(),
+                tab.content.items(),
                 markdown_settings(&self.theme()),
                 &Reading,
             ),
@@ -444,16 +600,77 @@ impl Reader {
             .center_x(Fill)
             .padding([24, 16]);
 
-        let reading = scrollable(page).id(page_id()).height(Fill);
+        let reading = scrollable(page)
+            .id(page_id())
+            .height(Fill)
+            .on_scroll(|viewport| Message::ScrollChanged(viewport.absolute_offset().y));
 
-        let body: Element<'_, Message> = if self.show_toc && !self.outline.is_empty() {
-            row![reading, contents(&self.outline)].into()
+        let reading: Element<'_, Message> = if self.show_toc && !tab.outline.is_empty() {
+            row![reading, contents(&tab.outline)].into()
         } else {
             reading.into()
         };
 
-        column![bar, body].into()
+        // Корешки показываем только со второй вкладки: на одной статье
+        // полоса — пустой шум, а «+» и Ctrl+T есть всегда.
+        if self.tabs.len() > 1 {
+            column![strip(&self.tabs, self.active), bar, reading].into()
+        } else {
+            column![bar, reading].into()
+        }
     }
+}
+
+/// Сколько знаков влезает на корешок. Обрезаем сами: запрет переноса
+/// не мешает длинной подписи вылезти за кнопку и налезть на крестик.
+const TAB_LABEL: usize = 24;
+
+/// Обрезать подпись по границе знака, с многоточием.
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out = out.trim_end().to_owned();
+    out.push('…');
+    out
+}
+
+/// Полоса корешков.
+fn strip(tabs: &[Tab], active: usize) -> Element<'_, Message> {
+    let mut list = row![].spacing(4);
+
+    for (index, tab) in tabs.iter().enumerate() {
+        let style = if index == active {
+            button::primary
+        } else {
+            button::secondary
+        };
+        list = list.push(
+            row![
+                button(
+                    text(clip(&tab.label(), TAB_LABEL))
+                        .size(TEXT_SIZE * 0.78)
+                        .wrapping(text::Wrapping::None)
+                )
+                .on_press(Message::SelectTab(index))
+                .style(style)
+                .width(190)
+                .padding([4, 8]),
+                button(text("×").size(TEXT_SIZE * 0.85))
+                    .on_press(Message::CloseTab(index))
+                    .style(button::text)
+                    .padding([4, 6]),
+            ]
+            .align_y(Center),
+        );
+    }
+
+    scrollable(list.padding([6, 8]))
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default().width(4).scroller_width(4),
+        ))
+        .into()
 }
 
 fn on_key(event: keyboard::Event) -> Option<Message> {
@@ -475,12 +692,20 @@ fn keys(key: &key::Key, modifiers: Modifiers) -> Option<Message> {
         // оставаться под рукой: на открытом вебе это частый путь, а не
         // крайний случай.
         key::Key::Character("o") if modifiers.command() => return Some(Message::OpenInBrowser),
+        key::Key::Character("t") if modifiers.command() => return Some(Message::NewTab),
+        key::Key::Character("w") if modifiers.command() => return Some(Message::CloseActiveTab),
         _ => return None,
     };
 
     match named {
         Named::ArrowLeft if modifiers.alt() => Some(Message::Back),
         Named::ArrowRight if modifiers.alt() => Some(Message::Forward),
+        // Вкладки идут раньше прокрутки: Ctrl+PageDown иначе просто
+        // пролистал бы страницу.
+        Named::Tab if modifiers.command() && modifiers.shift() => Some(Message::CycleTab(false)),
+        Named::Tab if modifiers.command() => Some(Message::CycleTab(true)),
+        Named::PageDown if modifiers.command() => Some(Message::CycleTab(true)),
+        Named::PageUp if modifiers.command() => Some(Message::CycleTab(false)),
         Named::ArrowDown => Some(Message::Scrolling(Scroll::By(STEP))),
         Named::ArrowUp => Some(Message::Scrolling(Scroll::By(-STEP))),
         Named::PageDown | Named::Space => Some(Message::Scrolling(Scroll::By(PAGE))),
@@ -964,9 +1189,9 @@ mod tests {
     fn typing_in_the_address_bar_wins_over_scrolling() {
         let scroll = Scroll::By(PAGE);
         // Тот же ответ, но с курсором в адресной строке — прокрутки нет.
-        let mut reader = Reader::new(None).0;
+        let mut reader = Reader::new(Vec::new()).0;
         let _ = reader.update(Message::Scrolled(scroll, true));
-        assert!(matches!(reader.page, Page::Blank), "состояние не должно меняться");
+        assert!(matches!(reader.tab().page, Page::Blank), "состояние не должно меняться");
     }
 
     #[test]
@@ -1077,6 +1302,109 @@ mod tests {
             Some(Message::OpenInBrowser)
         ));
         assert!(keys(&key::Key::Character("o".into()), Modifiers::default()).is_none());
+    }
+
+    #[test]
+    fn a_new_tab_opens_and_becomes_the_one_you_read() {
+        let mut reader = Reader::new(Vec::new()).0;
+        assert_eq!(reader.tabs.len(), 1);
+
+        let _ = reader.update(Message::NewTab);
+        assert_eq!(reader.tabs.len(), 2);
+        assert_eq!(reader.active, 1, "новая вкладка должна стать открытой");
+        assert!(matches!(reader.tab().page, Page::Blank));
+    }
+
+    #[test]
+    fn tabs_keep_their_own_address() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::InputChanged("первая".to_owned()));
+        let _ = reader.update(Message::NewTab);
+        let _ = reader.update(Message::InputChanged("вторая".to_owned()));
+
+        assert_eq!(reader.tabs[0].input, "первая");
+        assert_eq!(reader.tabs[1].input, "вторая");
+    }
+
+    #[test]
+    fn a_tab_remembers_where_you_left_it() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::ScrollChanged(1200.0));
+        let _ = reader.update(Message::NewTab);
+        let _ = reader.update(Message::ScrollChanged(40.0));
+
+        assert_eq!(reader.tabs[0].scroll, 1200.0);
+        assert_eq!(reader.tabs[1].scroll, 40.0);
+
+        let _ = reader.update(Message::SelectTab(0));
+        assert_eq!(reader.tab().scroll, 1200.0, "вернуться надо туда же");
+    }
+
+    #[test]
+    fn the_last_tab_does_not_close_into_nothing() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::InputChanged("что-то".to_owned()));
+        let _ = reader.update(Message::CloseActiveTab);
+
+        assert_eq!(reader.tabs.len(), 1, "окно без вкладок показывать нечем");
+        assert!(reader.tab().input.is_empty(), "и она должна быть чистой");
+    }
+
+    #[test]
+    fn closing_a_tab_lands_on_a_neighbour() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::NewTab);
+        let _ = reader.update(Message::NewTab);
+        assert_eq!((reader.tabs.len(), reader.active), (3, 2));
+
+        let _ = reader.update(Message::CloseActiveTab);
+        assert_eq!((reader.tabs.len(), reader.active), (2, 1));
+
+        let _ = reader.update(Message::CloseTab(0));
+        assert_eq!((reader.tabs.len(), reader.active), (1, 0));
+    }
+
+    #[test]
+    fn cycling_wraps_around() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::NewTab);
+        let _ = reader.update(Message::CycleTab(true));
+        assert_eq!(reader.active, 0, "с последней вперёд — на первую");
+        let _ = reader.update(Message::CycleTab(false));
+        assert_eq!(reader.active, 1, "с первой назад — на последнюю");
+    }
+
+    #[test]
+    fn a_long_title_fits_the_tab() {
+        let clipped = clip("Announcing Rust 1.81.0 | Rust Blog", TAB_LABEL);
+        assert!(clipped.chars().count() <= TAB_LABEL, "{clipped:?}");
+        assert!(clipped.ends_with('…'));
+        assert_eq!(clip("Коротко", TAB_LABEL), "Коротко");
+    }
+
+    #[test]
+    fn tab_shortcuts_are_wired() {
+        assert!(matches!(
+            keys(&key::Key::Character("t".into()), Modifiers::COMMAND),
+            Some(Message::NewTab)
+        ));
+        assert!(matches!(
+            keys(&key::Key::Character("w".into()), Modifiers::COMMAND),
+            Some(Message::CloseActiveTab)
+        ));
+        assert!(matches!(
+            keys(&named(key::Named::Tab), Modifiers::COMMAND),
+            Some(Message::CycleTab(true))
+        ));
+        assert!(matches!(
+            keys(&named(key::Named::Tab), Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Message::CycleTab(false))
+        ));
+        // Без Ctrl PageDown остаётся прокруткой.
+        assert!(matches!(
+            keys(&named(key::Named::PageDown), Modifiers::default()),
+            Some(Message::Scrolling(_))
+        ));
     }
 
     #[test]
