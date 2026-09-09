@@ -9,7 +9,9 @@
 
 use iced::keyboard::{self, Modifiers, key};
 use iced::widget::scrollable::AbsoluteOffset;
-use iced::widget::{button, column, container, markdown, operation, row, scrollable, text, text_input};
+use iced::widget::{
+    button, column, container, markdown, operation, rich_text, row, scrollable, text, text_input,
+};
 use iced::{Center, Element, Fill, Subscription, Task, Theme};
 
 use brevier::address::{self, Address};
@@ -70,6 +72,7 @@ enum Message {
     ScrollTo(f32),
     FocusAddress,
     OpenInBrowser,
+    OpenExternal(String),
     ToggleTheme,
 }
 
@@ -126,6 +129,10 @@ impl Reader {
                 Some(address) => self.load(address),
                 None => Task::none(),
             },
+            Message::OpenExternal(target) => {
+                open_in_system_browser(&target);
+                Task::none()
+            }
             Message::OpenInBrowser => {
                 if let Some(address) = self.history.current() {
                     open_in_system_browser(&address.display());
@@ -155,7 +162,9 @@ impl Reader {
                         self.page = Page::Failed(message);
                     }
                 }
-                Task::none()
+                // Новая страница начинается сверху. Без этого переход по ссылке
+                // открывает статью с той же высоты, на которой бросили прошлую.
+                operation::scroll_to(page_id(), AbsoluteOffset { x: 0.0, y: 0.0 })
             }
         }
     }
@@ -205,7 +214,10 @@ impl Reader {
                 "в браузере",
                 (!self.history.is_empty()).then_some(Message::OpenInBrowser)
             ),
-            go(if self.dark { "светлая" } else { "тёмная" }, Some(Message::ToggleTheme)),
+            go(
+                if self.dark { "☀" } else { "☾" },
+                Some(Message::ToggleTheme)
+            ),
         ]
         .spacing(6)
         .padding(8)
@@ -215,11 +227,11 @@ impl Reader {
             Page::Blank => hint("Введите адрес и нажмите Enter."),
             Page::Loading => hint("Загружаю…"),
             Page::Failed(message) => failure(message),
-            Page::Shown(_) => markdown::view(
+            Page::Shown(_) => markdown::view_with(
                 self.content.items(),
                 markdown::Settings::with_text_size(TEXT_SIZE, self.theme()),
-            )
-            .map(Message::LinkClicked),
+                &Reading,
+            ),
         };
 
         // Мера — около 65 знаков: ширина, на которой глаз находит начало
@@ -283,6 +295,44 @@ fn failure(message: &str) -> Element<'_, Message> {
 
 /// Отдать адрес системному браузеру. Без внешних крейтов: это три команды,
 /// а каждая зависимость в проекте про безопасность стоит дороже трёх строк.
+/// Свой вид для markdown. От умолчания отличается одним: картинками.
+struct Reading;
+
+impl<'a> markdown::Viewer<'a, Message> for Reading {
+    fn on_link_click(url: markdown::Uri) -> Message {
+        Message::LinkClicked(url)
+    }
+
+    /// Картинки не грузим — они единственная серьёзная поверхность атаки
+    /// после отказа от JS, и по плану включаются на M4: по клику
+    /// и только same-origin. Но молча пропадать текст не должен: показываем,
+    /// что здесь была картинка, с её подписью, и даём открыть её в системном
+    /// браузере — тем же выходом, что и для страниц, которые мы не тянем.
+    fn image(
+        &self,
+        settings: markdown::Settings,
+        url: &'a markdown::Uri,
+        _title: &'a str,
+        alt: &markdown::Text,
+    ) -> Element<'a, Message> {
+        let caption = rich_text(alt.spans(settings.style)).on_link_click(Self::on_link_click);
+        let target = url.to_string();
+
+        container(
+            column![
+                button(text("изображение — открыть в браузере").size(TEXT_SIZE * 0.8))
+                    .on_press(Message::OpenExternal(target))
+                    .padding([3, 8]),
+                caption,
+            ]
+            .spacing(6),
+        )
+        .padding(10)
+        .width(Fill)
+        .into()
+    }
+}
+
 fn page_id() -> iced::widget::Id {
     iced::widget::Id::new("page")
 }
