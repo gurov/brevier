@@ -2,8 +2,8 @@
 //!
 //! Статья рисуется одним `GtkTextView`, а не набором виджетов на абзац:
 //! выделение должно идти через весь документ, а не обрываться на границе
-//! абзаца. Тем же решением бесплатно приходят копирование, метки для точного
-//! оглавления и доступность через AT-SPI.
+//! абзаца. Тем же решением бесплатно приходят копирование, контекстное меню,
+//! точное оглавление по меткам в тексте и доступность через AT-SPI.
 //!
 //! Тулкит живёт только здесь. Разбор адреса, история, оглавление и тексты
 //! ошибок лежат в ядре и про GTK не знают ничего.
@@ -19,17 +19,21 @@ use gtk::{Application, ApplicationWindow};
 
 use brevier::address::{self, Address};
 use brevier::failure::describe;
-use brevier::outline::{HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE, clip, lead};
+use brevier::outline::{
+    HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE, clip, lead,
+};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
 const BODY_FAMILY: &str = "PT Serif";
 const MONO_FAMILY: &str = "PT Mono";
+/// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
+const BOLD: i32 = 700;
 const TOC_WIDTH: i32 = 260;
 /// Короче этого оглавление не нужно: страница и так вся под рукой.
 const MIN_DOC_CHARS: i32 = 4000;
-/// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
-const BOLD: i32 = 700;
+/// Сколько знаков влезает на корешок вкладки.
+const TAB_LABEL: usize = 24;
 
 fn main() -> glib::ExitCode {
     brevier::init_crypto();
@@ -48,11 +52,553 @@ fn main() -> glib::ExitCode {
             .skip(1)
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
-        build(app, start.first().cloned());
+        build(app, start);
         glib::ExitCode::SUCCESS
     });
 
     app.run()
+}
+
+/// Виджеты окна. Живут отдельно от данных: GTK-виджеты сами по себе
+/// разделяемые и изменяемые, а вот состояние вкладок требует `RefCell`,
+/// и держать их вместе значило бы занимать заём на каждый чих.
+#[derive(Clone)]
+struct Ui {
+    window: ApplicationWindow,
+    notebook: gtk::Notebook,
+    entry: gtk::Entry,
+    back: gtk::Button,
+    forward: gtk::Button,
+    contents: gtk::ListBox,
+    contents_pane: gtk::ScrolledWindow,
+    show_contents: gtk::ToggleButton,
+}
+
+/// Вкладка: своя статья, своя история, своё место в тексте.
+///
+/// Место хранить не нужно: у каждой вкладки собственный `ScrolledWindow`,
+/// и он помнит прокрутку сам.
+struct Tab {
+    id: u64,
+    view: gtk::TextView,
+    label: gtk::Label,
+    history: History,
+    /// Ссылки в тексте: где начинается, где кончается, куда ведёт.
+    links: Vec<Link>,
+    /// Куда прыгать по оглавлению — смещения в буфере, а не доли высоты.
+    marks: Vec<Mark>,
+    /// Номер загрузки. Ответ брошенной страницы отличаем по нему: отменить
+    /// синхронный `ureq` нечем, но и слушать его уже незачем.
+    generation: u64,
+}
+
+struct State {
+    tabs: Vec<Tab>,
+    next_id: u64,
+}
+
+impl State {
+    fn find(&mut self, id: u64) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|tab| tab.id == id)
+    }
+}
+
+struct Link {
+    start: i32,
+    end: i32,
+    target: String,
+}
+
+/// Строка оглавления: что показать и куда это в буфере.
+#[derive(Clone)]
+struct Mark {
+    level: u8,
+    title: String,
+    offset: i32,
+    /// Настоящий заголовок автора или веха, которую поставили мы.
+    heading: bool,
+}
+
+fn build(app: &Application, start: Vec<String>) {
+    let ui = Ui {
+        window: ApplicationWindow::builder()
+            .application(app)
+            .title("Brevier")
+            .default_width(1100)
+            .default_height(800)
+            .build(),
+        notebook: gtk::Notebook::builder().scrollable(true).build(),
+        entry: gtk::Entry::builder()
+            .placeholder_text("адрес, gh:owner/repo или путь к .md")
+            .hexpand(true)
+            .build(),
+        back: gtk::Button::from_icon_name("go-previous-symbolic"),
+        forward: gtk::Button::from_icon_name("go-next-symbolic"),
+        contents: gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .build(),
+        contents_pane: gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .width_request(TOC_WIDTH)
+            .visible(false)
+            .build(),
+        show_contents: gtk::ToggleButton::builder()
+            .icon_name("view-list-symbolic")
+            .tooltip_text("Оглавление")
+            .active(true)
+            .sensitive(false)
+            .build(),
+    };
+    ui.contents_pane.set_child(Some(&ui.contents));
+    ui.notebook.set_hexpand(true);
+    ui.notebook.set_vexpand(true);
+    ui.back.set_sensitive(false);
+    ui.forward.set_sensitive(false);
+
+    let new_tab_button = gtk::Button::from_icon_name("tab-new-symbolic");
+    new_tab_button.set_tooltip_text(Some("Новая вкладка (Ctrl+T)"));
+
+    let header = gtk::HeaderBar::builder().build();
+    header.pack_start(&ui.back);
+    header.pack_start(&ui.forward);
+    header.pack_start(&new_tab_button);
+    header.pack_end(&ui.show_contents);
+    header.set_title_widget(Some(&ui.entry));
+    ui.window.set_titlebar(Some(&header));
+
+    let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    body.append(&ui.notebook);
+    body.append(&ui.contents_pane);
+    ui.window.set_child(Some(&body));
+
+    let state = Rc::new(RefCell::new(State {
+        tabs: Vec::new(),
+        next_id: 0,
+    }));
+
+    // ── сцепка виджетов с действиями
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.entry.clone().connect_activate(move |entry| {
+            let text = entry.text().to_string();
+            match address::parse(&text) {
+                Ok(address) => open_current(&ui, &state, address, true),
+                Err(error) => {
+                    let problem = describe(&error);
+                    if let Some(tab) = current(&ui, &state) {
+                        show_message(&tab, problem.headline, &problem.detail);
+                    }
+                }
+            }
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.back.clone().connect_clicked(move |_| step(&ui, &state, true));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.forward
+            .clone()
+            .connect_clicked(move |_| step(&ui, &state, false));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        new_tab_button.connect_clicked(move |_| {
+            new_tab(&ui, &state, None);
+        });
+    }
+    {
+        let pane = ui.contents_pane.clone();
+        ui.show_contents.clone().connect_toggled(move |button| {
+            pane.set_visible(button.is_active() && button.is_sensitive());
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.notebook
+            .clone()
+            .connect_switch_page(move |_, _, index| {
+                sync(&ui, &state, Some(index as usize));
+            });
+    }
+
+    keyboard(&ui, &state, app);
+
+    // ── стартовые вкладки: по адресу на каждый аргумент
+    let addresses: Vec<Address> = start
+        .iter()
+        .filter_map(|text| address::parse(text).ok())
+        .collect();
+    if addresses.is_empty() {
+        new_tab(&ui, &state, None);
+    } else {
+        for address in addresses {
+            new_tab(&ui, &state, Some(address));
+        }
+        // Открываем первую: читатель просил их в этом порядке, а не наоборот.
+        ui.notebook.set_current_page(Some(0));
+    }
+
+    ui.window.present();
+}
+
+/// Клавиши, которые GTK сам не разбирает.
+fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
+    let add = |name: &str, keys: &[&str], action: gio::SimpleAction| {
+        app.add_action(&action);
+        app.set_accels_for_action(&format!("app.{name}"), keys);
+    };
+
+    let new = gio::SimpleAction::new("new-tab", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        new.connect_activate(move |_, _| {
+            new_tab(&ui, &state, None);
+        });
+    }
+    add("new-tab", &["<Control>t"], new);
+
+    let close = gio::SimpleAction::new("close-tab", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        close.connect_activate(move |_, _| {
+            if let Some(index) = ui.notebook.current_page() {
+                close_tab(&ui, &state, index as usize);
+            }
+        });
+    }
+    add("close-tab", &["<Control>w"], close);
+
+    let focus = gio::SimpleAction::new("focus-address", None);
+    {
+        let ui = ui.clone();
+        focus.connect_activate(move |_, _| {
+            ui.entry.grab_focus();
+        });
+    }
+    add("focus-address", &["<Control>l"], focus);
+
+    let browser = gio::SimpleAction::new("open-in-browser", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        browser.connect_activate(move |_, _| {
+            let target = current_address(&ui, &state);
+            if let Some(target) = target {
+                open_in_system_browser(&target);
+            }
+        });
+    }
+    add("open-in-browser", &["<Control>o"], browser);
+}
+
+/// Открыть новую вкладку и, если дали адрес, сразу читать.
+fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
+    let view = gtk::TextView::builder()
+        .editable(false)
+        .cursor_visible(false)
+        .wrap_mode(gtk::WrapMode::Word)
+        .halign(gtk::Align::Center)
+        .top_margin(28)
+        .bottom_margin(80)
+        .build();
+    tags(&view.buffer());
+    view.set_width_request(measure_px());
+
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .hexpand(true)
+        .vexpand(true)
+        .child(&view)
+        .build();
+
+    let label = gtk::Label::builder()
+        .label("Новая вкладка")
+        .ellipsize(pango::EllipsizeMode::End)
+        .width_chars(TAB_LABEL as i32)
+        .max_width_chars(TAB_LABEL as i32)
+        .build();
+    let close = gtk::Button::builder()
+        .icon_name("window-close-symbolic")
+        .has_frame(false)
+        .build();
+    let corner = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    corner.append(&label);
+    corner.append(&close);
+
+    let id = {
+        let mut state = state.borrow_mut();
+        let id = state.next_id;
+        state.next_id += 1;
+        state.tabs.push(Tab {
+            id,
+            view: view.clone(),
+            label: label.clone(),
+            history: History::new(),
+            links: Vec::new(),
+            marks: Vec::new(),
+            generation: 0,
+        });
+        id
+    };
+
+    let index = ui.notebook.append_page(&scroller, Some(&corner));
+    ui.notebook.set_tab_reorderable(&scroller, true);
+    ui.notebook.set_show_tabs(ui.notebook.n_pages() > 1);
+    ui.notebook.set_current_page(Some(index));
+
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        close.connect_clicked(move |_| {
+            let index = state
+                .borrow()
+                .tabs
+                .iter()
+                .position(|tab| tab.id == id);
+            if let Some(index) = index {
+                close_tab(&ui, &state, index);
+            }
+        });
+    }
+
+    // ── клик по ссылке
+    let click = gtk::GestureClick::new();
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let view = view.clone();
+        click.connect_released(move |gesture, _, x, y| {
+            let target = {
+                let mut state = state.borrow_mut();
+                let Some(tab) = state.find(id) else { return };
+                link_at(&view, &tab.links, x, y)
+            };
+            let Some(target) = target else { return };
+            let Ok(address) = address::parse(&target) else {
+                return;
+            };
+            // Как в браузерах: Ctrl открывает в новой вкладке.
+            let modifiers = gesture.current_event_state();
+            if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                new_tab(&ui, &state, Some(address));
+            } else {
+                open(&ui, &state, id, address, true);
+            }
+        });
+    }
+    view.add_controller(click);
+
+    if let Some(address) = address {
+        open(ui, state, id, address, true);
+    } else {
+        sync(ui, state, None);
+        ui.entry.grab_focus();
+    }
+}
+
+fn close_tab(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
+    if index >= state.borrow().tabs.len() {
+        return;
+    }
+    // Уходя, бросаем загрузку: слушать её больше некому.
+    state.borrow_mut().tabs.remove(index).generation = u64::MAX;
+    ui.notebook.remove_page(Some(index as u32));
+
+    // Окно без вкладок показывать нечем — заводим чистую.
+    if state.borrow().tabs.is_empty() {
+        new_tab(ui, state, None);
+        return;
+    }
+    ui.notebook.set_show_tabs(ui.notebook.n_pages() > 1);
+    sync(ui, state, None);
+}
+
+fn current(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<gtk::TextView> {
+    let index = ui.notebook.current_page()? as usize;
+    state.borrow().tabs.get(index).map(|tab| tab.view.clone())
+}
+
+fn current_address(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<String> {
+    let index = ui.notebook.current_page()? as usize;
+    state
+        .borrow()
+        .tabs
+        .get(index)?
+        .history
+        .current()
+        .map(Address::display)
+}
+
+fn open_current(ui: &Ui, state: &Rc<RefCell<State>>, address: Address, remember: bool) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let id = match state.borrow().tabs.get(index as usize) {
+        Some(tab) => tab.id,
+        None => return,
+    };
+    open(ui, state, id, address, remember);
+}
+
+/// Шаг по истории текущей вкладки.
+fn step(ui: &Ui, state: &Rc<RefCell<State>>, backwards: bool) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let step = {
+        let mut state = state.borrow_mut();
+        let Some(tab) = state.tabs.get_mut(index as usize) else {
+            return;
+        };
+        let address = if backwards {
+            tab.history.back().cloned()
+        } else {
+            tab.history.forward().cloned()
+        };
+        address.map(|address| (tab.id, address))
+    };
+    if let Some((id, address)) = step {
+        open(ui, state, id, address, false);
+    }
+}
+
+/// Открыть адрес в названной вкладке.
+fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember: bool) {
+    let generation = {
+        let mut state = state.borrow_mut();
+        let Some(tab) = state.find(id) else { return };
+        if remember {
+            tab.history.visit(address.clone());
+        }
+        tab.generation += 1;
+        tab.label.set_text(&clip("Загружаю…", TAB_LABEL));
+        tab.generation
+    };
+    sync(ui, state, None);
+
+    if let Some(view) = view_of(state, id) {
+        show_message(&view, "Загружаю…", "");
+    }
+
+    let ui = ui.clone();
+    let state = state.clone();
+    glib::spawn_future_local(async move {
+        let loaded =
+            gio::spawn_blocking(move || brevier::open(&address, UserAgent::Honest)).await;
+
+        // Читатель уже ушёл на другую страницу — ответ никому не нужен.
+        if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {
+            return;
+        }
+        let Some(view) = view_of(&state, id) else { return };
+
+        match loaded {
+            Ok(Ok(document)) => {
+                let page = render(&view, &document);
+                let mut borrowed = state.borrow_mut();
+                if let Some(tab) = borrowed.find(id) {
+                    tab.label.set_text(&clip(&document.title, TAB_LABEL));
+                    tab.label.set_tooltip_text(Some(&document.title));
+                    tab.links = page.links;
+                    tab.marks = page.marks;
+                }
+                drop(borrowed);
+                sync(&ui, &state, None);
+            }
+            Ok(Err(error)) => {
+                let problem = describe(&error);
+                show_message(&view, problem.headline, &problem.detail);
+                let mut borrowed = state.borrow_mut();
+                if let Some(tab) = borrowed.find(id) {
+                    tab.label.set_text(&clip(problem.headline, TAB_LABEL));
+                    tab.links.clear();
+                    tab.marks.clear();
+                }
+                drop(borrowed);
+                sync(&ui, &state, None);
+            }
+            Err(_) => show_message(&view, "Загрузка сорвалась", ""),
+        }
+    });
+}
+
+fn view_of(state: &Rc<RefCell<State>>, id: u64) -> Option<gtk::TextView> {
+    state
+        .borrow()
+        .tabs
+        .iter()
+        .find(|tab| tab.id == id)
+        .map(|tab| tab.view.clone())
+}
+
+/// Привести окно в соответствие с открытой вкладкой.
+fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
+    let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
+    let Some(index) = index else { return };
+
+    let (address, can_back, can_forward, marks, title, view) = {
+        let borrowed = state.borrow();
+        let Some(tab) = borrowed.tabs.get(index) else {
+            return;
+        };
+        (
+            tab.history.current().map(Address::display).unwrap_or_default(),
+            tab.history.can_go_back(),
+            tab.history.can_go_forward(),
+            tab.marks.clone(),
+            tab.label.text().to_string(),
+            tab.view.clone(),
+        )
+    };
+
+    ui.entry.set_text(&address);
+    ui.back.set_sensitive(can_back);
+    ui.forward.set_sensitive(can_forward);
+    ui.window.set_title(Some(&if address.is_empty() {
+        "Brevier".to_owned()
+    } else {
+        format!("{title} — Brevier")
+    }));
+
+    fill_contents(&ui.contents, &marks, &view);
+    ui.show_contents.set_sensitive(!marks.is_empty());
+    ui.contents_pane
+        .set_visible(ui.show_contents.is_active() && !marks.is_empty());
+}
+
+/// Мера в пикселях. В GTK кегль задаётся пунктами, а ширина виджета
+/// пикселями; без пересчёта по разрешению в строке оказывалось бы разное
+/// число знаков на разных экранах.
+fn measure_px() -> i32 {
+    let dpi = gtk::Settings::for_display(&gtk::gdk::Display::default().unwrap()).gtk_xft_dpi();
+    // Настройка хранится в 1024-х долях точки; 0 или -1 значит «не задано».
+    let dpi = if dpi > 0 { f64::from(dpi) / 1024.0 } else { 96.0 };
+    (f64::from(MEASURE) * dpi / 72.0).round() as i32
+}
+
+/// Отдать адрес системному браузеру. Без внешних крейтов: это три команды,
+/// а каждая зависимость в проекте про безопасность стоит дороже трёх строк.
+fn open_in_system_browser(target: &str) {
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("open", &[])
+    } else if cfg!(target_os = "windows") {
+        ("cmd", &["/C", "start", ""])
+    } else {
+        ("xdg-open", &[])
+    };
+    let _ = std::process::Command::new(program)
+        .args(args)
+        .arg(target)
+        .spawn();
 }
 
 /// Гарнитуры из комплекта — в обход системной установки.
@@ -108,249 +654,6 @@ fn use_bundled_fonts() {
     }
 }
 
-/// Что читатель сейчас видит.
-struct Reader {
-    history: History,
-    /// Ссылки в тексте: где начинается, где кончается, куда ведёт.
-    links: Vec<Link>,
-    /// Куда прыгать по оглавлению. Смещения в буфере, а не доли высоты:
-    /// на GTK положение заголовка известно точно.
-    marks: Vec<Mark>,
-    /// Номер загрузки. Ответ брошенной страницы отличаем по нему:
-    /// отменить синхронный `ureq` нечем, но и слушать его уже незачем.
-    generation: u64,
-}
-
-struct Link {
-    start: i32,
-    end: i32,
-    target: String,
-}
-
-/// Строка оглавления: что показать и куда это в буфере.
-#[derive(Clone)]
-struct Mark {
-    level: u8,
-    title: String,
-    offset: i32,
-    /// Настоящий заголовок автора или веха, которую поставили мы.
-    heading: bool,
-}
-
-fn build(app: &Application, start: Option<String>) {
-    let reader = Rc::new(RefCell::new(Reader {
-        history: History::new(),
-        links: Vec::new(),
-        marks: Vec::new(),
-        generation: 0,
-    }));
-
-    let view = gtk::TextView::builder()
-        .editable(false)
-        .cursor_visible(false)
-        .wrap_mode(gtk::WrapMode::Word)
-        .halign(gtk::Align::Center)
-        .top_margin(28)
-        .bottom_margin(80)
-        .build();
-    tags(&view.buffer());
-    // Мера задана в кеглях, а кегль в GTK — пункты, не пиксели. Переводим
-    // по разрешению, которым рисует Pango, иначе на разных экранах
-    // в строке окажется разное число знаков.
-    let dpi = gtk::Settings::for_display(&gtk::gdk::Display::default().unwrap())
-        .gtk_xft_dpi();
-    // Настройка хранится в 1024-х долях точки; 0 или -1 значит «не задано».
-    let dpi = if dpi > 0 { f64::from(dpi) / 1024.0 } else { 96.0 };
-    let measure = f64::from(MEASURE) * dpi / 72.0;
-    view.set_width_request(measure.round() as i32);
-
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .hexpand(true)
-        .vexpand(true)
-        .child(&view)
-        .build();
-
-    let contents = gtk::ListBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .build();
-    let contents_pane = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .width_request(TOC_WIDTH)
-        .child(&contents)
-        .visible(false)
-        .build();
-
-    let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    body.append(&scroller);
-    body.append(&contents_pane);
-
-    let address_entry = gtk::Entry::builder()
-        .placeholder_text("адрес, gh:owner/repo или путь к .md")
-        .hexpand(true)
-        .build();
-
-    let back = gtk::Button::from_icon_name("go-previous-symbolic");
-    let forward = gtk::Button::from_icon_name("go-next-symbolic");
-    back.set_sensitive(false);
-    forward.set_sensitive(false);
-
-    let show_contents = gtk::ToggleButton::builder()
-        .icon_name("view-list-symbolic")
-        .tooltip_text("Оглавление")
-        .active(true)
-        .sensitive(false)
-        .build();
-    {
-        let pane = contents_pane.clone();
-        show_contents.connect_toggled(move |button| {
-            pane.set_visible(button.is_active() && button.is_sensitive());
-        });
-    }
-
-    let header = gtk::HeaderBar::builder().build();
-    header.pack_start(&back);
-    header.pack_start(&forward);
-    header.pack_end(&show_contents);
-    header.set_title_widget(Some(&address_entry));
-
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title("Brevier")
-        .default_width(980)
-        .default_height(760)
-        .child(&body)
-        .build();
-    window.set_titlebar(Some(&header));
-
-    // ── переходы
-    let open = {
-        let reader = reader.clone();
-        let view = view.clone();
-        let entry = address_entry.clone();
-        let window = window.clone();
-        let back = back.clone();
-        let forward = forward.clone();
-        let contents = contents.clone();
-        let contents_pane = contents_pane.clone();
-        let show_contents = show_contents.clone();
-        Rc::new(move |address: Address, remember: bool| {
-            if remember {
-                reader.borrow_mut().history.visit(address.clone());
-            }
-            entry.set_text(&address.display());
-            back.set_sensitive(reader.borrow().history.can_go_back());
-            forward.set_sensitive(reader.borrow().history.can_go_forward());
-
-            let generation = {
-                let mut state = reader.borrow_mut();
-                state.generation += 1;
-                state.generation
-            };
-            show_message(&view, "Загружаю…", "");
-
-            let reader = reader.clone();
-            let view = view.clone();
-            let window = window.clone();
-            let contents = contents.clone();
-            let contents_pane = contents_pane.clone();
-            let show_contents = show_contents.clone();
-            glib::spawn_future_local(async move {
-                let loaded = gio::spawn_blocking(move || {
-                    brevier::open(&address, UserAgent::Honest)
-                })
-                .await;
-
-                // Читатель уже ушёл на другую страницу — ответ никому не нужен.
-                if reader.borrow().generation != generation {
-                    return;
-                }
-                match loaded {
-                    Ok(Ok(document)) => {
-                        window.set_title(Some(&format!("{} — Brevier", document.title)));
-                        let page = render(&view, &document);
-                        fill_contents(&contents, &page.marks, &view);
-                        show_contents.set_sensitive(!page.marks.is_empty());
-                        contents_pane
-                            .set_visible(show_contents.is_active() && !page.marks.is_empty());
-                        let mut state = reader.borrow_mut();
-                        state.links = page.links;
-                        state.marks = page.marks;
-                    }
-                    Ok(Err(error)) => {
-                        let problem = describe(&error);
-                        window.set_title(Some("Brevier"));
-                        show_message(&view, problem.headline, &problem.detail);
-                        show_contents.set_sensitive(false);
-                        contents_pane.set_visible(false);
-                        let mut state = reader.borrow_mut();
-                        state.links.clear();
-                        state.marks.clear();
-                    }
-                    Err(_) => show_message(&view, "Загрузка сорвалась", ""),
-                }
-            });
-        })
-    };
-
-    {
-        let open = open.clone();
-        let view = view.clone();
-        address_entry.connect_activate(move |entry| {
-            match address::parse(&entry.text()) {
-                Ok(address) => open(address, true),
-                Err(error) => {
-                    let problem = describe(&error);
-                    show_message(&view, problem.headline, &problem.detail);
-                }
-            }
-        });
-    }
-    {
-        let open = open.clone();
-        let reader = reader.clone();
-        back.connect_clicked(move |_| {
-            let previous = reader.borrow_mut().history.back().cloned();
-            if let Some(address) = previous {
-                open(address, false);
-            }
-        });
-    }
-    {
-        let open = open.clone();
-        let reader = reader.clone();
-        forward.connect_clicked(move |_| {
-            let next = reader.borrow_mut().history.forward().cloned();
-            if let Some(address) = next {
-                open(address, false);
-            }
-        });
-    }
-
-    // ── клик по ссылке
-    let click = gtk::GestureClick::new();
-    {
-        let reader = reader.clone();
-        let open = open.clone();
-        let view = view.clone();
-        click.connect_released(move |_, _, x, y| {
-            let Some(target) = link_at(&view, &reader.borrow().links, x, y) else {
-                return;
-            };
-            if let Ok(address) = address::parse(&target) {
-                open(address, true);
-            }
-        });
-    }
-    view.add_controller(click);
-
-    window.present();
-
-    if let Some(Ok(address)) = start.map(|start| address::parse(&start)) {
-        open(address, true);
-    }
-}
-
 /// Ссылка под точкой окна, если она там есть.
 fn link_at(view: &gtk::TextView, links: &[Link], x: f64, y: f64) -> Option<String> {
     let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
@@ -371,9 +674,7 @@ fn show_message(view: &gtk::TextView, headline: &str, detail: &str) {
         buffer.insert(&mut end, "\n\n");
         buffer.insert(&mut end, detail);
     }
-}
-
-/// Теги — вся типографика статьи. Кегли и интерлиньяж те же, что были
+}/// Теги — вся типографика статьи. Кегли и интерлиньяж те же, что были
 /// в прошлом интерфейсе: они живут в ядре и от тулкита не зависят.
 fn tags(buffer: &gtk::TextBuffer) {
     let extra = ((LINE_HEIGHT - 1.0) * TEXT_SIZE).round() as i32;
