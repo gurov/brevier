@@ -12,6 +12,7 @@
 //! собираются ссылки, на нём же будет рендер.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use comrak::nodes::NodeValue;
 use comrak::{Arena, Options};
@@ -163,6 +164,24 @@ const UI_LABELS: &[&str] = &[
 /// это может быть подпись, а не подпись кнопки.
 const UI_LABELS_WITH_COLON: &[&str] = &["автор", "материалы по теме", "читайте также"];
 
+/// Хвостовые уведомления: призыв подписаться и просьба сообщить об опечатке.
+/// Это единственное место, где правило опирается на слова, а не на форму, —
+/// у такого блока формы нет, это обычный абзац в конце текста. Слова взяты
+/// общеязыковые, не по сайтам: «подписывайтесь» пишут все, кто ведёт канал.
+const TAIL_NOTICES: &[&str] = &[
+    "подписывайтесь",
+    "подписаться на",
+    "нашли ошибку",
+    "сообщить об ошибке",
+    "ctrl+enter",
+];
+
+/// Расширения файлов картинок: по ним отличаем «открыть в полном размере»
+/// от анонса чужой статьи.
+const IMAGE_SUFFIXES: &[&str] = &[
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".svg", ".bmp",
+];
+
 /// Единицы, которые превращают число в счётчик: просмотры и время чтения.
 const COUNTER_UNITS: &[&str] = &[
     "",
@@ -202,6 +221,7 @@ fn strip_chrome(md: &str) -> String {
     }
 
     drop_link_quotes(&mut lines);
+    drop_repeats(&mut lines);
     drop_dangling_tail(&mut lines);
 
     // На месте выброшенных строк остались дыры из пустых — их схлопывает tidy.
@@ -291,6 +311,50 @@ fn drop_link_quotes(lines: &mut Vec<&str>) {
     *lines = result;
 }
 
+/// На сколько строк назад смотрит поиск повтора.
+const REPEAT_WINDOW: usize = 12;
+
+/// Дословно повторённый рядом абзац — мусор вёрстки, а не текст автора.
+/// Сайты кладут анонс и в мета-описание, и первым абзацем (devby.io),
+/// печатают биографию автора под текстом дважды (shazoo.ru), повторяют
+/// заглушку `<video>` у каждого ролика (nngroup).
+///
+/// Оба ограничения правила выведены из поломок на корпусе, а не из осторожности.
+/// Окно в дюжину строк: на арзамасе один и тот же курс перечислен в двух
+/// разных списках за сотни строк друг от друга, и это не повтор вёрстки,
+/// а содержание страницы. Строки со скобками не трогаем совсем: там же ссылки
+/// разбиты на несколько строк, и выброшенное продолжение `](url)` оставляет
+/// в тексте открытую скобку — вместо мусора получается сломанная разметка.
+/// Заголовки, списки, таблицы, цитаты и код повторяются законно.
+fn drop_repeats(lines: &mut Vec<&str>) {
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    let mut result: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut in_code = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            result.push(line);
+            continue;
+        }
+        let text = line.trim();
+        let prose = !in_code
+            && text.chars().count() >= 40
+            && !text.contains(['[', ']'])
+            && !text.starts_with(['#', '-', '*', '>', '|', '!', '+']);
+        if !prose {
+            result.push(line);
+            continue;
+        }
+        let near = seen.insert(text, i).is_some_and(|was| i - was <= REPEAT_WINDOW);
+        if !near {
+            result.push(line);
+        }
+    }
+
+    *lines = result;
+}
+
 /// Подводка, у которой отняли продолжение: «Материалы по теме:» и ничего после.
 fn drop_dangling_tail(lines: &mut Vec<&str>) {
     while let Some(last) = lines.last() {
@@ -298,7 +362,9 @@ fn drop_dangling_tail(lines: &mut Vec<&str>) {
         let divider = matches!(raw, "" | "* * *" | "***" | "---" | "___" | "-----");
         let text = raw.trim_matches('*').trim();
         let dangling = text.ends_with(':') && text.chars().count() <= 80;
-        if dangling || divider {
+        let lowered = text.to_lowercase();
+        let notice = TAIL_NOTICES.iter().any(|phrase| lowered.contains(phrase));
+        if dangling || divider || notice {
             lines.pop();
         } else {
             break;
@@ -335,16 +401,21 @@ fn strip_teasers(md: &str) -> Teasers {
         .map(|(i, _)| i)
         .collect();
 
-    let Some(&first) = teasers.first() else {
-        return Teasers::Article(md.to_owned());
-    };
-
     let tail_starts = (lines.len() as f32 * TAIL_STARTS_AT) as usize;
-    if teasers.len() >= 3 && first < tail_starts {
+    if teasers.len() >= 3 && teasers[0] < tail_starts {
         return Teasers::Listing;
     }
 
-    let mut cut = first;
+    // Заголовок-анонс режет с любого места, виджет без заголовка — только
+    // в хвосте. Берём то, что встретилось раньше.
+    let widget = teaser_grid_start(&lines);
+    let (mut cut, label) = match (teasers.first().copied(), widget) {
+        (Some(heading), Some(at)) if at < heading => (at, true),
+        (Some(heading), _) => (heading, false),
+        (None, Some(at)) => (at, true),
+        (None, None) => return Teasers::Article(md.to_owned()),
+    };
+
     // Подводка к виджету («Here's another article just for you:») остаётся
     // висеть без продолжения — убираем и её.
     while cut > 0 {
@@ -355,9 +426,97 @@ fn strip_teasers(md: &str) -> Teasers {
             break;
         }
     }
+    // Шапка сетки анонсов: «Сейчас на главной», «### Новости», «Изображение
+    // в превью:» — заголовки и метки, которые без своей сетки повисают.
+    // Снимаем их подряд и только над сеткой: там короткий заголовок —
+    // это её название, а не последний раздел статьи.
+    while label && cut > 0 {
+        let bare = lines[cut - 1].trim().trim_start_matches('#').trim_matches('*').trim();
+        let heading = lines[cut - 1].trim_start().starts_with('#');
+        let short = bare.chars().count() <= 60 && !bare.ends_with(['.', '!', '?', '…']);
+        if bare.is_empty()
+            || (short && (heading || !bare.starts_with(['|', '>', '-', '`', '['])))
+        {
+            cut -= 1;
+        } else {
+            break;
+        }
+    }
 
     let kept = lines[..cut].join("\n");
     Teasers::Article(kept.trim_end().to_owned() + "\n")
+}
+
+/// Сколько анонсов подряд превращают хвост в сетку «читайте ещё».
+const TEASER_GRID: usize = 2;
+
+/// Где начинается сетка анонсов, которой заканчивается документ.
+///
+/// Форма узкая, и это выстрадано: первая версия считала анонсом всякий список
+/// со ссылками и всякую картинку-ссылку в хвосте — и съела «Stabilized APIs»
+/// у блога Rust, список примеров у nngroup, врезку с демо у alistapart.
+/// В живой статье и список ссылок, и картинка со ссылкой — нормальный текст.
+///
+/// Что отличает сетку: анонсов **несколько**, они картинки-ссылки на страницы,
+/// и они занимают **весь хвост** до конца документа. Подпись под анонсом
+/// принимаем, только если прямо над ней анонс, — иначе назад уехал бы
+/// последний абзац статьи.
+fn teaser_grid_start(lines: &[&str]) -> Option<usize> {
+    let mut start = None;
+    let mut teasers = 0;
+    let mut i = lines.len();
+
+    while i > 0 {
+        i -= 1;
+        if lines[i].trim().is_empty() {
+            continue;
+        }
+        if is_teaser_paragraph(lines[i]) {
+            teasers += 1;
+            start = Some(i);
+            continue;
+        }
+        let above = lines[..i].iter().rposition(|line| !line.trim().is_empty());
+        match above {
+            Some(a) if is_teaser_paragraph(lines[a]) => continue,
+            _ => break,
+        }
+    }
+
+    // Сетка на весь документ — это не статья с хвостом, и резать нечего.
+    start.filter(|&at| at > 0 && teasers >= TEASER_GRID)
+}
+
+/// Абзац, который целиком является ссылкой на другую страницу.
+///
+/// Картинка-ссылка встречается и внутри статьи — так делают «открыть
+/// в полном размере», и ixbt в одном документе даёт обе формы. Отличает их
+/// цель ссылки: файл картинки — это увеличение, страница — анонс.
+fn is_teaser_paragraph(line: &str) -> bool {
+    let text = line.trim();
+    if !text.starts_with('[') {
+        return false;
+    }
+    let Some(url) = sole_link_target(text) else {
+        return false;
+    };
+    !points_at_image(url)
+}
+
+/// Цель ссылки, если строка — ровно одна ссылка и ничего кроме неё.
+fn sole_link_target(text: &str) -> Option<&str> {
+    let inner = text.strip_prefix('[')?;
+    let (_, target) = inner.rsplit_once("](")?;
+    let url = target.strip_suffix(')')?;
+    if url.contains(char::is_whitespace) || !url.starts_with("http") {
+        return None;
+    }
+    Some(url)
+}
+
+fn points_at_image(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url).to_lowercase();
+    IMAGE_SUFFIXES.iter().any(|ext| path.ends_with(ext))
 }
 
 fn is_teaser_heading(line: &str) -> bool {
@@ -784,5 +943,70 @@ mod tests {
     fn scripts_are_dropped() {
         let md = from_html("<p>text</p><script>alert('x')</script>").unwrap();
         assert!(!md.contains("alert"), "скрипт просочился:\n{md}");
+    }
+}
+
+#[cfg(test)]
+mod tail_tests {
+    use super::*;
+
+    fn article(body: &str) -> String {
+        match strip_teasers(body) {
+            Teasers::Article(text) => strip_chrome(&text),
+            Teasers::Listing => "СТАТЬИ НЕТ".to_owned(),
+        }
+    }
+
+    #[test]
+    fn image_link_to_a_page_in_the_tail_is_a_teaser() {
+        assert!(is_teaser_paragraph(
+            "[![](https://cdn.example.com/preview/1.png?w=600&h=300)](https://example.com/live/other.html)"
+        ));
+    }
+
+    #[test]
+    fn tail_grid_of_image_links_is_cut() {
+        let doc = "# Заголовок\n\nПервый абзац статьи, достаточно длинный.\n\n[![](https://cdn.example.com/a.jpg?w=877)](https://cdn.example.com/a.jpg)\n\nВторой абзац статьи, тоже длинный и осмысленный.\n\n[![](https://cdn.example.com/p1.png?w=600)](https://example.com/live/one.html)\n\nАнонс первой чужой статьи.\n\n[![](https://cdn.example.com/p2.png?w=600)](https://example.com/live/two.html)\n\nАнонс второй чужой статьи.\n";
+        let out = article(doc);
+        assert!(out.contains("Второй абзац"), "тело статьи должно остаться:\n{out}");
+        assert!(!out.contains("one.html"), "анонсы должны уйти:\n{out}");
+        // Картинка-ссылка на саму картинку — это увеличение, она остаётся.
+        assert!(out.contains("a.jpg"), "увеличение картинки не трогаем:\n{out}");
+    }
+
+    #[test]
+    fn a_lone_image_link_is_not_a_grid() {
+        let doc = "# Заголовок\n\nТекст статьи, вполне себе содержательный абзац.\n\n[![](https://cdn.example.com/promo.png)](https://example.com/promo)\n\nПодпись к врезке, которая на самом деле часть статьи.\n";
+        let out = article(doc);
+        assert!(out.contains("promo"), "одна картинка-ссылка — не сетка:\n{out}");
+    }
+
+    #[test]
+    fn repeated_paragraph_next_to_itself_is_dropped() {
+        let doc = "# Заголовок\n\nЛид статьи, который сайт печатает дважды подряд.\n\n![](https://cdn.example.com/i.jpg)\n\nЛид статьи, который сайт печатает дважды подряд.\n";
+        assert_eq!(article(doc).matches("Лид статьи").count(), 1);
+    }
+
+    #[test]
+    fn a_far_away_repeat_is_content_not_chrome() {
+        let far = "\n\n".to_owned() + &vec!["Прочий текст статьи, довольно длинная строка."; 20].join("\n\n");
+        let line = "Название курса, повторённое в двух разных списках страницы.";
+        let doc = format!("# Заголовок\n\n{line}{far}\n\n{line}\n");
+        assert_eq!(article(&doc).matches(line).count(), 2);
+    }
+
+    #[test]
+    fn tail_notice_is_dropped() {
+        let doc = "# Заголовок\n\nПоследний абзац статьи, вполне осмысленный и длинный.\n\nНашли ошибку в тексте — выделите её и нажмите Ctrl+Enter.\n";
+        let out = article(doc);
+        assert!(!out.contains("Ctrl+Enter"), "хвостовое уведомление должно уйти:\n{out}");
+        assert!(out.contains("Последний абзац"));
+    }
+
+    #[test]
+    fn image_link_to_an_image_is_a_zoom_not_a_teaser() {
+        assert!(!is_teaser_paragraph(
+            "[![](https://cdn.example.com/small.jpg?w=877)](https://cdn.example.com/original.jpg)"
+        ));
     }
 }
