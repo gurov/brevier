@@ -12,7 +12,14 @@ pub mod extract;
 pub mod fetch;
 pub mod history;
 pub mod markdown;
+/// Картинки. За фичей `images`: корпусу M0 декодеры не нужны, а лишний
+/// код в бинарнике про безопасность — лишняя поверхность.
+#[cfg(feature = "images")]
+pub mod media;
 pub mod outline;
+/// Сохранение статьи на диск. За фичей `save`: zip нужен окну, не корпусу.
+#[cfg(feature = "save")]
+pub mod save;
 
 use std::path::Path;
 

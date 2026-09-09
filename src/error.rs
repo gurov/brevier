@@ -24,6 +24,10 @@ pub enum Error {
     EmptyExtraction,
     /// HTML → Markdown.
     Convert(std::io::Error),
+    /// Картинку не удалось разобрать: битые байты, неизвестный формат,
+    /// размер за пределом. Отдельно от `Convert`, потому что лечится
+    /// иначе: страница читается и без картинки.
+    Media(String),
 }
 
 impl Error {
@@ -37,6 +41,7 @@ impl Error {
             Error::UnsupportedContentType(_) | Error::TooLarge(_) => 4,
             Error::EmptyExtraction => 5,
             Error::Convert(_) => 6,
+            Error::Media(_) => 7,
         }
     }
 }
@@ -54,6 +59,7 @@ impl fmt::Display for Error {
             Error::TooLarge(n) => write!(f, "response body over the {n} byte limit"),
             Error::EmptyExtraction => write!(f, "no article found on the page"),
             Error::Convert(e) => write!(f, "html to markdown: {e}"),
+            Error::Media(e) => write!(f, "image: {e}"),
         }
     }
 }

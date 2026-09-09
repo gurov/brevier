@@ -22,7 +22,12 @@ path = "src/ui/gtk.rs"
 required-features = ["ui"]
 
 [features]
-ui = ["dep:gtk"]
+ui = ["dep:gtk", "images", "save"]
+# Декодеры картинок. Отдельной фичей, потому что корпус M0 гоняется
+# бинарником `brevier` и лишние крейты ему ни к чему.
+images = ["dep:image", "dep:resvg"]
+# Сохранение статьи на диск: markdown, а с картинками — zip.
+save = ["dep:zip"]
 
 [dependencies]
 comrak = { version = "0.55", default-features = false }
@@ -30,6 +35,9 @@ dom_query = "0.28"
 dom_smoothie = "0.18.1"
 gtk = { version = "0.11.4", package = "gtk4", optional = true }
 htmd = "0.5.5"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
+resvg = { version = "0.48.1", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
 url = "2.5.8"
+zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }

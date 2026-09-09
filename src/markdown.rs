@@ -689,6 +689,26 @@ pub fn links(md: &str) -> Vec<String> {
     seen
 }
 
+/// Картинки статьи, в порядке появления, без повторов.
+///
+/// Адрес отдаём ровно таким, как он записан в тексте: по нему потом идёт
+/// замена ссылки при сохранении, и «поправленный» адрес там не совпадёт.
+pub fn images(md: &str) -> Vec<String> {
+    let arena = Arena::new();
+    let root = comrak::parse_document(&arena, md, &options());
+
+    let mut seen: Vec<String> = Vec::new();
+    for node in root.descendants() {
+        let NodeValue::Image(image) = &node.data.borrow().value else {
+            continue;
+        };
+        if !image.url.trim().is_empty() && !seen.contains(&image.url) {
+            seen.push(image.url.clone());
+        }
+    }
+    seen
+}
+
 fn to_markdown(html: &str) -> Result<String, Error> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(SKIP.to_vec())
@@ -852,6 +872,12 @@ mod tests {
             from_html("<pre><code class=\"language-rust\">let x = 1;\nlet y = 2;</code></pre>")
                 .unwrap();
         assert_eq!(md, "```rust\nlet x = 1;\nlet y = 2;\n```\n");
+    }
+
+    #[test]
+    fn images_are_listed_once_and_in_order() {
+        let md = "![a](x.png)\n\n![b](https://e.com/y.jpg)\n\n![a again](x.png)";
+        assert_eq!(images(md), vec!["x.png", "https://e.com/y.jpg"]);
     }
 
     #[test]

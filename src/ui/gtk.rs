@@ -8,7 +8,7 @@
 //! Тулкит живёт только здесь. Разбор адреса, история, оглавление и тексты
 //! ошибок лежат в ядре и про GTK не знают ничего.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::gio;
@@ -19,8 +19,10 @@ use gtk::{Application, ApplicationWindow};
 
 use brevier::address::{self, Address};
 use brevier::failure::describe;
+use brevier::media::{self, Raster, Source};
+use brevier::save;
 use brevier::outline::{
-    HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE, clip, lead,
+    HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE, anchor, clip, lead,
 };
 use brevier::{Document, History, UserAgent};
 
@@ -34,6 +36,27 @@ const TOC_WIDTH: i32 = 260;
 const MIN_DOC_CHARS: i32 = 4000;
 /// Сколько знаков влезает на корешок вкладки.
 const TAB_LABEL: usize = 24;
+/// Сколько совпадений подсвечиваем. Дальше это уже не поиск, а заливка.
+const MAX_HITS: usize = 2000;
+/// Метка, которой прокручивают буфер: одна на все прыжки.
+const JUMP: &str = "brevier-jump";
+
+/// Цвета страницы. Заданы здесь, а не взяты у темы GTK, по той же причине,
+/// по которой в комплекте едут гарнитуры: вид задаёт читатель, а не система.
+/// Заодно уходит разнобой, из-за которого поля вокруг колонки текста красила
+/// тема, а саму колонку — виджет текста.
+const PAPER_DARK: &str = "#1b1d20";
+const INK_DARK: &str = "#d7d3cc";
+const PAPER_LIGHT: &str = "#fbfaf8";
+const INK_LIGHT: &str = "#22201d";
+/// Оглавлению отличаться можно: это не страница, а полка рядом с ней.
+const SHELF_DARK: &str = "#15171a";
+const SHELF_LIGHT: &str = "#f1efeb";
+/// Найденное поиском. Цвета одни на обе темы: подсветка обязана читаться
+/// и там и там, а жёлтый маркер узнаётся без объяснений.
+const FOUND: &str = "#f2d47e";
+const FOUND_HERE: &str = "#f6a13c";
+const FOUND_INK: &str = "#1c1a17";
 
 fn main() -> glib::ExitCode {
     brevier::init_crypto();
@@ -73,6 +96,15 @@ struct Ui {
     contents_pane: gtk::ScrolledWindow,
     show_contents: gtk::ToggleButton,
     dark_mode: gtk::ToggleButton,
+    save: gtk::Button,
+    /// Строка состояния внизу: что сохранилось, что не загрузилось.
+    notice: gtk::Label,
+    /// Поиск по странице: строка внизу окна, как в браузерах.
+    search: gtk::SearchBar,
+    needle: gtk::SearchEntry,
+    tally: gtk::Label,
+    /// Свои цвета страницы. Тема GTK красит окно, эта таблица — текст.
+    paint: gtk::CssProvider,
 }
 
 /// Вкладка: своя статья, своя история, своё место в тексте.
@@ -88,6 +120,13 @@ struct Tab {
     links: Vec<Link>,
     /// Куда прыгать по оглавлению — смещения в буфере, а не доли высоты.
     marks: Vec<Mark>,
+    /// Якоря заголовков: по ним находится место для ссылки вида `#anchor`.
+    anchors: Vec<(String, i32)>,
+    /// Места картинок в тексте.
+    shots: Vec<Shot>,
+    /// Что показано. Нужно для сохранения: на экране текст уже разложен
+    /// по буферу, а на диск ложится markdown.
+    document: Option<Document>,
     /// Номер загрузки. Ответ брошенной страницы отличаем по нему: отменить
     /// синхронный `ureq` нечем, но и слушать его уже незачем.
     generation: u64,
@@ -98,6 +137,30 @@ struct State {
     next_id: u64,
     /// Тема общая для всех вкладок: это настройка читателя, а не страницы.
     dark: bool,
+    /// Поиск: строка одна на окно, поэтому и состояние одно.
+    search: Search,
+}
+
+/// Что нашёл поиск и на котором совпадении стоим.
+#[derive(Default)]
+struct Search {
+    hits: Vec<(i32, i32)>,
+    at: usize,
+}
+
+/// Место картинки в тексте.
+///
+/// В буфере на её месте стоит якорь с контейнером: сначала в нём заглушка,
+/// после загрузки — сама картинка с подписью. Контейнер, а не текст, потому
+/// что подменять текст пришлось бы вместе со всеми смещениями ссылок,
+/// заголовков и совпадений поиска.
+#[derive(Clone)]
+struct Shot {
+    source: Source,
+    alt: String,
+    frame: gtk::Box,
+    /// Чтобы второй клик не начинал вторую загрузку той же картинки.
+    busy: Rc<Cell<bool>>,
 }
 
 impl State {
@@ -132,7 +195,7 @@ fn build(app: &Application, start: Vec<String>) {
             .build(),
         notebook: gtk::Notebook::builder().scrollable(true).build(),
         entry: gtk::Entry::builder()
-            .placeholder_text("адрес, gh:owner/repo или путь к .md")
+            .placeholder_text("address or path to a file")
             .hexpand(true)
             .build(),
         back: gtk::Button::from_icon_name("go-previous-symbolic"),
@@ -147,24 +210,50 @@ fn build(app: &Application, start: Vec<String>) {
             .build(),
         show_contents: gtk::ToggleButton::builder()
             .icon_name("view-list-symbolic")
-            .tooltip_text("Оглавление")
+            .tooltip_text("Contents")
             .active(true)
             .sensitive(false)
             .build(),
         dark_mode: gtk::ToggleButton::builder()
             .icon_name("weather-clear-night-symbolic")
-            .tooltip_text("Тёмная тема")
+            .tooltip_text("Dark theme")
             .active(true)
             .build(),
+        save: gtk::Button::from_icon_name("document-save-symbolic"),
+        notice: gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .margin_start(10)
+            .margin_end(10)
+            .margin_top(4)
+            .margin_bottom(4)
+            .visible(false)
+            .build(),
+        search: gtk::SearchBar::builder().build(),
+        needle: gtk::SearchEntry::builder()
+            .placeholder_text("find on page")
+            .hexpand(true)
+            .build(),
+        tally: gtk::Label::builder().width_chars(10).xalign(1.0).build(),
+        paint: gtk::CssProvider::new(),
     };
     ui.contents_pane.set_child(Some(&ui.contents));
+    ui.contents_pane.add_css_class("shelf");
+    ui.contents.add_css_class("shelf");
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &ui.paint,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
     ui.notebook.set_hexpand(true);
     ui.notebook.set_vexpand(true);
     ui.back.set_sensitive(false);
     ui.forward.set_sensitive(false);
 
     let new_tab_button = gtk::Button::from_icon_name("tab-new-symbolic");
-    new_tab_button.set_tooltip_text(Some("Новая вкладка (Ctrl+T)"));
+    new_tab_button.set_tooltip_text(Some("New tab (Ctrl+T)"));
 
     let header = gtk::HeaderBar::builder().build();
     header.pack_start(&ui.back);
@@ -172,20 +261,47 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_start(&new_tab_button);
     header.pack_end(&ui.dark_mode);
     header.pack_end(&ui.show_contents);
+    header.pack_end(&ui.save);
     header.set_title_widget(Some(&ui.entry));
     ui.window.set_titlebar(Some(&header));
+
+    let find_previous = gtk::Button::from_icon_name("go-up-symbolic");
+    let find_next = gtk::Button::from_icon_name("go-down-symbolic");
+    find_previous.set_tooltip_text(Some("Previous (Shift+Enter)"));
+    find_next.set_tooltip_text(Some("Next (Enter)"));
+    let find_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    find_row.set_margin_start(6);
+    find_row.set_margin_end(6);
+    find_row.append(&ui.needle);
+    find_row.append(&ui.tally);
+    find_row.append(&find_previous);
+    find_row.append(&find_next);
+    ui.search.set_child(Some(&find_row));
+    ui.search.set_show_close_button(true);
+    ui.search.connect_entry(&ui.needle);
 
     let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     body.append(&ui.notebook);
     body.append(&ui.contents_pane);
-    ui.window.set_child(Some(&body));
+    body.set_vexpand(true);
+
+    // Поиск внизу, как в браузерах: строка приходит и уходит, и двигать
+    // ради неё текст незачем.
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    root.append(&body);
+    root.append(&ui.search);
+    root.append(&ui.notice);
+    ui.window.set_child(Some(&root));
+    ui.notice.add_css_class("caption");
+    ui.save.set_tooltip_text(Some("Save the article (Ctrl+S)"));
 
     let state = Rc::new(RefCell::new(State {
         tabs: Vec::new(),
         next_id: 0,
         dark: true,
+        search: Search::default(),
     }));
-    apply_theme(&state);
+    apply_theme(&ui, &state);
 
     // ── сцепка виджетов с действиями
     {
@@ -224,11 +340,76 @@ fn build(app: &Application, start: Vec<String>) {
         });
     }
     {
+        let ui = ui.clone();
         let state = state.clone();
         ui.dark_mode.clone().connect_toggled(move |button| {
             state.borrow_mut().dark = button.is_active();
-            apply_theme(&state);
+            apply_theme(&ui, &state);
         });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.save.clone().connect_clicked(move |_| ask_where_to_save(&ui, &state));
+    }
+
+    // ── поиск по странице
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.needle.clone().connect_search_changed(move |entry| {
+            find(&ui, &state, &entry.text(), true);
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.needle.clone().connect_activate(move |_| step_hit(&ui, &state, true));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        find_next.connect_clicked(move |_| step_hit(&ui, &state, true));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        find_previous.connect_clicked(move |_| step_hit(&ui, &state, false));
+    }
+    {
+        // Shift+Enter — назад. Отдельным контроллером: у `SearchEntry`
+        // сигнал `activate` про модификаторы ничего не знает.
+        let needle = ui.needle.clone();
+        let ui = ui.clone();
+        let state = state.clone();
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+            if shift && matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter) {
+                step_hit(&ui, &state, false);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        needle.add_controller(keys);
+    }
+    {
+        // Строку закрыли — подсветку убираем: жёлтые пятна в тексте
+        // после поиска читать мешают.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.search
+            .clone()
+            .connect_search_mode_enabled_notify(move |bar| {
+                if bar.is_search_mode() {
+                    find(&ui, &state, &ui.needle.text(), true);
+                } else {
+                    find(&ui, &state, "", true);
+                    if let Some(view) = current(&ui, &state) {
+                        view.grab_focus();
+                    }
+                }
+            });
     }
     {
         let pane = ui.contents_pane.clone();
@@ -237,13 +418,18 @@ fn build(app: &Application, start: Vec<String>) {
         });
     }
     {
+        // Сигнал приходит посреди работы самого `Notebook`: страница ещё
+        // добавляется или удаляется, у нового ребёнка раскладки нет. Трогать
+        // виджеты в этот момент — способ получить от GTK жалобу на снимок
+        // виджета без раскладки, поэтому приводим окно в порядок следующим
+        // холостым ходом, когда перестройка закончится.
         let ui = ui.clone();
         let state = state.clone();
-        ui.notebook
-            .clone()
-            .connect_switch_page(move |_, _, index| {
-                sync(&ui, &state, Some(index as usize));
-            });
+        ui.notebook.clone().connect_switch_page(move |_, _, _| {
+            let ui = ui.clone();
+            let state = state.clone();
+            glib::idle_add_local_once(move || sync(&ui, &state, None));
+        });
     }
 
     keyboard(&ui, &state, app);
@@ -264,6 +450,7 @@ fn build(app: &Application, start: Vec<String>) {
     }
 
     ui.window.present();
+
 }
 
 /// Клавиши, которые GTK сам не разбирает.
@@ -316,6 +503,25 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         });
     }
     add("open-in-browser", &["<Control>o"], browser);
+
+    let find_action = gio::SimpleAction::new("find", None);
+    {
+        let ui = ui.clone();
+        find_action.connect_activate(move |_, _| {
+            ui.search.set_search_mode(true);
+            ui.needle.grab_focus();
+            ui.needle.select_region(0, -1);
+        });
+    }
+    add("find", &["<Control>f"], find_action);
+
+    let save = gio::SimpleAction::new("save", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        save.connect_activate(move |_, _| ask_where_to_save(&ui, &state));
+    }
+    add("save", &["<Control>s"], save);
 }
 
 /// Открыть новую вкладку и, если дали адрес, сразу читать.
@@ -338,8 +544,13 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         .child(&view)
         .build();
 
+    // Страница — одного цвета целиком: и колонка текста, и поля вокруг неё.
+    // Без этого поля красит тема окна, и получаются три полосы разного тона.
+    view.add_css_class("page");
+    scroller.add_css_class("page");
+
     let label = gtk::Label::builder()
-        .label("Новая вкладка")
+        .label("New tab")
         .ellipsize(pango::EllipsizeMode::End)
         .width_chars(TAB_LABEL as i32)
         .max_width_chars(TAB_LABEL as i32)
@@ -363,6 +574,9 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             history: History::new(),
             links: Vec::new(),
             marks: Vec::new(),
+            anchors: Vec::new(),
+            shots: Vec::new(),
+            document: None,
             generation: 0,
         });
         id
@@ -397,21 +611,35 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         let state = state.clone();
         let view = view.clone();
         click.connect_released(move |gesture, _, x, y| {
-            let target = {
-                let mut state = state.borrow_mut();
-                let Some(tab) = state.find(id) else { return };
-                link_at(&view, &tab.links, x, y)
-            };
-            let Some(target) = target else { return };
-            let Ok(address) = address::parse(&target) else {
-                return;
-            };
             // Как в браузерах: Ctrl и средняя кнопка открывают вкладкой,
             // обычный клик уводит на страницу.
             let ctrl = gesture
                 .current_event_state()
                 .contains(gtk::gdk::ModifierType::CONTROL_MASK);
             let middle = gesture.current_button() == gtk::gdk::BUTTON_MIDDLE;
+            let plain = !ctrl && !middle;
+
+            let target = {
+                let mut borrowed = state.borrow_mut();
+                let Some(tab) = borrowed.find(id) else { return };
+                let Some(target) = link_at(&view, &tab.links, x, y).map(|link| link.target.clone())
+                else {
+                    return;
+                };
+                // Ссылка внутрь этой же страницы — не загрузка, а прыжок
+                // по буферу: место заголовка мы знаем точно.
+                let here = tab.history.current().map(Address::display);
+                if plain
+                    && let Some(fragment) = fragment_of(&target, here.as_deref())
+                    && jump(&view, &tab.anchors, &fragment)
+                {
+                    return;
+                }
+                target
+            };
+            let Ok(address) = address::parse(&target) else {
+                return;
+            };
             if ctrl || middle {
                 new_tab(&ui, &state, Some(address));
             } else if gesture.current_button() == gtk::gdk::BUTTON_PRIMARY {
@@ -420,6 +648,29 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         });
     }
     view.add_controller(click);
+
+    // Курсор над ссылкой — палец, как в любом браузере. `GtkTextView` ставит
+    // себе курсор-текст сам, поэтому возвращаем его руками, когда ссылка
+    // кончилась.
+    let hover = gtk::EventControllerMotion::new();
+    {
+        let state = state.clone();
+        let view = view.clone();
+        // Движение мыши приходит на каждый пиксель, а смена курсора — работа
+        // для сервера: трогаем, только когда ссылка появилась или кончилась.
+        let was_over = Cell::new(false);
+        hover.connect_motion(move |_, x, y| {
+            let over = {
+                let mut borrowed = state.borrow_mut();
+                let Some(tab) = borrowed.find(id) else { return };
+                link_at(&view, &tab.links, x, y).is_some()
+            };
+            if over != was_over.replace(over) {
+                view.set_cursor_from_name(Some(if over { "pointer" } else { "text" }));
+            }
+        });
+    }
+    view.add_controller(hover);
 
     // Клавиши прокрутки висят на тексте, а не на окне: иначе пробел
     // и стрелки ломали бы набор адреса в строке.
@@ -529,6 +780,9 @@ fn step(ui: &Ui, state: &Rc<RefCell<State>>, backwards: bool) {
 
 /// Открыть адрес в названной вкладке.
 fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember: bool) {
+    // Решётку в адресе запоминаем здесь: серверу её не отправляют, и в адресе
+    // загруженного документа её уже не будет.
+    let anchor = anchor_of(&address);
     let generation = {
         let mut state = state.borrow_mut();
         let Some(tab) = state.find(id) else { return };
@@ -536,13 +790,13 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             tab.history.visit(address.clone());
         }
         tab.generation += 1;
-        tab.label.set_text(&clip("Загружаю…", TAB_LABEL));
+        tab.label.set_text(&clip("Loading…", TAB_LABEL));
         tab.generation
     };
     sync(ui, state, None);
 
     if let Some(view) = view_of(state, id) {
-        show_message(&view, "Загружаю…", "");
+        show_message(&view, "Loading…", "");
     }
 
     let ui = ui.clone();
@@ -559,7 +813,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
 
         match loaded {
             Ok(Ok(document)) => {
-                let page = render(&view, &document);
+                let page = render(&view, &document, anchor.as_deref());
                 view.grab_focus();
                 let mut borrowed = state.borrow_mut();
                 if let Some(tab) = borrowed.find(id) {
@@ -567,9 +821,17 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                     tab.label.set_tooltip_text(Some(&document.title));
                     tab.links = page.links;
                     tab.marks = page.marks;
+                    tab.anchors = page.anchors;
+                    tab.shots = page.shots.clone();
+                    tab.document = Some(document.clone());
                 }
                 drop(borrowed);
                 sync(&ui, &state, None);
+                // Заглушки оживляем после того, как вкладка узнала про них:
+                // клик по заглушке ищет вкладку по номеру.
+                for shot in &page.shots {
+                    place_shot(&ui, &state, id, shot, None);
+                }
             }
             Ok(Err(error)) => {
                 let problem = describe(&error);
@@ -579,11 +841,14 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                     tab.label.set_text(&clip(problem.headline, TAB_LABEL));
                     tab.links.clear();
                     tab.marks.clear();
+                    tab.anchors.clear();
+                    tab.shots.clear();
+                    tab.document = None;
                 }
                 drop(borrowed);
                 sync(&ui, &state, None);
             }
-            Err(_) => show_message(&view, "Загрузка сорвалась", ""),
+            Err(_) => show_message(&view, "The load fell through", ""),
         }
     });
 }
@@ -630,19 +895,47 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     ui.show_contents.set_sensitive(!marks.is_empty());
     ui.contents_pane
         .set_visible(ui.show_contents.is_active() && !marks.is_empty());
+
+    // Поиск открыт — ищем в том, что теперь на экране: подсветка и счётчик
+    // принадлежат странице, а не строке ввода.
+    if ui.search.is_search_mode() {
+        find(ui, state, &ui.needle.text(), true);
+    }
 }
 
-/// Тема. Кроме настройки GTK перекрашиваем свои теги: цвет ссылки
-/// и приглушённого текста — часть типографики, а не оформления окна,
-/// и в теге он задан явно.
-fn apply_theme(state: &Rc<RefCell<State>>) {
+/// Тема. Кроме настройки GTK перекрашиваем страницу и свои теги: цвет бумаги,
+/// ссылки и приглушённого текста — часть типографики, а не оформления окна.
+fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
     let dark = state.borrow().dark;
     if let Some(settings) = gtk::Settings::default() {
         settings.set_gtk_application_prefer_dark_theme(dark);
     }
+    ui.paint.load_from_data(&page_css(dark));
     for tab in &state.borrow().tabs {
         recolor(&tab.view.buffer(), dark);
     }
+}
+
+/// Цвета страницы одной таблицей.
+///
+/// Красим и текст, и то, что вокруг него: колонка узкая, поля по бокам широкие,
+/// и если их красит тема окна, страница получается из трёх полос разного тона.
+/// Оглавлению отличаться можно — оно рядом со страницей, а не на ней.
+fn page_css(dark: bool) -> String {
+    let (paper, ink, shelf) = if dark {
+        (PAPER_DARK, INK_DARK, SHELF_DARK)
+    } else {
+        (PAPER_LIGHT, INK_LIGHT, SHELF_LIGHT)
+    };
+    let (_, dim) = palette(dark);
+
+    format!(
+        ".page, .page text {{ background-color: {paper}; color: {ink}; }}\n\
+         .shelf, .shelf > viewport, .shelf list, .shelf row {{ background-color: {shelf}; }}\n\
+         .shot {{ border: 1px dashed {dim}; border-radius: 6px; padding: 20px 14px; \
+                  color: {dim}; margin: 6px 0; }}\n\
+         .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n"
+    )
 }
 
 fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
@@ -745,14 +1038,13 @@ fn use_bundled_fonts() {
 }
 
 /// Ссылка под точкой окна, если она там есть.
-fn link_at(view: &gtk::TextView, links: &[Link], x: f64, y: f64) -> Option<String> {
+fn link_at<'a>(view: &gtk::TextView, links: &'a [Link], x: f64, y: f64) -> Option<&'a Link> {
     let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
     let (iter, _) = view.iter_at_position(bx, by)?;
     let offset = iter.offset();
     links
         .iter()
         .find(|link| offset >= link.start && offset < link.end)
-        .map(|link| link.target.clone())
 }
 
 fn show_message(view: &gtk::TextView, headline: &str, detail: &str) {
@@ -821,6 +1113,17 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         &[("underline", &pango::Underline::Single), ("foreground", &link)],
     );
     buffer.create_tag(Some("dim"), &[("foreground", &dim)]);
+
+    // Подсветка поиска. Заводится последней: у тегов, наложенных позже,
+    // приоритет выше, и жёлтое ложится поверх цвета ссылки.
+    buffer.create_tag(
+        Some("found"),
+        &[("background", &FOUND), ("foreground", &FOUND_INK)],
+    );
+    buffer.create_tag(
+        Some("here"),
+        &[("background", &FOUND_HERE), ("foreground", &FOUND_INK)],
+    );
 }
 
 /// Разложить статью по буферу. Возвращает ссылки с их местами в тексте —
@@ -828,9 +1131,11 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
 struct Page {
     links: Vec<Link>,
     marks: Vec<Mark>,
+    anchors: Vec<(String, i32)>,
+    shots: Vec<Shot>,
 }
 
-fn render(view: &gtk::TextView, document: &Document) -> Page {
+fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Page {
     use comrak::{Arena, Options, parse_document};
 
     let buffer = view.buffer();
@@ -846,10 +1151,16 @@ fn render(view: &gtk::TextView, document: &Document) -> Page {
 
     let mut links = Vec::new();
     let mut marks = Vec::new();
+    let mut anchors = Vec::new();
+    let mut shots = Vec::new();
     let mut writer = Writer {
         buffer: &buffer,
+        view,
+        base: &document.address,
         links: &mut links,
         marks: &mut marks,
+        anchors: &mut anchors,
+        shots: &mut shots,
     };
 
     for node in root.children() {
@@ -857,16 +1168,79 @@ fn render(view: &gtk::TextView, document: &Document) -> Page {
     }
     let marks = contents_of(marks, buffer.char_count());
 
-    // Возврат наверх: новая статья начинается сначала. Через `idle`,
-    // потому что в момент вставки текста у виджета ещё нет раскладки
-    // и прокручивать ему некуда.
+    // Новая статья начинается сначала — или с того места, на которое указывала
+    // решётка в адресе. Через `idle`, потому что в момент вставки текста
+    // у виджета ещё нет раскладки и прокручивать ему некуда.
     buffer.place_cursor(&buffer.start_iter());
+    let target = target.map(anchor);
+    let places = anchors.clone();
     let view = view.clone();
     glib::idle_add_local_once(move || {
-        let mut start = view.buffer().start_iter();
-        view.scroll_to_iter(&mut start, 0.0, true, 0.0, 0.0);
+        let offset = target
+            .and_then(|want| places.iter().find(|(name, _)| *name == want))
+            .map(|(_, offset)| *offset);
+        scroll_to(&view, offset.unwrap_or(0), if offset.is_some() { 0.05 } else { 0.0 });
     });
-    Page { links, marks }
+    Page {
+        links,
+        marks,
+        anchors,
+        shots,
+    }
+}
+
+/// Прокрутить к месту в буфере.
+///
+/// Через метку, а не через итератор: сразу после отрисовки раскладки ещё нет,
+/// и `scroll_to_iter` промахивается — он меряет по тому, что успело
+/// разложиться. Прокрутка к метке умеет дождаться раскладки. Метка одна
+/// на буфер и переезжает с места на место: плодить их незачем.
+fn scroll_to(view: &gtk::TextView, offset: i32, align: f64) {
+    let buffer = view.buffer();
+    let place = buffer.iter_at_offset(offset);
+    let mark = match buffer.mark(JUMP) {
+        Some(mark) => {
+            buffer.move_mark(&mark, &place);
+            mark
+        }
+        None => buffer.create_mark(Some(JUMP), &place, true),
+    };
+    view.scroll_to_mark(&mark, 0.0, true, 0.0, align);
+}
+
+/// Ссылка внутрь открытой страницы: `#anchor` или полный адрес с решёткой,
+/// совпадающий с тем, что уже открыто.
+fn fragment_of(target: &str, here: Option<&str>) -> Option<String> {
+    if let Some(fragment) = target.strip_prefix('#') {
+        return (!fragment.is_empty()).then(|| fragment.to_owned());
+    }
+    let (page, fragment) = target.split_once('#')?;
+    let here = here?;
+    let here = here.split('#').next().unwrap_or(here);
+    (!fragment.is_empty() && page.trim_end_matches('/') == here.trim_end_matches('/'))
+        .then(|| fragment.to_owned())
+}
+
+/// Прыгнуть к якорю. `false` значит «такого заголовка на странице нет» —
+/// тогда ссылка отрабатывает как обычная.
+fn jump(view: &gtk::TextView, anchors: &[(String, i32)], fragment: &str) -> bool {
+    let want = anchor(fragment);
+    let Some((_, offset)) = anchors.iter().find(|(name, _)| *name == want) else {
+        return false;
+    };
+    scroll_to(view, *offset, 0.05);
+    true
+}
+
+/// Решётка в адресе, если она там есть.
+fn anchor_of(address: &Address) -> Option<String> {
+    match address {
+        Address::Web(url) => url
+            .split_once('#')
+            .map(|(_, fragment)| fragment.to_owned())
+            .filter(|fragment| !fragment.is_empty()),
+        _ => None,
+    }
 }
 
 /// Оглавление из того, что встретилось при отрисовке.
@@ -944,16 +1318,21 @@ fn fill_contents(list: &gtk::ListBox, marks: &[Mark], view: &gtk::TextView) {
         let Some(&offset) = offsets.get(row.index().max(0) as usize) else {
             return;
         };
-        let mut iter = view.buffer().iter_at_offset(offset);
         // Точное попадание: заголовок встаёт под верх окна.
-        view.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.05);
+        scroll_to(&view, offset, 0.05);
     });
 }
 
 struct Writer<'a> {
     buffer: &'a gtk::TextBuffer,
+    /// Нужен только ради картинок: виджет на якоре живёт в нём, а не в буфере.
+    view: &'a gtk::TextView,
+    /// Адрес документа: от него разворачиваются относительные ссылки картинок.
+    base: &'a Address,
     links: &'a mut Vec<Link>,
     marks: &'a mut Vec<Mark>,
+    anchors: &'a mut Vec<(String, i32)>,
+    shots: &'a mut Vec<Shot>,
 }
 
 impl Writer<'_> {
@@ -977,6 +1356,32 @@ impl Writer<'_> {
         self.buffer.text(&from, &to, false).to_string()
     }
 
+    /// Поставить в текст место под картинку.
+    ///
+    /// Картинка — блок: своя строка сверху и снизу. Внутри абзаца её ставят
+    /// редко, а разорванная надвое строка читается плохо.
+    fn shot(&mut self, source: Source, alt: String) {
+        if !self.buffer.end_iter().starts_line() {
+            self.put("\n", &[]);
+        }
+        let mut end = self.buffer.end_iter();
+        let place = self.buffer.create_child_anchor(&mut end);
+
+        let frame = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .width_request(measure_px())
+            .build();
+        self.view.add_child_at_anchor(&frame, &place);
+
+        self.shots.push(Shot {
+            source,
+            alt,
+            frame,
+            busy: Rc::new(Cell::new(false)),
+        });
+    }
+
     fn block<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, outer: &[&str]) {
         use comrak::nodes::NodeValue;
 
@@ -989,6 +1394,7 @@ impl Writer<'_> {
                 let start = self.offset();
                 self.inlines(node, &tags);
                 let title = self.text_since(start);
+                self.anchors.push((anchor(&title), start));
                 self.marks.push(Mark {
                     level: level as u8,
                     title,
@@ -1097,24 +1503,22 @@ impl Writer<'_> {
                     });
                 }
                 NodeValue::Image(image) => {
-                    // Картинки не грузим до M4: показываем, что здесь было
-                    // изображение, и подпись.
-                    let mut with = tags.to_vec();
-                    with.push("dim");
-                    let alt = plain_text(child);
-                    let label = if alt.trim().is_empty() {
-                        "[изображение]".to_owned()
-                    } else {
-                        format!("[изображение: {}]", alt.trim())
-                    };
-                    let start = self.offset();
-                    self.put(&label, &with);
-                    let end = self.offset();
-                    self.links.push(Link {
-                        start,
-                        end,
-                        target: image.url.clone(),
-                    });
+                    let alt = plain_text(child).trim().to_owned();
+                    match media::resolve(self.base, &image.url) {
+                        Some(source) => self.shot(source, alt),
+                        // Чего сами не достанем (`data:`, `blob:`) — оставляем
+                        // строкой: честнее пустой рамки.
+                        None => {
+                            let mut with = tags.to_vec();
+                            with.push("dim");
+                            let label = if alt.is_empty() {
+                                "[image]".to_owned()
+                            } else {
+                                format!("[image: {alt}]")
+                            };
+                            self.put(&label, &with);
+                        }
+                    }
                 }
                 NodeValue::SoftBreak => self.put(" ", tags),
                 NodeValue::LineBreak => self.put("\n", tags),
@@ -1122,6 +1526,377 @@ impl Writer<'_> {
             }
         }
     }
+}
+
+// ── картинки ────────────────────────────────────────────────────────────────
+
+/// Заглушка на месте картинки: нажмёшь — загрузится.
+///
+/// По умолчанию картинки не грузятся вовсе. Это не осторожность ради
+/// осторожности: после отказа от JS декодер картинок остаётся единственной
+/// серьёзной поверхностью атаки, и решение открыть её принимает читатель —
+/// кликом или переключателем в шапке.
+fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble: Option<&str>) {
+    let name = if shot.alt.is_empty() {
+        "image".to_owned()
+    } else {
+        format!("image: {}", clip(&shot.alt, 160))
+    };
+    let label = match trouble {
+        Some(trouble) => format!("{trouble}\n{name}"),
+        None => name,
+    };
+
+    let button = gtk::Button::builder().label(&label).has_frame(false).build();
+    button.add_css_class("shot");
+    button.set_cursor_from_name(Some("pointer"));
+    button.set_tooltip_text(Some(&shot.source.display()));
+    if let Some(text) = button.child().and_downcast::<gtk::Label>() {
+        text.set_wrap(true);
+        text.set_justify(gtk::Justification::Center);
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let shot = shot.clone();
+        button.connect_clicked(move |_| load_shot(&ui, &state, id, &shot));
+    }
+    fill(&shot.frame, &button);
+}
+
+/// Скачать и показать одну картинку.
+///
+/// Скачивание и декодирование уходят в отдельный поток: `ureq` синхронный,
+/// а схема на пол-мегабайта разбирается заметное время — окно не должно
+/// вставать на ней колом.
+fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
+    if shot.busy.replace(true) {
+        return;
+    }
+    let Some(generation) = state.borrow_mut().find(id).map(|tab| tab.generation) else {
+        return;
+    };
+
+    let waiting = gtk::Label::builder()
+        .label("loading the image…")
+        .wrap(true)
+        .build();
+    waiting.add_css_class("caption");
+    fill(&shot.frame, &waiting);
+
+    let width = measure_px().max(1) as u32;
+    let source = shot.source.clone();
+    let ui = ui.clone();
+    let state = state.clone();
+    let shot = shot.clone();
+
+    glib::spawn_future_local(async move {
+        let loaded =
+            gio::spawn_blocking(move || media::load(&source, UserAgent::Honest, width)).await;
+
+        // Вкладку успели увести на другую страницу — рамки уже нет.
+        if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {
+            return;
+        }
+        match loaded {
+            Ok(Ok(raster)) => show_shot(&shot, raster),
+            Ok(Err(error)) => {
+                shot.busy.set(false);
+                place_shot(&ui, &state, id, &shot, Some(describe(&error).headline));
+            }
+            Err(_) => {
+                shot.busy.set(false);
+                place_shot(&ui, &state, id, &shot, Some("The load fell through"));
+            }
+        }
+    });
+}
+
+/// Показать разобранную картинку с подписью.
+fn show_shot(shot: &Shot, raster: Raster) {
+    let bytes = glib::Bytes::from_owned(raster.rgba);
+    let texture = gtk::gdk::MemoryTexture::new(
+        raster.width as i32,
+        raster.height as i32,
+        // Ядро отдаёт непрозрачный RGBA: прозрачное оно кладёт на белое ещё
+        // при декодировании, иначе схема с чёрными линиями пропадала бы
+        // на тёмной теме.
+        gtk::gdk::MemoryFormat::R8g8b8a8,
+        &bytes,
+        raster.width as usize * 4,
+    );
+
+    let picture = gtk::Picture::for_paintable(&texture);
+    picture.set_cursor_from_name(Some("pointer"));
+    picture.set_can_shrink(true);
+    picture.set_halign(gtk::Align::Center);
+    picture.set_size_request(raster.width as i32, raster.height as i32);
+    picture.set_tooltip_text(Some(&shot.source.display()));
+
+    // Полный размер — работа системного браузера: у нас картинка ужата
+    // до меры текста.
+    let click = gtk::GestureClick::new();
+    let target = shot.source.display();
+    click.connect_released(move |_, _, _, _| open_in_system_browser(&target));
+    picture.add_controller(click);
+
+    fill(&shot.frame, &picture);
+    if !shot.alt.is_empty() {
+        // Подпись стоит под картинкой, а не под колонкой: узкая картинка
+        // висит по центру, и подпись у левого поля выглядела бы чужой.
+        let narrow = raster.width < measure_px() as u32;
+        let caption = gtk::Label::builder()
+            .label(&shot.alt)
+            .wrap(true)
+            .xalign(if narrow { 0.5 } else { 0.0 })
+            .justify(if narrow {
+                gtk::Justification::Center
+            } else {
+                gtk::Justification::Left
+            })
+            .build();
+        caption.add_css_class("caption");
+        shot.frame.append(&caption);
+    }
+}
+
+/// Единственный ребёнок рамки — тот, что дали.
+fn fill(frame: &gtk::Box, child: &impl IsA<gtk::Widget>) {
+    while let Some(old) = frame.first_child() {
+        frame.remove(&old);
+    }
+    frame.append(child);
+}
+
+// ── сохранение ──────────────────────────────────────────────────────────────
+
+/// Спросить, куда класть статью, и сохранить.
+///
+/// Имя предлагаем по документу: есть картинки — архив, нет — просто текст.
+/// Читатель волен переименовать, и расширение из диалога старше нашего.
+fn ask_where_to_save(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(document) = current_document(ui, state) else {
+        notice(ui, "Nothing to save yet");
+        return;
+    };
+
+    let chooser = gtk::FileChooserNative::new(
+        Some("Save article"),
+        Some(&ui.window),
+        gtk::FileChooserAction::Save,
+        Some("Save"),
+        Some("Cancel"),
+    );
+    chooser.set_current_name(&save::suggested_name(&document));
+
+    let chooser = Rc::new(chooser);
+    let alive = chooser.clone();
+    let ui = ui.clone();
+    chooser.connect_response(move |chooser, answer| {
+        // Ссылка на самого себя держит диалог в живых до ответа: местных
+        // переменных к этому моменту уже нет.
+        let _ = &alive;
+        chooser.hide();
+        if answer != gtk::ResponseType::Accept {
+            return;
+        }
+        let Some(path) = chooser.file().and_then(|file| file.path()) else {
+            return;
+        };
+        save_to(&ui, path, document.clone());
+    });
+    chooser.show();
+}
+
+/// Записать статью на диск.
+///
+/// Картинки для архива качаются здесь же, поэтому работа уходит в отдельный
+/// поток: десяток иллюстраций — это десяток сетевых запросов.
+fn save_to(ui: &Ui, path: std::path::PathBuf, document: Document) {
+    notice(ui, "Saving…");
+    let ui = ui.clone();
+
+    glib::spawn_future_local(async move {
+        let done = gio::spawn_blocking(move || {
+            save::write(&path, &document, UserAgent::Honest)
+        })
+        .await;
+
+        match done {
+            Ok(Ok(saved)) => {
+                let name = saved
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| saved.path.display().to_string());
+                let mut said = format!("Saved as {name}");
+                if saved.images > 0 {
+                    said.push_str(&format!(" · {}", count(saved.images, "image", "images")));
+                }
+                if saved.missed > 0 {
+                    said.push_str(&format!(
+                        " · {} could not be fetched",
+                        count(saved.missed, "image", "images")
+                    ));
+                }
+                notice(&ui, &said);
+            }
+            Ok(Err(error)) => notice(&ui, &format!("Not saved: {}", describe(&error).headline)),
+            Err(_) => notice(&ui, "Not saved: the write was interrupted"),
+        }
+    });
+}
+
+fn count(how_many: usize, one: &str, many: &str) -> String {
+    if how_many == 1 {
+        format!("{how_many} {one}")
+    } else {
+        format!("{how_many} {many}")
+    }
+}
+
+fn current_document(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<Document> {
+    let index = ui.notebook.current_page()? as usize;
+    state.borrow().tabs.get(index)?.document.clone()
+}
+
+/// Строка состояния внизу окна. Сама и убирается: сообщение о сохранении
+/// живёт ровно столько, сколько на него смотрят.
+fn notice(ui: &Ui, said: &str) {
+    ui.notice.set_text(said);
+    ui.notice.set_visible(!said.is_empty());
+
+    let label = ui.notice.clone();
+    let said = said.to_owned();
+    glib::timeout_add_local_once(std::time::Duration::from_secs(8), move || {
+        if label.text() == said {
+            label.set_text("");
+            label.set_visible(false);
+        }
+    });
+}
+
+// ── поиск по странице ───────────────────────────────────────────────────────
+
+/// Найти всё и встать на ближайшее совпадение.
+///
+/// `restart` значит «читатель поменял запрос»: тогда ищем от того места,
+/// которое он видит, а не от начала документа.
+fn find(ui: &Ui, state: &Rc<RefCell<State>>, needle: &str, restart: bool) {
+    let Some(view) = current(ui, state) else {
+        return;
+    };
+    let buffer = view.buffer();
+    let (start, end) = buffer.bounds();
+    buffer.remove_tag_by_name("found", &start, &end);
+    buffer.remove_tag_by_name("here", &start, &end);
+
+    let hits = if needle.is_empty() {
+        Vec::new()
+    } else {
+        hits_of(&buffer, needle)
+    };
+    for (from, to) in &hits {
+        buffer.apply_tag_by_name(
+            "found",
+            &buffer.iter_at_offset(*from),
+            &buffer.iter_at_offset(*to),
+        );
+    }
+
+    let at = if restart {
+        first_visible(&view, &hits)
+    } else {
+        state.borrow().search.at.min(hits.len().saturating_sub(1))
+    };
+    {
+        let mut borrowed = state.borrow_mut();
+        borrowed.search.hits = hits;
+        borrowed.search.at = at;
+    }
+
+    let empty = state.borrow().search.hits.is_empty();
+    if empty && !needle.is_empty() {
+        ui.needle.add_css_class("error");
+        ui.tally.set_text("no matches");
+    } else {
+        ui.needle.remove_css_class("error");
+        ui.tally.set_text("");
+    }
+    show_hit(ui, state, &view);
+}
+
+/// Шаг по совпадениям, по кругу: дойдя до низа, поиск начинает сверху.
+fn step_hit(ui: &Ui, state: &Rc<RefCell<State>>, forward: bool) {
+    let Some(view) = current(ui, state) else {
+        return;
+    };
+    {
+        let mut borrowed = state.borrow_mut();
+        let total = borrowed.search.hits.len();
+        if total == 0 {
+            return;
+        }
+        let at = borrowed.search.at;
+        borrowed.search.at = if forward {
+            (at + 1) % total
+        } else {
+            (at + total - 1) % total
+        };
+    }
+    show_hit(ui, state, &view);
+}
+
+/// Подсветить то совпадение, на котором стоим, и подвести к нему страницу.
+fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
+    let buffer = view.buffer();
+    let (start, end) = buffer.bounds();
+    buffer.remove_tag_by_name("here", &start, &end);
+
+    let (total, at, hit) = {
+        let borrowed = state.borrow();
+        (
+            borrowed.search.hits.len(),
+            borrowed.search.at,
+            borrowed.search.hits.get(borrowed.search.at).copied(),
+        )
+    };
+    let Some((from, to)) = hit else { return };
+
+    ui.tally.set_text(&format!("{} of {total}", at + 1));
+    buffer.apply_tag_by_name("here", &buffer.iter_at_offset(from), &buffer.iter_at_offset(to));
+    // Треть экрана сверху: совпадение нужно видеть в контексте, а не в самом
+    // верху окна.
+    scroll_to(view, from, 0.3);
+}
+
+fn hits_of(buffer: &gtk::TextBuffer, needle: &str) -> Vec<(i32, i32)> {
+    // Регистр не важен: читатель ищет слово, а не написание. `TEXT_ONLY`
+    // велит не спотыкаться о картинки — на их месте в буфере стоит якорь.
+    let flags = gtk::TextSearchFlags::CASE_INSENSITIVE | gtk::TextSearchFlags::TEXT_ONLY;
+    let mut hits = Vec::new();
+    let mut from = buffer.start_iter();
+
+    while let Some((start, end)) = from.forward_search(needle, flags, None) {
+        hits.push((start.offset(), end.offset()));
+        if hits.len() >= MAX_HITS {
+            break;
+        }
+        from = end;
+    }
+    hits
+}
+
+/// Первое совпадение, которое читатель уже видит или увидит ниже.
+fn first_visible(view: &gtk::TextView, hits: &[(i32, i32)]) -> usize {
+    let top = view.visible_rect();
+    let offset = view
+        .iter_at_location(top.x(), top.y())
+        .map(|iter| iter.offset())
+        .unwrap_or(0);
+    hits.iter()
+        .position(|(from, _)| *from >= offset)
+        .unwrap_or(0)
 }
 
 /// Текст узла без разметки — для подписей картинок и ячеек таблицы.

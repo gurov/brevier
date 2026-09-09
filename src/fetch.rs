@@ -94,6 +94,16 @@ pub struct Page {
     pub body: String,
 }
 
+/// Что скачали, кроме текста. Картинку разбирает `media`, а тракт загрузки —
+/// тот же, что у страниц: те же таймауты, те же корни, тот же User-Agent.
+#[derive(Debug)]
+pub struct Blob {
+    pub url: String,
+    /// Тип, как его назвал сервер. Верить ему на слово нельзя, но знать полезно.
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
 pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
     let mut target = url.to_owned();
     let mut hops = 0;
@@ -112,14 +122,32 @@ pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
     }
 }
 
-fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
-    let parsed = Url::parse(url).map_err(|_| Error::BadUrl(url.to_owned()))?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        other => return Err(Error::UnsupportedScheme(other.to_owned())),
-    }
+/// Скачать что-то нетекстовое: картинку. Content-type не проверяем здесь —
+/// это дело того, кто заказывал: `media` умеет отличить svg от png в байтах,
+/// а сервера ошибаются в заголовке чаще, чем хотелось бы.
+pub fn binary(url: &str, ua: UserAgent, accept: &str, limit: u64) -> Result<Blob, Error> {
+    let parsed = target(url)?;
 
-    let mut res: Response<Body> = agent(ua).get(parsed.as_str()).call()?;
+    let mut res: Response<Body> = agent(ua, accept).get(parsed.as_str()).call()?;
+    let final_url = res.get_uri().to_string();
+    let mime = res
+        .body()
+        .mime_type()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let bytes = res.body_mut().with_config().limit(limit).read_to_vec()?;
+
+    Ok(Blob {
+        url: final_url,
+        mime,
+        bytes,
+    })
+}
+
+fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
+    let parsed = target(url)?;
+
+    let mut res: Response<Body> = agent(ua, ACCEPT).get(parsed.as_str()).call()?;
 
     let final_url = res.get_uri().to_string();
     let mime = res
@@ -142,6 +170,19 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         kind,
         body,
     })
+}
+
+/// Что отправляем серверу. Схема проверяется здесь, и здесь же отрезается
+/// решётка: якорь — дело читателя, серверу его не показывают, а в строке
+/// запроса он ломает разбор адреса.
+fn target(url: &str) -> Result<Url, Error> {
+    let mut parsed = Url::parse(url).map_err(|_| Error::BadUrl(url.to_owned()))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(Error::UnsupportedScheme(other.to_owned())),
+    }
+    parsed.set_fragment(None);
+    Ok(parsed)
 }
 
 /// Страница-редирект: `<meta http-equiv="refresh" content="0; url=...">`.
@@ -201,7 +242,7 @@ fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
         .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
-fn agent(ua: UserAgent) -> Agent {
+fn agent(ua: UserAgent, accept: &str) -> Agent {
     let tls = TlsConfig::builder()
         // Никогда не трогать disable_verification, даже временно.
         .root_certs(RootCerts::PlatformVerifier)
@@ -209,7 +250,7 @@ fn agent(ua: UserAgent) -> Agent {
 
     Config::builder()
         .user_agent(ua.as_str())
-        .accept(ACCEPT)
+        .accept(accept)
         .tls_config(tls)
         .max_redirects(MAX_REDIRECTS)
         .timeout_global(Some(TIMEOUT))
@@ -262,6 +303,12 @@ mod tests {
     fn other_meta_tags_are_left_alone() {
         let page = html_page(r#"<meta http-equiv="content-type" content="text/html"><p>текст</p>"#);
         assert_eq!(meta_refresh(&page), None);
+    }
+
+    #[test]
+    fn the_fragment_never_reaches_the_server() {
+        let asked = target("https://e.com/a/b?q=1#place").unwrap();
+        assert_eq!(asked.as_str(), "https://e.com/a/b?q=1");
     }
 
     #[test]

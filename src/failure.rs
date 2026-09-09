@@ -1,19 +1,21 @@
 //! Ошибки на языке читателя.
 //!
 //! `Error` писан для stderr и прогона корпуса: там нужен код возврата
-//! и короткая английская строка. В окне нужно другое — что случилось,
-//! почему и что теперь делать. Тексты живут в ядре: они одни и те же
-//! для любого интерфейса.
+//! и короткая строка. В окне нужно другое — что случилось, почему и что
+//! теперь делать. Тексты живут в ядре: они одни и те же для любого
+//! интерфейса.
+//!
+//! Язык по умолчанию английский — это язык продукта. Перевод, когда до него
+//! дойдут руки, встанет ровно сюда: наружу отсюда торчат готовые строки,
+//! а не куски, которые интерфейс склеивает сам.
 
 use crate::Error;
 
 /// Ошибка, переведённая с языка тракта на язык читателя.
 ///
-/// `brevier::Error` писан для stderr и прогона корпуса: там нужен код возврата
-/// и короткая английская строка. В окне нужно другое — что случилось, почему
-/// и что теперь делать. Разные причины требуют разных ответов: сертификат
-/// лечится установкой корня в систему, 403 не лечится ничем, а пустое
-/// извлечение — повод сразу предложить системный браузер.
+/// Разные причины требуют разных ответов: сертификат лечится установкой корня
+/// в систему, 403 не лечится ничем, а пустое извлечение — повод сразу
+/// предложить системный браузер.
 #[derive(Debug, Clone)]
 pub struct Failure {
     pub headline: &'static str,
@@ -31,81 +33,81 @@ pub fn describe(error: &Error) -> Failure {
 
     match error {
         Error::BadUrl(what) if what.trim().is_empty() => failure(
-            "Пустой адрес",
-            "Напечатайте адрес страницы, `gh:owner/repo` или путь к файлу `.md`."
-                .to_owned(),
+            "Empty address",
+            "Type the address of a page, or the path to a `.md` file.".to_owned(),
             false,
         ),
         Error::BadUrl(what) => failure(
-            "Это не похоже на адрес",
-            format!("Brevier не понял, что открывать: «{what}». Полный адрес выглядит так: https://example.com/статья."),
+            "That does not look like an address",
+            format!("Brevier could not tell what to open: “{what}”. A full address looks like https://example.com/article."),
             false,
         ),
         Error::UnsupportedScheme(scheme) => failure(
-            "Такие адреса Brevier не открывает",
-            format!("Схема «{scheme}:» не поддерживается — Brevier ходит только по http и https."),
+            "Brevier does not open such addresses",
+            format!("The “{scheme}:” scheme is not supported — Brevier speaks http and https only."),
             true,
         ),
         // Проверку сертификата не обходим никогда, поэтому объясняем причину:
         // это не «сайт сломался», а нехватка корня в хранилище самой системы,
         // и лечится она установкой корня, а не флагом в читалке.
         Error::Network(e) if is_certificate_problem(&e.to_string()) => failure(
-            "Сертификату сайта нет доверия",
-            "Он подписан центром, которого нет в хранилище вашей операционной системы. Brevier доверяет тем же корням, что и вся система, и проверку не обходит. Если этот центр вам известен — поставьте его корень в систему."
+            "The site's certificate is not trusted",
+            "It is signed by an authority your operating system does not know. Brevier trusts the same roots as the rest of the system and never works around the check. If you do know that authority, install its root into the system."
                 .to_owned(),
             true,
         ),
         Error::Network(e) => failure(
-            "Не удалось соединиться",
-            format!("{e}. Возможно, хост недоступен или нет сети."),
+            "Could not connect",
+            format!("{e}. The host may be down, or there is no network."),
             true,
         ),
         Error::HttpStatus(401 | 403) => failure(
-            "Сайт не пустил",
-            "Страница закрыта для незалогиненных или отсечена защитой от ботов. Brevier не умеет логиниться — это осознанно."
+            "The site would not let us in",
+            "The page is closed to visitors who are not logged in, or a bot filter turned us away. Brevier cannot log in — that is deliberate."
                 .to_owned(),
             true,
         ),
         Error::HttpStatus(404 | 410) => failure(
-            "Страницы нет",
-            "Сервер отвечает, что по этому адресу ничего не лежит.".to_owned(),
+            "The page is not there",
+            "The server says nothing lives at this address.".to_owned(),
             true,
         ),
         Error::HttpStatus(429) => failure(
-            "Слишком часто",
-            "Сайт просит подождать: запросов с вашего адреса пришло больше, чем он готов принять."
+            "Too often",
+            "The site asks you to wait: it has had more requests from your address than it is willing to take."
                 .to_owned(),
             true,
         ),
         Error::HttpStatus(code) if *code >= 500 => failure(
-            "Сервер сайта отвечает ошибкой",
-            format!("Код {code}. Это не у вас — попробуйте позже."),
+            "The site's server answers with an error",
+            format!("Code {code}. This one is not on you — try again later."),
             true,
         ),
         Error::HttpStatus(code) => failure(
-            "Сервер ответил не тем",
-            format!("Код {code}."),
+            "The server answered with something else",
+            format!("Code {code}."),
             true,
         ),
         Error::UnsupportedContentType(kind) => failure(
-            "Это не страница",
-            format!("Сервер отдал «{kind}». Brevier читает html, markdown и простой текст; PDF, видео и картинки — работа для системного браузера."),
+            "This is not a page",
+            format!("The server sent “{kind}”. Brevier reads html, markdown and plain text; PDF, video and images are work for the system browser."),
             true,
         ),
         Error::TooLarge(limit) => failure(
-            "Страница слишком большая",
-            format!("Тело ответа не влезло в предел {limit} байт."),
+            "The page is too big",
+            format!("The body did not fit the {limit} byte limit."),
             true,
         ),
         Error::EmptyExtraction => failure(
-            "Статьи на странице нет",
-            "Так выглядят ленты, каталоги и сайты, которые собираются джаваскриптом. Brevier показывает статью или честно говорит, что её нет."
+            "There is no article on this page",
+            "That is how feeds, catalogues and sites assembled by JavaScript look. Brevier shows an article or says plainly that there is none."
                 .to_owned(),
             true,
         ),
-        Error::Convert(e) => failure(
-            "Не удалось разобрать страницу",
-            format!("{e}"),
+        Error::Convert(e) => failure("Could not make sense of the page", format!("{e}"), true),
+        Error::Media(what) => failure(
+            "The image cannot be shown",
+            format!("{what}. The text of the article is not affected."),
             true,
         ),
     }

@@ -46,6 +46,71 @@ pub struct Entry {
     pub offset: usize,
 }
 
+/// Якорь заголовка — то, чем он назван в ссылке `#…`.
+///
+/// Генераторы статических сайтов лепят якорь из текста заголовка по правилу
+/// github: в нижний регистр, пробелы в дефисы, знаки препинания долой.
+/// Точного стандарта нет, и мелкие расхождения между генераторами (два дефиса
+/// подряд там, где другой поставит один) лечатся тем, что через эту же функцию
+/// пропускается и то, что написано в ссылке: сравниваются не строки, а их
+/// приведённые виды.
+///
+/// Буквы не только латинские: кириллический якорь в ссылке приезжает
+/// процентными кодами, поэтому сначала раскодируем.
+pub fn anchor(text: &str) -> String {
+    let text = percent_decode(text);
+    let mut out = String::with_capacity(text.len());
+
+    for ch in text.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            out.extend(ch.to_lowercase());
+        } else if (ch == '-' || ch.is_whitespace()) && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
+/// `%D0%BF` → байты. Своё, потому что ради десяти строк тащить крейт незачем,
+/// а `url` наружу декодер не отдаёт.
+fn percent_decode(text: &str) -> String {
+    if !text.contains('%') {
+        return text.to_owned();
+    }
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match (bytes[i], bytes.get(i + 1), bytes.get(i + 2)) {
+            (b'%', Some(&high), Some(&low)) => match hex(high).zip(hex(low)) {
+                Some((high, low)) => {
+                    out.push(high * 16 + low);
+                    i += 3;
+                }
+                None => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
+            _ => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Сколько знаков влезает в строку на нашей мере.
 const CHARS_PER_LINE: f32 = MEASURE_IN_EMS * 2.0;
 /// Высота блока-картинки: кнопка-заглушка плюс подпись.
@@ -380,6 +445,20 @@ mod tests {
         let label = lead(long);
         assert!(label.chars().count() <= 42, "подпись слишком длинная: {label:?}");
         assert!(label.ends_with('…'));
+    }
+
+    #[test]
+    fn an_anchor_is_built_like_github_builds_it() {
+        assert_eq!(anchor("What the week was about"), "what-the-week-was-about");
+        assert_eq!(anchor("Don't panic!"), "dont-panic");
+        assert_eq!(anchor("  Method  "), "method");
+    }
+
+    #[test]
+    fn the_link_and_the_heading_meet_in_the_middle() {
+        // Слева — то, что стоит в href, справа — заголовок статьи.
+        assert_eq!(anchor("#a--b"), anchor("A — B"));
+        assert_eq!(anchor("%D0%9F%D0%BE%D0%B4%D0%B2%D0%BE%D0%B4%D0%BD%D1%8B%D0%B5"), "подводные");
     }
 
     #[test]
