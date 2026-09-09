@@ -157,6 +157,48 @@ fn meta_refresh_is_followed() {
 }
 
 #[test]
+fn refresh_loop_terminates() {
+    // Враждебный ввод: две страницы, отправляющие друг к другу. Бюджет обрывает
+    // хождение, читатель получает последнюю страницу, а не зависший процесс.
+    let base = serve(vec![
+        route(
+            "/ping",
+            "text/html",
+            r#"<meta http-equiv="refresh" content="0; url=/pong"><p>пинг</p>"#,
+        ),
+        route(
+            "/pong",
+            "text/html",
+            r#"<meta http-equiv="refresh" content="0; url=/ping"><p>понг</p>"#,
+        ),
+    ]);
+
+    let out = brevier(&[&format!("{base}/ping")]);
+    assert!(out.status.code().is_some(), "процесс не завершился сам");
+    let md = stdout(&out);
+    assert!(md.contains("пинг") || md.contains("понг"), "пусто:\n{md}");
+}
+
+#[test]
+fn raw_mode_skips_extraction() {
+    let base = serve(vec![route("/a", "text/html", ARTICLE)]);
+    let md = stdout(&brevier(&["--raw", &format!("{base}/a")]));
+
+    // Без Readability на месте остаётся и навигация, и подвал.
+    assert!(md.contains("главное меню сайта"), "нет навигации:\n{md}");
+    assert!(md.contains("копирайт"), "нет подвала:\n{md}");
+}
+
+#[test]
+fn html_mode_prints_extracted_html() {
+    let base = serve(vec![route("/a", "text/html", ARTICLE)]);
+    let out = stdout(&brevier(&["--html", &format!("{base}/a")]));
+
+    assert!(out.contains("<p"), "это не html:\n{out}");
+    assert!(!out.contains("копирайт"), "подвал не вырезан:\n{out}");
+}
+
+#[test]
 fn windows_1251_is_decoded() {
     // Доюникодный веб никуда не делся, и он в основном русскоязычный.
     let body = vec![
