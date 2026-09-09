@@ -72,6 +72,7 @@ struct Ui {
     contents: gtk::ListBox,
     contents_pane: gtk::ScrolledWindow,
     show_contents: gtk::ToggleButton,
+    dark_mode: gtk::ToggleButton,
 }
 
 /// Вкладка: своя статья, своя история, своё место в тексте.
@@ -95,6 +96,8 @@ struct Tab {
 struct State {
     tabs: Vec<Tab>,
     next_id: u64,
+    /// Тема общая для всех вкладок: это настройка читателя, а не страницы.
+    dark: bool,
 }
 
 impl State {
@@ -148,6 +151,11 @@ fn build(app: &Application, start: Vec<String>) {
             .active(true)
             .sensitive(false)
             .build(),
+        dark_mode: gtk::ToggleButton::builder()
+            .icon_name("weather-clear-night-symbolic")
+            .tooltip_text("Тёмная тема")
+            .active(true)
+            .build(),
     };
     ui.contents_pane.set_child(Some(&ui.contents));
     ui.notebook.set_hexpand(true);
@@ -162,6 +170,7 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_start(&ui.back);
     header.pack_start(&ui.forward);
     header.pack_start(&new_tab_button);
+    header.pack_end(&ui.dark_mode);
     header.pack_end(&ui.show_contents);
     header.set_title_widget(Some(&ui.entry));
     ui.window.set_titlebar(Some(&header));
@@ -174,7 +183,9 @@ fn build(app: &Application, start: Vec<String>) {
     let state = Rc::new(RefCell::new(State {
         tabs: Vec::new(),
         next_id: 0,
+        dark: true,
     }));
+    apply_theme(&state);
 
     // ── сцепка виджетов с действиями
     {
@@ -210,6 +221,13 @@ fn build(app: &Application, start: Vec<String>) {
         let state = state.clone();
         new_tab_button.connect_clicked(move |_| {
             new_tab(&ui, &state, None);
+        });
+    }
+    {
+        let state = state.clone();
+        ui.dark_mode.clone().connect_toggled(move |button| {
+            state.borrow_mut().dark = button.is_active();
+            apply_theme(&state);
         });
     }
     {
@@ -310,7 +328,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         .top_margin(28)
         .bottom_margin(80)
         .build();
-    tags(&view.buffer());
+    tags(&view.buffer(), state.borrow().dark);
     view.set_width_request(measure_px());
 
     let scroller = gtk::ScrolledWindow::builder()
@@ -371,7 +389,9 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
     }
 
     // ── клик по ссылке
-    let click = gtk::GestureClick::new();
+    // Ноль значит «все кнопки»: по умолчанию жест слушает только левую,
+    // и средняя до ссылки не доходила.
+    let click = gtk::GestureClick::builder().button(0).build();
     {
         let ui = ui.clone();
         let state = state.clone();
@@ -386,16 +406,52 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             let Ok(address) = address::parse(&target) else {
                 return;
             };
-            // Как в браузерах: Ctrl открывает в новой вкладке.
-            let modifiers = gesture.current_event_state();
-            if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            // Как в браузерах: Ctrl и средняя кнопка открывают вкладкой,
+            // обычный клик уводит на страницу.
+            let ctrl = gesture
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK);
+            let middle = gesture.current_button() == gtk::gdk::BUTTON_MIDDLE;
+            if ctrl || middle {
                 new_tab(&ui, &state, Some(address));
-            } else {
+            } else if gesture.current_button() == gtk::gdk::BUTTON_PRIMARY {
                 open(&ui, &state, id, address, true);
             }
         });
     }
     view.add_controller(click);
+
+    // Клавиши прокрутки висят на тексте, а не на окне: иначе пробел
+    // и стрелки ломали бы набор адреса в строке.
+    let keys = gtk::EventControllerKey::new();
+    {
+        let scroller = scroller.clone();
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                return glib::Propagation::Proceed;
+            }
+            let adjustment = scroller.vadjustment();
+            let page = adjustment.page_size();
+            let step = page / 10.0;
+            let to = match key {
+                gtk::gdk::Key::space | gtk::gdk::Key::Page_Down => {
+                    adjustment.value() + page * 0.9
+                }
+                gtk::gdk::Key::BackSpace | gtk::gdk::Key::Page_Up => {
+                    adjustment.value() - page * 0.9
+                }
+                gtk::gdk::Key::Down => adjustment.value() + step,
+                gtk::gdk::Key::Up => adjustment.value() - step,
+                gtk::gdk::Key::Home => adjustment.lower(),
+                gtk::gdk::Key::End => adjustment.upper(),
+                _ => return glib::Propagation::Proceed,
+            };
+            let highest = (adjustment.upper() - page).max(adjustment.lower());
+            adjustment.set_value(to.clamp(adjustment.lower(), highest));
+            glib::Propagation::Stop
+        });
+    }
+    view.add_controller(keys);
 
     if let Some(address) = address {
         open(ui, state, id, address, true);
@@ -504,6 +560,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
         match loaded {
             Ok(Ok(document)) => {
                 let page = render(&view, &document);
+                view.grab_focus();
                 let mut borrowed = state.borrow_mut();
                 if let Some(tab) = borrowed.find(id) {
                     tab.label.set_text(&clip(&document.title, TAB_LABEL));
@@ -573,6 +630,39 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     ui.show_contents.set_sensitive(!marks.is_empty());
     ui.contents_pane
         .set_visible(ui.show_contents.is_active() && !marks.is_empty());
+}
+
+/// Тема. Кроме настройки GTK перекрашиваем свои теги: цвет ссылки
+/// и приглушённого текста — часть типографики, а не оформления окна,
+/// и в теге он задан явно.
+fn apply_theme(state: &Rc<RefCell<State>>) {
+    let dark = state.borrow().dark;
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_application_prefer_dark_theme(dark);
+    }
+    for tab in &state.borrow().tabs {
+        recolor(&tab.view.buffer(), dark);
+    }
+}
+
+fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
+    let table = buffer.tag_table();
+    let (link, dim) = palette(dark);
+    if let Some(tag) = table.lookup("link") {
+        tag.set_property("foreground", link);
+    }
+    if let Some(tag) = table.lookup("dim") {
+        tag.set_property("foreground", dim);
+    }
+}
+
+/// Цвет ссылки и приглушённого текста под тему.
+fn palette(dark: bool) -> (&'static str, &'static str) {
+    if dark {
+        ("#88c0d0", "#8b98a5")
+    } else {
+        ("#0b6ea8", "#6b7480")
+    }
 }
 
 /// Мера в пикселях. В GTK кегль задаётся пунктами, а ширина виджета
@@ -676,7 +766,7 @@ fn show_message(view: &gtk::TextView, headline: &str, detail: &str) {
     }
 }/// Теги — вся типографика статьи. Кегли и интерлиньяж те же, что были
 /// в прошлом интерфейсе: они живут в ядре и от тулкита не зависят.
-fn tags(buffer: &gtk::TextBuffer) {
+fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     let extra = ((LINE_HEIGHT - 1.0) * TEXT_SIZE).round() as i32;
     let body = f64::from(TEXT_SIZE);
 
@@ -725,11 +815,12 @@ fn tags(buffer: &gtk::TextBuffer) {
         Some("quote"),
         &[("style", &pango::Style::Italic), ("left-margin", &24)],
     );
+    let (link, dim) = palette(dark);
     buffer.create_tag(
         Some("link"),
-        &[("underline", &pango::Underline::Single), ("foreground", &"#88c0d0")],
+        &[("underline", &pango::Underline::Single), ("foreground", &link)],
     );
-    buffer.create_tag(Some("dim"), &[("foreground", &"#8b98a5")]);
+    buffer.create_tag(Some("dim"), &[("foreground", &dim)]);
 }
 
 /// Разложить статью по буферу. Возвращает ссылки с их местами в тексте —

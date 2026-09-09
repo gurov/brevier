@@ -14,23 +14,15 @@ path = "src/lib.rs"
 name = "brevier"
 path = "src/main.rs"
 
-# Окно — отдельный бинарник за фичей: ядро и cli собираются без iced,
+# Окно — отдельный бинарник за фичей: ядро и cli собираются без GTK,
 # и корпус M0 продолжает гонять тот же `brevier`, что и раньше.
 [[bin]]
 name = "brevier-ui"
-path = "src/ui/main.rs"
+path = "src/ui/gtk.rs"
 required-features = ["ui"]
 
-# Переезд на GTK4 идёт вторым бинарником рядом с первым: iced остаётся
-# рабочим, пока новый интерфейс не догонит его, и сравнивать можно вживую.
-[[bin]]
-name = "brevier-gtk"
-path = "src/ui/gtk.rs"
-required-features = ["gtk"]
-
 [features]
-ui = ["dep:iced"]
-gtk = ["dep:gtk"]
+ui = ["dep:gtk"]
 
 [dependencies]
 comrak = { version = "0.55", default-features = false }
@@ -38,26 +30,6 @@ dom_query = "0.28"
 dom_smoothie = "0.18.1"
 gtk = { version = "0.11.4", package = "gtk4", optional = true }
 htmd = "0.5.5"
-# Набор фич iced собран вручную: это умолчания минус `wgpu`. Читалке нечего
-# считать на видеокарте, а программный рендерер снимает и зависимость от GPU,
-# и заметный кусок поверхности для CVE. `advanced-shaping` — не украшение:
-# без него не работают арабица, иврит и сложные индийские письменности.
-# x11/wayland — линуксовые; при выходе на macOS и Windows набор станет
-# зависимым от целевой платформы.
-iced = { version = "0.14.0", default-features = false, optional = true, features = [
-    "tiny-skia",
-    "markdown",
-    "advanced-shaping",
-    "thread-pool",
-    "linux-theme-detection",
-    "web-colors",
-    "crisp",
-    "x11",
-    "wayland",
-] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
 url = "2.5.8"
-
-[dev-dependencies]
-cosmic-text = "0.15"
