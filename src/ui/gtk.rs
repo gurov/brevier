@@ -116,6 +116,7 @@ struct Ui {
     contents_pane: gtk::ScrolledWindow,
     show_contents: gtk::ToggleButton,
     dark_mode: gtk::ToggleButton,
+    show_images: gtk::ToggleButton,
     save: gtk::Button,
     /// Строка состояния внизу: что сохранилось, что не загрузилось.
     notice: gtk::Label,
@@ -157,6 +158,10 @@ struct State {
     next_id: u64,
     /// Тема общая для всех вкладок: это настройка читателя, а не страницы.
     dark: bool,
+    /// Грузить ли картинки. Читатель волен выключить их кнопкой в панели:
+    /// после отказа от JS декодер картинок — единственная серьёзная
+    /// поверхность атаки, и закрыть её должно быть чем.
+    images: bool,
     /// Поиск: строка одна на окно, поэтому и состояние одно.
     search: Search,
 }
@@ -178,6 +183,9 @@ struct Search {
 struct Shot {
     source: Source,
     alt: String,
+    /// Картинка внутри строки — обычно формула: у неё нет ни своей строки,
+    /// ни подписи, и роста она с текст, а не с колонку.
+    inline: bool,
     frame: gtk::Box,
     /// Чтобы второй клик не начинал вторую загрузку той же картинки.
     busy: Rc<Cell<bool>>,
@@ -238,6 +246,11 @@ fn build(app: &Application, start: Vec<String>) {
             .icon_name("weather-clear-night-symbolic")
             .tooltip_text("Dark theme")
             .build(),
+        show_images: gtk::ToggleButton::builder()
+            .icon_name("image-x-generic-symbolic")
+            .tooltip_text("Images")
+            .active(true)
+            .build(),
         save: gtk::Button::from_icon_name("document-save-symbolic"),
         notice: gtk::Label::builder()
             .xalign(0.0)
@@ -280,6 +293,7 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_start(&new_tab_button);
     header.pack_end(&ui.dark_mode);
     header.pack_end(&ui.show_contents);
+    header.pack_end(&ui.show_images);
     header.pack_end(&ui.save);
     header.set_title_widget(Some(&ui.entry));
     ui.window.set_titlebar(Some(&header));
@@ -320,6 +334,7 @@ fn build(app: &Application, start: Vec<String>) {
         // Светлая по умолчанию: бумага белая, и читатель, которому нужно иначе,
         // жмёт кнопку.
         dark: false,
+        images: true,
         search: Search::default(),
     }));
     apply_theme(&ui, &state);
@@ -372,6 +387,16 @@ fn build(app: &Application, start: Vec<String>) {
         let ui = ui.clone();
         let state = state.clone();
         ui.save.clone().connect_clicked(move |_| ask_where_to_save(&ui, &state));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.show_images.clone().connect_toggled(move |button| {
+            state.borrow_mut().images = button.is_active();
+            if button.is_active() {
+                show_all_shots(&ui, &state);
+            }
+        });
     }
 
     // ── поиск по странице
@@ -854,8 +879,14 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 sync(&ui, &state, None);
                 // Заглушки оживляем после того, как вкладка узнала про них:
                 // клик по заглушке ищет вкладку по номеру.
+                let eager = state.borrow().images;
                 for shot in &page.shots {
                     place_shot(&ui, &state, id, shot, None);
+                    // Именно в эту вкладку, а не в открытую: пока страница
+                    // грузилась, читатель мог уйти смотреть другую.
+                    if eager {
+                        load_shot(&ui, &state, id, shot);
+                    }
                 }
                 for cell in &page.cells {
                     follow_cell_links(&ui, &state, id, cell);
@@ -983,6 +1014,7 @@ fn page_css(dark: bool) -> String {
          .shot {{ border: 1px dashed {dim}; border-radius: 6px; padding: 20px 14px; \
                   color: {dim}; margin: 6px 0; }}\n\
          .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n\
+         .formula {{ padding: 0 2px; min-height: 0; min-width: 0; color: {dim}; }}\n\
          .table {{ margin: 10px 0 14px 0; }}\n\
          .table separator {{ background-color: {rule}; min-height: 1px; }}\n\
          .th {{ font-weight: 500; }}\n"
@@ -1066,10 +1098,19 @@ fn rgb(hex: &str) -> [u8; 3] {
 /// пикселями; без пересчёта по разрешению в строке оказывалось бы разное
 /// число знаков на разных экранах.
 fn measure_px() -> i32 {
+    (f64::from(MEASURE) * dpi() / 72.0).round() as i32
+}
+
+/// Кегль текста в пикселях. Нужен не окну, а разбору svg: MathJax печатает
+/// формулы в `ex`, и они обязаны быть ростом с текст.
+fn text_px() -> f32 {
+    (f64::from(TEXT_SIZE) * dpi() / 72.0) as f32
+}
+
+fn dpi() -> f64 {
     let dpi = gtk::Settings::for_display(&gtk::gdk::Display::default().unwrap()).gtk_xft_dpi();
     // Настройка хранится в 1024-х долях точки; 0 или -1 значит «не задано».
-    let dpi = if dpi > 0 { f64::from(dpi) / 1024.0 } else { 96.0 };
-    (f64::from(MEASURE) * dpi / 72.0).round() as i32
+    if dpi > 0 { f64::from(dpi) / 1024.0 } else { 96.0 }
 }
 
 /// Отдать адрес системному браузеру. Без внешних крейтов: это три команды,
@@ -1639,14 +1680,38 @@ impl Writer<'_> {
     ///
     /// Картинка — блок: своя строка сверху и снизу. Внутри абзаца её ставят
     /// редко, а разорванная надвое строка читается плохо.
-    fn shot(&mut self, source: Source, alt: String) {
-        let frame = self.anchor();
+    fn shot(&mut self, source: Source, alt: String, inline: bool) {
+        let frame = if inline {
+            self.inline_anchor()
+        } else {
+            self.anchor()
+        };
         self.shots.push(Shot {
             source,
             alt,
+            inline,
             frame,
             busy: Rc::new(Cell::new(false)),
         });
+    }
+
+    /// Место под картинку прямо в строке: ни своей строки, ни ширины
+    /// в колонку — иначе формула разорвала бы предложение надвое.
+    fn inline_anchor(&mut self) -> gtk::Box {
+        let mut end = self.buffer.end_iter();
+        let place = self.buffer.create_child_anchor(&mut end);
+
+        let frame = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .valign(gtk::Align::Baseline)
+            // Пустая коробка нулевого размера в строке текста — та самая,
+            // на которую GTK жалуется «snapshot without a current allocation»:
+            // раскладку ей не дают, а рисовать пытаются. Просим хоть пиксель.
+            .width_request(1)
+            .height_request(1)
+            .build();
+        self.view.add_child_at_anchor(&frame, &place);
+        frame
     }
 
     /// Место под виджет в тексте: своя строка, рамка в меру.
@@ -1837,8 +1902,12 @@ impl Writer<'_> {
                 }
                 NodeValue::Image(image) => {
                     let alt = plain_text(child).trim().to_owned();
+                    // Картинка одна в абзаце — иллюстрация; окружённая
+                    // текстом — часть строки. Вторым способом в вебе набирают
+                    // формулы: википедия печатает их картинками MathJax.
+                    let inline = !stands_alone(child);
                     match media::resolve(self.base, &image.url) {
-                        Some(source) => self.shot(source, alt),
+                        Some(source) => self.shot(source, alt, inline),
                         // Чего сами не достанем (`data:`, `blob:`) — оставляем
                         // строкой: честнее пустой рамки.
                         None => {
@@ -1870,18 +1939,36 @@ impl Writer<'_> {
 /// серьёзной поверхностью атаки, и решение открыть её принимает читатель —
 /// кликом или переключателем в шапке.
 fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble: Option<&str>) {
-    let name = if shot.alt.is_empty() {
-        "image".to_owned()
+    // Формулу, которая всё равно сейчас загрузится, ждём пустой картинкой,
+    // а не подписью: подменять ребёнка в строке текста — способ получить
+    // от GTK жалобу на снимок виджета без раскладки. Ставим `GtkPicture`
+    // сразу и потом только меняем в нём холст.
+    if shot.inline && trouble.is_none() && state.borrow().images {
+        let waiting = gtk::Picture::new();
+        waiting.set_size_request(1, 1);
+        waiting.set_valign(gtk::Align::Baseline);
+        fill(&shot.frame, &waiting);
+        return;
+    }
+
+    let label = if shot.inline {
+        // Вместо формулы — её исходник: `{\displaystyle b}` читается плохо,
+        // но лучше пустого места, а «image:» в середине фразы — совсем мимо.
+        formula(&shot.alt)
     } else {
-        format!("image: {}", clip(&shot.alt, 160))
-    };
-    let label = match trouble {
-        Some(trouble) => format!("{trouble}\n{name}"),
-        None => name,
+        let name = if shot.alt.is_empty() {
+            "image".to_owned()
+        } else {
+            format!("image: {}", clip(&shot.alt, 160))
+        };
+        match trouble {
+            Some(trouble) => format!("{trouble}\n{name}"),
+            None => name,
+        }
     };
 
     let button = gtk::Button::builder().label(&label).has_frame(false).build();
-    button.add_css_class("shot");
+    button.add_css_class(if shot.inline { "formula" } else { "shot" });
     button.set_cursor_from_name(Some("pointer"));
     button.set_tooltip_text(Some(&shot.source.display()));
     if let Some(text) = button.child().and_downcast::<gtk::Label>() {
@@ -1897,6 +1984,25 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
     fill(&shot.frame, &button);
 }
 
+/// Загрузить все картинки открытой вкладки.
+fn show_all_shots(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let Some((id, shots)) = ({
+        let borrowed = state.borrow();
+        borrowed
+            .tabs
+            .get(index as usize)
+            .map(|tab| (tab.id, tab.shots.clone()))
+    }) else {
+        return;
+    };
+    for shot in &shots {
+        load_shot(ui, state, id, shot);
+    }
+}
+
 /// Скачать и показать одну картинку.
 ///
 /// Скачивание и декодирование уходят в отдельный поток: `ureq` синхронный,
@@ -1910,27 +2016,36 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         return;
     };
 
-    let waiting = gtk::Label::builder()
-        .label("loading the image…")
-        .wrap(true)
-        .build();
-    waiting.add_css_class("caption");
-    fill(&shot.frame, &waiting);
+    if !shot.inline {
+        let waiting = gtk::Label::builder()
+            .label("loading the image…")
+            .wrap(true)
+            .build();
+        waiting.add_css_class("caption");
+        fill(&shot.frame, &waiting);
+    }
 
-    let width = measure_px().max(1) as u32;
     let source = shot.source.clone();
-    // Прозрачное кладём на светлую бумагу, а не на белое: белая карточка
-    // посреди слоновой кости заметна, а схеме нужен только светлый фон —
-    // на тёмной теме тем более.
-    let paper = rgb(PAPER_LIGHT);
+    let look = media::Look {
+        width: measure_px().max(1) as u32,
+        // Прозрачное кладём на светлую бумагу, а не на белое: белая карточка
+        // посреди слоновой кости заметна, а схеме нужен только светлый фон —
+        // на тёмной теме тем более.
+        paper: rgb(PAPER_LIGHT),
+        font_size: text_px(),
+        fit: if shot.inline {
+            media::Fit::Natural
+        } else {
+            media::Fit::Column
+        },
+    };
     let ui = ui.clone();
     let state = state.clone();
     let shot = shot.clone();
 
     glib::spawn_future_local(async move {
         let loaded =
-            gio::spawn_blocking(move || media::load(&source, UserAgent::Honest, width, paper))
-                .await;
+            gio::spawn_blocking(move || media::load(&source, UserAgent::Honest, look)).await;
 
         // Вкладку успели увести на другую страницу — рамки уже нет.
         if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {
@@ -1950,6 +2065,24 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     });
 }
 
+/// Исходник формулы из `alt`: MathJax заворачивает его в `{\displaystyle …}`,
+/// и читателю эта обёртка не нужна.
+fn formula(alt: &str) -> String {
+    let text = alt.trim();
+    let inner = text
+        .strip_prefix('{')
+        .and_then(|text| text.strip_suffix('}'))
+        .map(|text| text.trim())
+        .and_then(|text| text.strip_prefix("\\displaystyle").or(Some(text)))
+        .unwrap_or(text);
+    let inner = inner.trim();
+    if inner.is_empty() {
+        "formula".to_owned()
+    } else {
+        inner.to_owned()
+    }
+}
+
 /// Показать разобранную картинку с подписью.
 fn show_shot(shot: &Shot, raster: Raster) {
     let bytes = glib::Bytes::from_owned(raster.rgba);
@@ -1964,11 +2097,32 @@ fn show_shot(shot: &Shot, raster: Raster) {
         raster.width as usize * 4,
     );
 
-    let picture = gtk::Picture::for_paintable(&texture);
-    picture.set_cursor_from_name(Some("pointer"));
+    // Если картинка уже стоит в рамке — меняем холст, а не ребёнка:
+    // перестройка дерева виджетов посреди кадра и есть та самая жалоба
+    // GTK на снимок без раскладки.
+    let picture = match shot.frame.first_child().and_downcast::<gtk::Picture>() {
+        Some(picture) => {
+            picture.set_paintable(Some(&texture));
+            picture
+        }
+        None => {
+            let picture = gtk::Picture::for_paintable(&texture);
+            fill(&shot.frame, &picture);
+            picture
+        }
+    };
     picture.set_can_shrink(true);
-    picture.set_halign(gtk::Align::Center);
     picture.set_size_request(raster.width as i32, raster.height as i32);
+    if shot.inline {
+        // Формула стоит в строке: её подпирает базовая линия, а не центр
+        // колонки, и открывать её отдельно незачем.
+        picture.set_valign(gtk::Align::Baseline);
+        picture.set_tooltip_text(Some(&formula(&shot.alt)));
+        return;
+    }
+
+    picture.set_cursor_from_name(Some("pointer"));
+    picture.set_halign(gtk::Align::Center);
     picture.set_tooltip_text(Some(&shot.source.display()));
 
     // Полный размер — работа системного браузера: у нас картинка ужата
@@ -1978,7 +2132,6 @@ fn show_shot(shot: &Shot, raster: Raster) {
     click.connect_released(move |_, _, _, _| open_in_system_browser(&target));
     picture.add_controller(click);
 
-    fill(&shot.frame, &picture);
     if !shot.alt.is_empty() {
         // Подпись стоит под картинкой, а не под колонкой: узкая картинка
         // висит по центру, и подпись у левого поля выглядела бы чужой.
@@ -2235,6 +2388,22 @@ fn first_visible(view: &gtk::TextView, hits: &[(i32, i32)]) -> usize {
     hits.iter()
         .position(|(from, _)| *from >= offset)
         .unwrap_or(0)
+}
+
+/// Стоит ли картинка в абзаце одна.
+///
+/// Соседи-пробелы не в счёт: `![схема](url)` на своей строке приходит
+/// с переводами строк по краям, и это всё равно иллюстрация.
+fn stands_alone<'n>(image: &'n comrak::nodes::AstNode<'n>) -> bool {
+    let empty = |node: Option<&'n comrak::nodes::AstNode<'n>>| match node {
+        None => true,
+        Some(node) => match &node.data.borrow().value {
+            NodeValue::Text(text) => text.trim().is_empty(),
+            NodeValue::SoftBreak | NodeValue::LineBreak => true,
+            _ => false,
+        },
+    };
+    empty(image.previous_sibling()) && empty(image.next_sibling())
 }
 
 /// Ячейка таблицы разметкой Pango: курсив, полужирный, код и ссылки.

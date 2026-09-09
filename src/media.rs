@@ -37,6 +37,32 @@ const MAX_SVG_SCALE: f32 = 2.0;
 
 const ACCEPT: &str = "image/*";
 
+/// Как вписывать картинку в страницу.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    /// Иллюстрация: занимает колонку. Мелкую векторную растягиваем — на то
+    /// она и векторная.
+    Column,
+    /// Своя величина: формула в строке текста должна быть ростом с текст,
+    /// а не с колонку. Уменьшаем, если не влезает, но не увеличиваем.
+    Natural,
+}
+
+/// Во что вписываем картинку. Собрано в одну структуру, потому что все три
+/// числа приходят из типографики окна и меняются вместе.
+#[derive(Debug, Clone, Copy)]
+pub struct Look {
+    /// Ширина колонки в точках.
+    pub width: u32,
+    /// Цвет бумаги под прозрачным; см. [`flatten`].
+    pub paper: [u8; 3],
+    /// Кегль текста в точках. В svg размеры бывают в `em` и `ex` — MathJax
+    /// именно так и печатает формулы, — и считаться они обязаны от текста,
+    /// рядом с которым картинка стоит.
+    pub font_size: f32,
+    pub fit: Fit,
+}
+
 /// Готовая к показу картинка: непрозрачный RGBA8 в нужной ширине.
 ///
 /// Непрозрачный намеренно — см. [`flatten`].
@@ -116,10 +142,8 @@ fn has_scheme(src: &str) -> bool {
     }
 }
 
-/// Достать и разобрать картинку, ужав её до ширины `width` в точках.
-///
-/// `paper` — цвет, на который ложится прозрачное; см. [`flatten`].
-pub fn load(source: &Source, ua: UserAgent, width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
+/// Достать и разобрать картинку.
+pub fn load(source: &Source, ua: UserAgent, look: Look) -> Result<Raster, Error> {
     let (bytes, mime) = match source {
         Source::Web(url) => {
             let blob = fetch::binary(url, ua, ACCEPT, MAX_IMAGE)?;
@@ -127,24 +151,19 @@ pub fn load(source: &Source, ua: UserAgent, width: u32, paper: [u8; 3]) -> Resul
         }
         Source::File(path) => (std::fs::read(path).map_err(Error::Convert)?, None),
     };
-    decode(&bytes, mime.as_deref(), width, paper)
+    decode(&bytes, mime.as_deref(), look)
 }
 
 /// Разобрать байты картинки. Тип берём из заголовка, но не верим ему
 /// на слово: сервер ошибается, а подпись svg видна в самих байтах.
-pub fn decode(
-    bytes: &[u8],
-    mime: Option<&str>,
-    width: u32,
-    paper: [u8; 3],
-) -> Result<Raster, Error> {
+pub fn decode(bytes: &[u8], mime: Option<&str>, look: Look) -> Result<Raster, Error> {
     if bytes.is_empty() {
         return Err(Error::Media("the server sent nothing".to_owned()));
     }
     if is_svg(bytes, mime) {
-        vector(bytes, width, paper)
+        vector(bytes, look)
     } else {
-        raster(bytes, width, paper)
+        raster(bytes, look)
     }
 }
 
@@ -158,7 +177,8 @@ fn is_svg(bytes: &[u8], mime: Option<&str>) -> bool {
     head.starts_with("<svg") || (head.starts_with("<?xml") && head.contains("<svg"))
 }
 
-fn raster(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
+fn raster(bytes: &[u8], look: Look) -> Result<Raster, Error> {
+    let width = look.width;
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| Error::Media(e.to_string()))?;
@@ -181,7 +201,7 @@ fn raster(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
     Ok(Raster {
         width,
         height,
-        rgba: flatten(rgba.into_raw(), paper),
+        rgba: flatten(rgba.into_raw(), look.paper),
     })
 }
 
@@ -198,9 +218,12 @@ fn limits() -> image::Limits {
 ///
 /// Тёмную тему схемы не увидят: `@media (prefers-color-scheme: dark)` внутри
 /// svg resvg не разбирает. Поэтому вектор кладём на белое, как и всё остальное.
-fn vector(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
+fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
     let options = usvg::Options {
         fontdb: fonts(),
+        // Кегль страницы: от него считаются `em` и `ex`, а формулы MathJax
+        // размечены именно ими.
+        font_size: look.font_size,
         ..Default::default()
     };
     let tree = usvg::Tree::from_data(bytes, &options).map_err(|e| Error::Media(e.to_string()))?;
@@ -209,7 +232,12 @@ fn vector(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
     if size.width() < 1.0 || size.height() < 1.0 {
         return Err(Error::Media("the image has no size".to_owned()));
     }
-    let scale = (width as f32 / size.width()).min(MAX_SVG_SCALE);
+    let room = look.width as f32 / size.width();
+    let scale = match look.fit {
+        Fit::Column => room.min(MAX_SVG_SCALE),
+        // Формула уже нужного роста: трогаем, только если не влезает.
+        Fit::Natural => room.min(1.0),
+    };
     let w = ((size.width() * scale).round() as u32).clamp(1, MAX_SIDE);
     let h = ((size.height() * scale).round() as u32).clamp(1, MAX_SIDE);
 
@@ -217,18 +245,65 @@ fn vector(bytes: &[u8], width: u32, paper: [u8; 3]) -> Result<Raster, Error> {
         tiny_skia::Pixmap::new(w, h).ok_or_else(|| Error::Media("no room for the canvas".to_owned()))?;
     // Бумагой — до отрисовки: дальше по всему холсту альфа единица, и премножение
     // tiny-skia совпадает с обычным RGBA. Иначе пришлось бы делить обратно.
-    pixmap.fill(tiny_skia::Color::from_rgba8(paper[0], paper[1], paper[2], 255));
+    pixmap.fill(tiny_skia::Color::from_rgba8(
+        look.paper[0],
+        look.paper[1],
+        look.paper[2],
+        255,
+    ));
     resvg::render(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
 
-    Ok(Raster {
+    let raster = Raster {
         width: w,
         height: h,
         rgba: pixmap.take(),
+    };
+    Ok(match look.fit {
+        Fit::Natural => trim(raster, look.paper),
+        Fit::Column => raster,
     })
+}
+
+/// Срезать пустые поля формулы сверху и снизу.
+///
+/// MathJax печатает формулу с запасом под базовой линией и объявляет его
+/// через `vertical-align`; браузер этот запас учитывает, а `GtkTextView`
+/// ставит виджет нижним краем ровно на базовую линию — и формула повисает
+/// над строкой. Пустые ряды снизу срезаны — и она садится куда надо; пустые
+/// сверху срезаны заодно, иначе формула раздувает межстрочный интервал.
+///
+/// Больше трети высоты не срезаем: пустая картинка должна остаться картинкой,
+/// а не исчезнуть.
+fn trim(raster: Raster, paper: [u8; 3]) -> Raster {
+    let row = raster.width as usize * 4;
+    let blank = |line: usize| {
+        raster.rgba[line * row..(line + 1) * row]
+            .chunks_exact(4)
+            .all(|pixel| pixel[..3] == paper[..])
+    };
+
+    let limit = (raster.height as usize) / 3;
+    let mut top = 0;
+    while top < limit && blank(top) {
+        top += 1;
+    }
+    let mut bottom = raster.height as usize;
+    while bottom > top + 1 && raster.height as usize - bottom < limit && blank(bottom - 1) {
+        bottom -= 1;
+    }
+    if top == 0 && bottom == raster.height as usize {
+        return raster;
+    }
+
+    Raster {
+        width: raster.width,
+        height: (bottom - top) as u32,
+        rgba: raster.rgba[top * row..bottom * row].to_vec(),
+    }
 }
 
 /// Шрифты для текста внутри svg. Системные: свои две гарнитуры комплекта
@@ -279,6 +354,15 @@ mod tests {
     /// Бумага, на которую в окне ложатся картинки.
     const PAPER: [u8; 3] = [250, 245, 234];
 
+    fn look(width: u32, fit: Fit) -> Look {
+        Look {
+            width,
+            paper: PAPER,
+            font_size: 22.0,
+            fit,
+        }
+    }
+
     fn web(url: &str) -> Address {
         Address::Web(url.to_owned())
     }
@@ -318,6 +402,46 @@ mod tests {
     }
 
     #[test]
+    fn a_formula_is_the_size_of_the_text_around_it() {
+        // MathJax печатает формулы в `ex`: рост зависит от кегля страницы,
+        // а не от колонки. Заодно проверяем, что вектор в своей величине
+        // не растягивается.
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2ex" height="4ex"
+                       viewBox="0 0 20 40"><rect width="20" height="40"/></svg>"#;
+        let big = decode(svg, None, look(1000, Fit::Natural)).unwrap();
+        let small = decode(
+            svg,
+            None,
+            Look {
+                font_size: 11.0,
+                ..look(1000, Fit::Natural)
+            },
+        )
+        .unwrap();
+
+        assert!(
+            big.height > small.height,
+            "кегль не влияет на формулу: {} против {}",
+            big.height,
+            small.height
+        );
+        assert!(big.width < 100, "формулу растянуло до колонки: {}", big.width);
+    }
+
+    #[test]
+    fn a_formula_sits_on_the_baseline() {
+        // Внизу картинки пустая полоса — запас MathJax под базовой линией.
+        // В своей величине она срезается, в колонке остаётся как есть.
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="30"
+                        viewBox="0 0 10 30"><rect width="10" height="22" fill="#000"/></svg>"##;
+        let natural = decode(svg, None, look(500, Fit::Natural)).unwrap();
+        let column = decode(svg, None, look(10, Fit::Column)).unwrap();
+
+        assert_eq!(natural.height, 22, "пустой низ не срезан");
+        assert_eq!(column.height, 30, "в колонке резать нечего");
+    }
+
+    #[test]
     fn transparency_ends_up_on_the_paper() {
         // Чёрный, полностью прозрачный, — становится цветом бумаги.
         assert_eq!(flatten(vec![0, 0, 0, 0], PAPER), PAPER.iter().copied().chain([255]).collect::<Vec<u8>>());
@@ -329,7 +453,7 @@ mod tests {
     fn a_vector_is_drawn_at_the_asked_width() {
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"
                        viewBox="0 0 100 50"><rect width="100" height="50" fill="#333"/></svg>"##;
-        let raster = decode(svg, Some("image/svg+xml"), 200, PAPER).unwrap();
+        let raster = decode(svg, Some("image/svg+xml"), look(200, Fit::Column)).unwrap();
         // Растягиваем не более чем вдвое.
         assert_eq!((raster.width, raster.height), (200, 100));
         assert_eq!(raster.rgba.len() as u32, raster.width * raster.height * 4);
