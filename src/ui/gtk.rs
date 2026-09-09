@@ -19,12 +19,15 @@ use gtk::{Application, ApplicationWindow};
 
 use brevier::address::{self, Address};
 use brevier::failure::describe;
-use brevier::outline::{HEADINGS, LINE_HEIGHT, MEASURE, TEXT_SIZE};
+use brevier::outline::{HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE, clip, lead};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
 const BODY_FAMILY: &str = "PT Serif";
 const MONO_FAMILY: &str = "PT Mono";
+const TOC_WIDTH: i32 = 260;
+/// Короче этого оглавление не нужно: страница и так вся под рукой.
+const MIN_DOC_CHARS: i32 = 4000;
 /// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
 const BOLD: i32 = 700;
 
@@ -110,6 +113,9 @@ struct Reader {
     history: History,
     /// Ссылки в тексте: где начинается, где кончается, куда ведёт.
     links: Vec<Link>,
+    /// Куда прыгать по оглавлению. Смещения в буфере, а не доли высоты:
+    /// на GTK положение заголовка известно точно.
+    marks: Vec<Mark>,
     /// Номер загрузки. Ответ брошенной страницы отличаем по нему:
     /// отменить синхронный `ureq` нечем, но и слушать его уже незачем.
     generation: u64,
@@ -121,10 +127,21 @@ struct Link {
     target: String,
 }
 
+/// Строка оглавления: что показать и куда это в буфере.
+#[derive(Clone)]
+struct Mark {
+    level: u8,
+    title: String,
+    offset: i32,
+    /// Настоящий заголовок автора или веха, которую поставили мы.
+    heading: bool,
+}
+
 fn build(app: &Application, start: Option<String>) {
     let reader = Rc::new(RefCell::new(Reader {
         history: History::new(),
         links: Vec::new(),
+        marks: Vec::new(),
         generation: 0,
     }));
 
@@ -149,9 +166,24 @@ fn build(app: &Application, start: Option<String>) {
 
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .hexpand(true)
         .vexpand(true)
         .child(&view)
         .build();
+
+    let contents = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    let contents_pane = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .width_request(TOC_WIDTH)
+        .child(&contents)
+        .visible(false)
+        .build();
+
+    let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    body.append(&scroller);
+    body.append(&contents_pane);
 
     let address_entry = gtk::Entry::builder()
         .placeholder_text("адрес, gh:owner/repo или путь к .md")
@@ -163,9 +195,23 @@ fn build(app: &Application, start: Option<String>) {
     back.set_sensitive(false);
     forward.set_sensitive(false);
 
+    let show_contents = gtk::ToggleButton::builder()
+        .icon_name("view-list-symbolic")
+        .tooltip_text("Оглавление")
+        .active(true)
+        .sensitive(false)
+        .build();
+    {
+        let pane = contents_pane.clone();
+        show_contents.connect_toggled(move |button| {
+            pane.set_visible(button.is_active() && button.is_sensitive());
+        });
+    }
+
     let header = gtk::HeaderBar::builder().build();
     header.pack_start(&back);
     header.pack_start(&forward);
+    header.pack_end(&show_contents);
     header.set_title_widget(Some(&address_entry));
 
     let window = ApplicationWindow::builder()
@@ -173,7 +219,7 @@ fn build(app: &Application, start: Option<String>) {
         .title("Brevier")
         .default_width(980)
         .default_height(760)
-        .child(&scroller)
+        .child(&body)
         .build();
     window.set_titlebar(Some(&header));
 
@@ -185,6 +231,9 @@ fn build(app: &Application, start: Option<String>) {
         let window = window.clone();
         let back = back.clone();
         let forward = forward.clone();
+        let contents = contents.clone();
+        let contents_pane = contents_pane.clone();
+        let show_contents = show_contents.clone();
         Rc::new(move |address: Address, remember: bool| {
             if remember {
                 reader.borrow_mut().history.visit(address.clone());
@@ -203,6 +252,9 @@ fn build(app: &Application, start: Option<String>) {
             let reader = reader.clone();
             let view = view.clone();
             let window = window.clone();
+            let contents = contents.clone();
+            let contents_pane = contents_pane.clone();
+            let show_contents = show_contents.clone();
             glib::spawn_future_local(async move {
                 let loaded = gio::spawn_blocking(move || {
                     brevier::open(&address, UserAgent::Honest)
@@ -216,14 +268,24 @@ fn build(app: &Application, start: Option<String>) {
                 match loaded {
                     Ok(Ok(document)) => {
                         window.set_title(Some(&format!("{} — Brevier", document.title)));
-                        let links = render(&view, &document);
-                        reader.borrow_mut().links = links;
+                        let page = render(&view, &document);
+                        fill_contents(&contents, &page.marks, &view);
+                        show_contents.set_sensitive(!page.marks.is_empty());
+                        contents_pane
+                            .set_visible(show_contents.is_active() && !page.marks.is_empty());
+                        let mut state = reader.borrow_mut();
+                        state.links = page.links;
+                        state.marks = page.marks;
                     }
                     Ok(Err(error)) => {
                         let problem = describe(&error);
                         window.set_title(Some("Brevier"));
                         show_message(&view, problem.headline, &problem.detail);
-                        reader.borrow_mut().links.clear();
+                        show_contents.set_sensitive(false);
+                        contents_pane.set_visible(false);
+                        let mut state = reader.borrow_mut();
+                        state.links.clear();
+                        state.marks.clear();
                     }
                     Err(_) => show_message(&view, "Загрузка сорвалась", ""),
                 }
@@ -284,10 +346,8 @@ fn build(app: &Application, start: Option<String>) {
 
     window.present();
 
-    if let Some(start) = start {
-        if let Ok(address) = address::parse(&start) {
-            open(address, true);
-        }
+    if let Some(Ok(address)) = start.map(|start| address::parse(&start)) {
+        open(address, true);
     }
 }
 
@@ -373,7 +433,12 @@ fn tags(buffer: &gtk::TextBuffer) {
 
 /// Разложить статью по буферу. Возвращает ссылки с их местами в тексте —
 /// по ним потом опознаётся клик.
-fn render(view: &gtk::TextView, document: &Document) -> Vec<Link> {
+struct Page {
+    links: Vec<Link>,
+    marks: Vec<Mark>,
+}
+
+fn render(view: &gtk::TextView, document: &Document) -> Page {
     use comrak::{Arena, Options, parse_document};
 
     let buffer = view.buffer();
@@ -388,14 +453,17 @@ fn render(view: &gtk::TextView, document: &Document) -> Vec<Link> {
     let root = parse_document(&arena, &document.markdown, &options);
 
     let mut links = Vec::new();
+    let mut marks = Vec::new();
     let mut writer = Writer {
         buffer: &buffer,
         links: &mut links,
+        marks: &mut marks,
     };
 
     for node in root.children() {
         writer.block(node, &[]);
     }
+    let marks = contents_of(marks, buffer.char_count());
 
     // Возврат наверх: новая статья начинается сначала. Через `idle`,
     // потому что в момент вставки текста у виджета ещё нет раскладки
@@ -406,12 +474,94 @@ fn render(view: &gtk::TextView, document: &Document) -> Vec<Link> {
         let mut start = view.buffer().start_iter();
         view.scroll_to_iter(&mut start, 0.0, true, 0.0, 0.0);
     });
-    links
+    Page { links, marks }
+}
+
+/// Оглавление из того, что встретилось при отрисовке.
+///
+/// Заголовки берём как есть — их место в буфере известно точно, поэтому
+/// прыжок попадает в заголовок, а не примерно туда. Если заголовков мало,
+/// вехами служат начала абзацев, расставленные по документу примерно
+/// поровну. Короткая страница не получает оглавления вовсе.
+fn contents_of(marks: Vec<Mark>, total: i32) -> Vec<Mark> {
+    if total < MIN_DOC_CHARS {
+        return Vec::new();
+    }
+
+    let mut headings: Vec<Mark> = marks.iter().filter(|mark| mark.heading).cloned().collect();
+    // Название статьи — не раздел: оно и так наверху.
+    if matches!(headings.first(), Some(first) if first.level == 1 && first.offset == 0) {
+        headings.remove(0);
+    }
+    if headings.len() >= MIN_HEADINGS {
+        return headings;
+    }
+
+    let leads: Vec<&Mark> = marks.iter().filter(|mark| !mark.heading).collect();
+    if leads.is_empty() {
+        return Vec::new();
+    }
+    let wanted = ((total / MIN_DOC_CHARS.max(1)) as usize + 1).clamp(2, MAX_WAYPOINTS);
+
+    let mut chosen: Vec<Mark> = Vec::with_capacity(wanted);
+    let mut taken = 0usize;
+    for step in 0..wanted {
+        let target = total * (step as i32 * 2 + 1) / (wanted as i32 * 2);
+        let Some((index, mark)) = leads
+            .iter()
+            .enumerate()
+            .skip(taken)
+            .min_by_key(|(_, mark)| (mark.offset - target).abs())
+        else {
+            break;
+        };
+        taken = index + 1;
+        chosen.push((*mark).clone());
+    }
+    chosen
+}
+
+/// Показать оглавление и связать строки с местами в тексте.
+fn fill_contents(list: &gtk::ListBox, marks: &[Mark], view: &gtk::TextView) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    for mark in marks {
+        let label = gtk::Label::builder()
+            .label(clip(&mark.title, 42))
+            .xalign(0.0)
+            .wrap(true)
+            .margin_top(4)
+            .margin_bottom(4)
+            .margin_start(10 + i32::from(mark.level.saturating_sub(1)) * 12)
+            .margin_end(10)
+            .build();
+        if !mark.heading {
+            // Веха — не структура автора, а наша выжимка. Пусть это видно.
+            label.add_css_class("dim-label");
+        }
+
+        let row = gtk::ListBoxRow::builder().child(&label).build();
+        list.append(&row);
+    }
+
+    let offsets: Vec<i32> = marks.iter().map(|mark| mark.offset).collect();
+    let view = view.clone();
+    list.connect_row_activated(move |_, row| {
+        let Some(&offset) = offsets.get(row.index().max(0) as usize) else {
+            return;
+        };
+        let mut iter = view.buffer().iter_at_offset(offset);
+        // Точное попадание: заголовок встаёт под верх окна.
+        view.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.05);
+    });
 }
 
 struct Writer<'a> {
     buffer: &'a gtk::TextBuffer,
     links: &'a mut Vec<Link>,
+    marks: &'a mut Vec<Mark>,
 }
 
 impl Writer<'_> {
@@ -428,6 +578,13 @@ impl Writer<'_> {
         self.buffer.end_iter().offset()
     }
 
+    /// Что вставили с этого места — заголовок или начало абзаца.
+    fn text_since(&self, start: i32) -> String {
+        let from = self.buffer.iter_at_offset(start);
+        let to = self.buffer.end_iter();
+        self.buffer.text(&from, &to, false).to_string()
+    }
+
     fn block<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, outer: &[&str]) {
         use comrak::nodes::NodeValue;
 
@@ -437,13 +594,33 @@ impl Writer<'_> {
                 let name = format!("h{level}");
                 let mut tags = outer.to_vec();
                 tags.push(&name);
+                let start = self.offset();
                 self.inlines(node, &tags);
+                let title = self.text_since(start);
+                self.marks.push(Mark {
+                    level: level as u8,
+                    title,
+                    offset: start,
+                    heading: true,
+                });
                 self.put("\n", &[]);
             }
             NodeValue::Paragraph => {
                 let mut tags = outer.to_vec();
                 tags.push("body");
+                let start = self.offset();
                 self.inlines(node, &tags);
+                let text = self.text_since(start);
+                // Вехой может быть только настоящий абзац: у короткой
+                // строки начало ничего не говорит.
+                if text.chars().count() >= 120 {
+                    self.marks.push(Mark {
+                        level: 1,
+                        title: lead(&text),
+                        offset: start,
+                        heading: false,
+                    });
+                }
                 self.put("\n", &["body"]);
             }
             NodeValue::CodeBlock(code) => {

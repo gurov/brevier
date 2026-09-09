@@ -229,7 +229,7 @@ fn scan(source: &str) -> (Vec<Block>, f32) {
 
 /// Начало абзаца как подпись к вехе: до первой границы слова после сорока
 /// знаков. Смысл в том, чтобы читатель узнал место, а не прочитал абзац.
-fn lead(text: &str) -> String {
+pub fn lead(text: &str) -> String {
     let plain = plain(text);
     let mut out = String::new();
 
