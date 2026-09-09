@@ -50,8 +50,9 @@ outdir="$root/corpus/out/nav-$ua"
 nav="$root/corpus/out/nav-$ua.tsv"
 mkdir -p "$outdir"
 
-if [[ -f "$verdict" ]] && awk -F'\t' 'NR>1 && $1=="y"' "$verdict" | grep -q .; then
-    sources=$(awk -F'\t' 'NR>1 && $1=="y" { print $2 }' "$verdict")
+if [[ -f "$verdict" ]] && tr -d '\r' < "$verdict" | awk -F'\t' 'NR>1 && $1=="y"' | grep -q .; then
+    # редактор мог сохранить вердикты с CRLF — возвраты убираем
+    sources=$(tr -d '\r' < "$verdict" | awk -F'\t' 'NR>1 && $1=="y" { print $2 }')
 else
     echo "вердиктов ещё нет — беру всё, что извлеклось; число будет завышено" >&2
     sources=$(awk -F'\t' 'NR>1 && $1==0 { print $3 }' "$report")

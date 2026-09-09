@@ -26,6 +26,12 @@ verdict="$root/corpus/out/verdict-$ua.tsv"
 report="$root/corpus/out/report-$ua.tsv"
 [[ -f "$verdict" ]] || { echo "нет $verdict — сначала corpus/run.sh --ua $ua" >&2; exit 1; }
 
+# Вердикты правит человек в редакторе, а редактор бывает с CRLF: `\r` уезжает
+# в последнюю колонку и ломает имя файла. Читаем через копию без возвратов.
+clean=$(mktemp); trap 'rm -f "$clean"' EXIT
+tr -d '\r' < "$verdict" > "$clean"
+verdict=$clean
+
 total=$(($(wc -l <"$report") - 1))
 yes=$(awk -F'\t' 'NR>1 && $1=="y"' "$verdict" | wc -l)
 no=$(awk -F'\t' 'NR>1 && $1=="n"' "$verdict" | wc -l)
