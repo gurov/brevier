@@ -1,10 +1,15 @@
-//! HTML → Markdown и нормализация.
+//! HTML → Markdown.
 //!
-//! Markdown здесь — внутреннее представление, а не формат файлов. Всё, что
-//! выходит отсюда, обязано быть валидным в объявленном диалекте (CommonMark +
-//! GFM), поэтому результат конвертации прогоняется через comrak и печатается
-//! обратно: заодно это делает вывод каноничным, а значит диффабельным —
-//! на нём ловятся регрессии извлечения.
+//! Markdown здесь — внутреннее представление, а не формат файлов, и диалект
+//! объявлен: CommonMark + GFM.
+//!
+//! Обратной печати через comrak в тракте вывода нет, хотя соблазн был:
+//! канонизировать результат конвертации выглядело правильным. Но writer comrak
+//! экранирует `!`, `_`, `[`, `<` безусловно (`cm.rs`), и русский текст
+//! превращается в «публикация\!». На M1 это съест рендерер и никто не заметит,
+//! а на M0 вывод читают глазами в `less` — там это ровно тот мусор вёрстки,
+//! который рубрика велит считать дефектом. comrak остаётся парсером: на нём
+//! собираются ссылки, на нём же будет рендер.
 
 use comrak::nodes::NodeValue;
 use comrak::{Arena, Options};
@@ -40,13 +45,41 @@ pub fn from_article(article: &Article) -> Result<String, Error> {
     doc.push_str(body.trim());
     doc.push('\n');
 
-    Ok(normalize(&doc))
+    Ok(tidy(&doc))
 }
 
 /// Страница целиком, без Readability (`--raw`). Нужен, чтобы отличать
 /// «извлечение промахнулось» от «конвертация промахнулась».
 pub fn from_html(html: &str) -> Result<String, Error> {
-    Ok(normalize(&to_markdown(html)?))
+    Ok(tidy(&to_markdown(html)?))
+}
+
+/// Убрать то, что htmd оставляет после вырезанных элементов: хвостовые пробелы
+/// и дыры в три и больше пустых строк.
+fn tidy(md: &str) -> String {
+    let mut out = String::with_capacity(md.len());
+    let mut blanks = 0;
+
+    for line in md.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            blanks += 1;
+            if blanks > 1 {
+                continue;
+            }
+        } else {
+            blanks = 0;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    let trimmed = out.trim_end().to_owned();
+    if trimmed.is_empty() {
+        trimmed
+    } else {
+        trimmed + "\n"
+    }
 }
 
 /// Исходящие ссылки статьи, в порядке появления, без повторов.
@@ -68,11 +101,6 @@ pub fn links(md: &str) -> Vec<String> {
         }
     }
     seen
-}
-
-/// Привести markdown к каноничному виду в нашем диалекте.
-pub fn normalize(md: &str) -> String {
-    comrak::markdown_to_commonmark(md, &options())
 }
 
 fn to_markdown(html: &str) -> Result<String, Error> {
@@ -120,6 +148,19 @@ mod tests {
         let md = from_html(r#"<h2>Titl</h2><p>text <a href="https://e.com">link</a></p>"#).unwrap();
         assert!(md.contains("## Titl"));
         assert!(md.contains("[link](https://e.com)"));
+    }
+
+    #[test]
+    fn text_is_not_over_escaped() {
+        // comrak на этом месте выдавал «Ура\!» и «a\_b».
+        let md = from_html("<p>Ура! Вот так: a_b, 3 &lt; 5.</p>").unwrap();
+        assert_eq!(md, "Ура! Вот так: a\\_b, 3 < 5.\n");
+    }
+
+    #[test]
+    fn blank_line_runs_collapse() {
+        let md = from_html("<p>раз</p><div></div><div></div><p>два</p>").unwrap();
+        assert_eq!(md, "раз\n\nдва\n");
     }
 
     #[test]

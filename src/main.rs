@@ -72,8 +72,8 @@ fn run(args: &Args) -> Result<String, Error> {
     let page = fetch::fetch(&args.url, args.ua)?;
 
     let text = match page.kind {
-        // Родной формат: конвертировать нечего, только привести к диалекту.
-        ContentKind::Markdown => markdown::normalize(&page.body),
+        // Родной формат: конвертировать нечего, трогать текст автора — тем более.
+        ContentKind::Markdown => page.body,
         // Простой текст markdown-ом не является — отдаём как есть.
         ContentKind::Text => page.body,
         ContentKind::Html if args.raw => markdown::from_html(&page.body)?,
