@@ -316,6 +316,7 @@ name = "brevier"
 version = "0.1.0"
 dependencies = [
  "comrak",
+ "cosmic-text",
  "dom_query",
  "dom_smoothie",
  "htmd",

@@ -49,3 +49,6 @@ iced = { version = "0.14.0", default-features = false, optional = true, features
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
 url = "2.5.8"
+
+[dev-dependencies]
+cosmic-text = "0.15"
