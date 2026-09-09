@@ -17,11 +17,30 @@ use iced::{Center, Element, Fill, Subscription, Task, Theme};
 use brevier::address::{self, Address};
 use brevier::{Document, History, UserAgent};
 
-/// Ширина колонки в логических пикселях. Мера — около 65 знаков при кегле 17:
-/// та ширина, на которой глаз находит начало следующей строки без усилия.
-/// Считается по средней ширине знака примерно в половину кегля.
-const MEASURE: f32 = 560.0;
+/// Типографика. Числа связаны между собой, поэтому и живут вместе: мера
+/// задана в кеглях, а не в пикселях, чтобы при смене размера шрифта строка
+/// оставалась той же длины в знаках. Тридцать три кегля — это около
+/// 65 знаков при средней ширине знака примерно в половину кегля.
 const TEXT_SIZE: f32 = 17.0;
+const MEASURE_IN_EMS: f32 = 33.0;
+const MEASURE: f32 = TEXT_SIZE * MEASURE_IN_EMS;
+
+/// Межстрочный интервал. Умолчание iced (1.3) собрано для интерфейса,
+/// где строки короткие; на мере в 65 знаков глаз на обратном ходе
+/// соскакивает на соседнюю строку. Полтора с небольшим — книжная норма.
+const LINE_HEIGHT: f32 = 1.55;
+/// В заголовке строки короткие, и полуторный интервал разваливает его
+/// на отдельные строки. Плотнее.
+const HEADING_LINE_HEIGHT: f32 = 1.15;
+
+/// Шкала заголовков в долях кегля. Умолчание iced — вдвое на первом уровне
+/// и минус четверть на каждом следующем; на экране это даёт заголовок
+/// в 34 пункта, который спорит с текстом, а не ведёт к нему.
+const HEADINGS: [f32; 6] = [1.75, 1.45, 1.28, 1.14, 1.05, 1.0];
+
+/// Оглавление показываем, только если оно что-то даёт.
+const MIN_HEADINGS: usize = 3;
+const TOC_WIDTH: f32 = 240.0;
 /// На сколько прокручивает стрелка и на сколько — страница.
 const STEP: f32 = 60.0;
 const PAGE: f32 = 520.0;
@@ -48,6 +67,10 @@ struct Reader {
     history: History,
     page: Page,
     content: markdown::Content,
+    outline: Vec<Entry>,
+    /// Ручка текущей загрузки. Нужна, чтобы ответ брошенной страницы
+    /// не приезжал поверх новой.
+    loading: Option<iced::task::Handle>,
     dark: bool,
 }
 
@@ -187,6 +210,7 @@ enum Message {
     Scrolled(Scroll, bool),
     FocusAddress,
     Unfocus,
+    JumpTo(f32),
     OpenInBrowser,
     OpenExternal(String),
     ToggleTheme,
@@ -199,6 +223,8 @@ impl Reader {
             history: History::new(),
             page: Page::Blank,
             content: markdown::Content::new(),
+            outline: Vec::new(),
+            loading: None,
             dark: true,
         };
         match start {
@@ -274,19 +300,25 @@ impl Reader {
                 operation::select_all(address_id()),
             ]),
             Message::Unfocus => unfocus(),
+            Message::JumpTo(at) => {
+                operation::snap_to(page_id(), scrollable::RelativeOffset { x: 0.0, y: at })
+            }
             Message::ToggleTheme => {
                 self.dark = !self.dark;
                 Task::none()
             }
             Message::Loaded(result) => {
+                self.loading = None;
                 match *result {
                     Ok(document) => {
                         self.input = document.address.display();
+                        self.outline = outline(&document.markdown);
                         self.content = markdown::Content::parse(&document.markdown);
                         self.page = Page::Shown(document.title);
                     }
                     Err(failure) => {
                         self.content = markdown::Content::new();
+                        self.outline = Vec::new();
                         self.page = Page::Failed(failure);
                     }
                 }
@@ -312,14 +344,28 @@ impl Reader {
     }
 
     fn load(&mut self, address: Address) -> Task<Message> {
+        // Уходя со страницы, бросаем её загрузку: иначе медленный сайт
+        // догоняет читателя и подменяет уже открытую статью своей.
+        self.abort_loading();
         self.page = Page::Loading;
         self.input = address.display();
-        Task::perform(
+
+        let (task, handle) = Task::perform(
             async move {
                 brevier::open(&address, UserAgent::Honest).map_err(|e| describe(&e))
             },
             |result| Message::Loaded(Box::new(result)),
         )
+        .abortable();
+
+        self.loading = Some(handle);
+        task
+    }
+
+    fn abort_loading(&mut self) {
+        if let Some(handle) = self.loading.take() {
+            handle.abort();
+        }
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -359,7 +405,7 @@ impl Reader {
             Page::Failed(problem) => failed(problem),
             Page::Shown(_) => markdown::view_with(
                 self.content.items(),
-                markdown::Settings::with_text_size(TEXT_SIZE, self.theme()),
+                markdown_settings(&self.theme()),
                 &Reading,
             ),
         };
@@ -370,7 +416,15 @@ impl Reader {
             .center_x(Fill)
             .padding([24, 16]);
 
-        column![bar, scrollable(page).id(page_id()).height(Fill)].into()
+        let reading = scrollable(page).id(page_id()).height(Fill);
+
+        let body: Element<'_, Message> = if self.outline.len() >= MIN_HEADINGS {
+            row![reading, contents(&self.outline)].into()
+        } else {
+            reading.into()
+        };
+
+        column![bar, body].into()
     }
 }
 
@@ -406,6 +460,152 @@ fn keys(key: &key::Key, modifiers: Modifiers) -> Option<Message> {
     }
 }
 
+/// Заголовок в оглавлении и его место в документе — долей от полной высоты.
+#[derive(Debug, Clone, PartialEq)]
+struct Entry {
+    level: u8,
+    title: String,
+    at: f32,
+}
+
+/// Сколько знаков влезает в строку на нашей мере.
+const CHARS_PER_LINE: f32 = MEASURE_IN_EMS * 2.0;
+/// Высота блока-картинки: кнопка-заглушка плюс подпись.
+const IMAGE_BLOCK: f32 = 90.0;
+
+/// Оглавление статьи с местом каждого заголовка.
+///
+/// Прыгать по документу iced умеет только долями от полной высоты
+/// (`snap_to`), а спросить, где лежит конкретный виджет, нечем: операции
+/// вроде `visible_bounds` в 0.14 нет. Поэтому высоту считаем сами
+/// по разметке — так же, как её потом разложит рендерер: абзац занимает
+/// столько строк, сколько знаков в нём не влезло в меру, у кода строка
+/// своя, у картинки фиксированный блок.
+///
+/// Это оценка, а не измерение. Систематическая ошибка масштаба не страшна:
+/// в долю она не входит, потому что делится сама на себя. Врёт оценка там,
+/// где блок ведёт себя не как текст, — на широких таблицах и длинных
+/// списках. Промах в полэкрана заголовок всё равно оставляет на виду.
+fn outline(source: &str) -> Vec<Entry> {
+    let line_px = TEXT_SIZE * LINE_HEIGHT;
+    let gap = TEXT_SIZE * 0.95;
+    let code_line = TEXT_SIZE * 0.88 * 1.35;
+
+    let mut entries: Vec<Entry> = Vec::new();
+    let mut height = 0.0f32;
+    let mut in_code = false;
+
+    for line in source.lines() {
+        let text = line.trim();
+
+        if text.starts_with("```") {
+            in_code = !in_code;
+            height += code_line;
+            continue;
+        }
+        if in_code {
+            height += code_line;
+            continue;
+        }
+        if text.is_empty() {
+            height += gap;
+            continue;
+        }
+        if let Some((level, title)) = heading(text) {
+            entries.push(Entry {
+                level,
+                title,
+                at: height,
+            });
+            height += TEXT_SIZE * HEADINGS[usize::from(level - 1)] * HEADING_LINE_HEIGHT
+                + TEXT_SIZE * 1.4;
+            continue;
+        }
+        if text.starts_with("![") {
+            height += IMAGE_BLOCK;
+            continue;
+        }
+
+        let rows = (text.chars().count() as f32 / CHARS_PER_LINE).ceil().max(1.0);
+        height += rows * line_px;
+    }
+
+    // Первый заголовок первого уровня — название статьи, оно и так наверху.
+    if matches!(entries.first(), Some(first) if first.level == 1 && first.at == 0.0) {
+        entries.remove(0);
+    }
+
+    let total = height.max(1.0);
+    for entry in &mut entries {
+        entry.at = (entry.at / total).clamp(0.0, 1.0);
+    }
+    entries
+}
+
+/// `## Заголовок` → уровень и текст без разметки.
+fn heading(line: &str) -> Option<(u8, String)> {
+    let level = line.chars().take_while(|c| *c == '#').count();
+    if level == 0 || level > 6 {
+        return None;
+    }
+    let rest = line[level..].strip_prefix(' ')?.trim();
+    (!rest.is_empty()).then(|| (level as u8, plain(rest)))
+}
+
+/// Снять разметку с текста заголовка: в оглавлении нужен только он сам.
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut depth = 0usize;
+
+    while let Some(c) = chars.next() {
+        match c {
+            // `[текст](ссылка)` — оставляем текст, адрес выбрасываем.
+            '[' => {}
+            ']' if chars.peek() == Some(&'(') => {
+                depth = 1;
+                chars.next();
+            }
+            '(' if depth > 0 => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth > 0 => {}
+            '*' | '_' | '`' => {}
+            '\\' => {
+                if let Some(escaped) = chars.next() {
+                    out.push(escaped);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out.trim().to_owned()
+}
+
+/// Оглавление сбоку.
+fn contents(entries: &[Entry]) -> Element<'_, Message> {
+    let mut list = column![].spacing(2);
+
+    for entry in entries {
+        let indent = f32::from(entry.level.saturating_sub(1)) * 12.0;
+        list = list.push(
+            button(text(&entry.title).size(TEXT_SIZE * 0.8))
+                .on_press(Message::JumpTo(entry.at))
+                .style(button::text)
+                .padding(iced::Padding {
+                    left: 6.0 + indent,
+                    right: 6.0,
+                    top: 3.0,
+                    bottom: 3.0,
+                }),
+        );
+    }
+
+    container(scrollable(list).height(Fill))
+        .width(TOC_WIDTH)
+        .padding([24, 8])
+        .into()
+}
+
 fn hint(message: &str) -> Element<'_, Message> {
     column![text(message).size(15)].padding([40, 0]).into()
 }
@@ -438,6 +638,54 @@ struct Reading;
 impl<'a> markdown::Viewer<'a, Message> for Reading {
     fn on_link_click(url: markdown::Uri) -> Message {
         Message::LinkClicked(url)
+    }
+
+    /// Абзац с книжным межстрочным интервалом: у iced по умолчанию
+    /// интерфейсный, для сплошного текста тесный.
+    fn paragraph(
+        &self,
+        settings: markdown::Settings,
+        text: &markdown::Text,
+    ) -> Element<'a, Message> {
+        rich_text(text.spans(settings.style))
+            .size(settings.text_size)
+            .line_height(LINE_HEIGHT)
+            .on_link_click(Self::on_link_click)
+            .into()
+    }
+
+    /// Заголовок: своя шкала кеглей, плотный интервал и воздух сверху,
+    /// а не снизу — заголовок принадлежит тому, что под ним.
+    fn heading(
+        &self,
+        settings: markdown::Settings,
+        level: &'a markdown::HeadingLevel,
+        text: &'a markdown::Text,
+        index: usize,
+    ) -> Element<'a, Message> {
+        use markdown::HeadingLevel;
+
+        let size = match level {
+            HeadingLevel::H1 => settings.h1_size,
+            HeadingLevel::H2 => settings.h2_size,
+            HeadingLevel::H3 => settings.h3_size,
+            HeadingLevel::H4 => settings.h4_size,
+            HeadingLevel::H5 => settings.h5_size,
+            HeadingLevel::H6 => settings.h6_size,
+        };
+        let air = if index > 0 { TEXT_SIZE * 1.4 } else { 0.0 };
+
+        container(
+            rich_text(text.spans(settings.style))
+                .size(size)
+                .line_height(HEADING_LINE_HEIGHT)
+                .on_link_click(Self::on_link_click),
+        )
+        .padding(iced::Padding {
+            top: air,
+            ..iced::Padding::ZERO
+        })
+        .into()
     }
 
     /// Картинки не грузим — они единственная серьёзная поверхность атаки
@@ -492,6 +740,25 @@ impl Scroll {
 /// на заведомо несуществующий.
 fn unfocus() -> Task<Message> {
     operation::focus(iced::widget::Id::new("brevier-nowhere"))
+}
+
+/// Настройки рендера markdown. Собираем сами, а не через `with_text_size`:
+/// у него своя шкала заголовков.
+fn markdown_settings(theme: &Theme) -> markdown::Settings {
+    let heading = |level: usize| iced::Pixels(TEXT_SIZE * HEADINGS[level]);
+
+    markdown::Settings {
+        text_size: TEXT_SIZE.into(),
+        h1_size: heading(0),
+        h2_size: heading(1),
+        h3_size: heading(2),
+        h4_size: heading(3),
+        h5_size: heading(4),
+        h6_size: heading(5),
+        code_size: (TEXT_SIZE * 0.88).into(),
+        spacing: (TEXT_SIZE * 0.95).into(),
+        style: markdown::Style::from_palette(theme.palette()),
+    }
 }
 
 fn page_id() -> iced::widget::Id {
@@ -565,6 +832,44 @@ mod tests {
             keys(&named(key::Named::ArrowRight), Modifiers::ALT),
             Some(Message::Forward)
         ));
+    }
+
+    #[test]
+    fn outline_skips_the_article_title() {
+        let doc = "# Название статьи\n\nАбзац.\n\n## Первый раздел\n\nАбзац.\n\n## Второй раздел\n";
+        let entries = outline(doc);
+        assert_eq!(entries.len(), 2, "название в оглавление не идёт: {entries:?}");
+        assert_eq!(entries[0].title, "Первый раздел");
+        assert_eq!(entries[1].level, 2);
+    }
+
+    #[test]
+    fn outline_places_headings_in_order() {
+        let filler = vec!["Длинный абзац статьи, который занимает место."; 30].join("\n\n");
+        let doc = format!("# Название\n\n{filler}\n\n## Середина\n\n{filler}\n\n## Конец\n");
+        let entries = outline(&doc);
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].at < entries[1].at, "порядок нарушен: {entries:?}");
+        assert!(entries[0].at > 0.3 && entries[0].at < 0.7, "середина не в середине: {entries:?}");
+        assert!(entries.iter().all(|e| (0.0..=1.0).contains(&e.at)));
+    }
+
+    #[test]
+    fn heading_text_loses_its_markup() {
+        assert_eq!(
+            heading("## [Ссылка](https://example.com) и **жирное**"),
+            Some((2, "Ссылка и жирное".to_owned()))
+        );
+        assert_eq!(heading("#Не заголовок"), None);
+        assert_eq!(heading("Обычный текст"), None);
+    }
+
+    #[test]
+    fn code_fences_do_not_become_headings() {
+        let doc = "# Название\n\n```\n# это комментарий, а не заголовок\n```\n\n## Раздел\n";
+        let entries = outline(doc);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Раздел");
     }
 
     #[test]
