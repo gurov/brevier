@@ -181,9 +181,12 @@ enum Message {
     LinkClicked(markdown::Uri),
     Back,
     Forward,
-    Scroll(f32),
-    ScrollTo(f32),
+    /// Клавиша прокрутки нажата — но сначала выясним, не набирают ли адрес.
+    Scrolling(Scroll),
+    /// Ответ на этот вопрос: прокручиваем, если курсор не в адресной строке.
+    Scrolled(Scroll, bool),
     FocusAddress,
+    Unfocus,
     OpenInBrowser,
     OpenExternal(String),
     ToggleTheme,
@@ -229,7 +232,9 @@ impl Reader {
                 self.input = value;
                 Task::none()
             }
-            Message::Go => self.go(),
+            // После Enter фокус уходит со строки: дальше человек читает,
+            // а не правит адрес, и клавиши должны листать страницу.
+            Message::Go => Task::batch([unfocus(), self.go()]),
             Message::LinkClicked(uri) => {
                 self.input = uri.to_string();
                 self.go()
@@ -252,13 +257,23 @@ impl Reader {
                 }
                 Task::none()
             }
-            Message::Scroll(delta) => {
-                operation::scroll_by(page_id(), AbsoluteOffset { x: 0.0, y: delta })
+            // Подписка на клавиатуру приходит мимо виджетов и не знает, кто
+            // в фокусе. Поэтому не прокручиваем сразу, а спрашиваем: если
+            // курсор в адресной строке, пробел и стрелки принадлежат набору.
+            Message::Scrolling(scroll) => operation::is_focused(address_id())
+                .map(move |typing| Message::Scrolled(scroll, typing)),
+            Message::Scrolled(scroll, typing) => {
+                if typing {
+                    Task::none()
+                } else {
+                    scroll.task()
+                }
             }
-            Message::ScrollTo(y) => {
-                operation::scroll_to(page_id(), AbsoluteOffset { x: 0.0, y })
-            }
-            Message::FocusAddress => operation::focus(address_id()),
+            Message::FocusAddress => Task::batch([
+                operation::focus(address_id()),
+                operation::select_all(address_id()),
+            ]),
+            Message::Unfocus => unfocus(),
             Message::ToggleTheme => {
                 self.dark = !self.dark;
                 Task::none()
@@ -380,12 +395,13 @@ fn keys(key: &key::Key, modifiers: Modifiers) -> Option<Message> {
     match named {
         Named::ArrowLeft if modifiers.alt() => Some(Message::Back),
         Named::ArrowRight if modifiers.alt() => Some(Message::Forward),
-        Named::ArrowDown => Some(Message::Scroll(STEP)),
-        Named::ArrowUp => Some(Message::Scroll(-STEP)),
-        Named::PageDown | Named::Space => Some(Message::Scroll(PAGE)),
-        Named::PageUp => Some(Message::Scroll(-PAGE)),
-        Named::Home => Some(Message::ScrollTo(0.0)),
-        Named::End => Some(Message::ScrollTo(f32::MAX)),
+        Named::ArrowDown => Some(Message::Scrolling(Scroll::By(STEP))),
+        Named::ArrowUp => Some(Message::Scrolling(Scroll::By(-STEP))),
+        Named::PageDown | Named::Space => Some(Message::Scrolling(Scroll::By(PAGE))),
+        Named::PageUp => Some(Message::Scrolling(Scroll::By(-PAGE))),
+        Named::Home => Some(Message::Scrolling(Scroll::To(0.0))),
+        Named::End => Some(Message::Scrolling(Scroll::To(f32::MAX))),
+        Named::Escape => Some(Message::Unfocus),
         _ => None,
     }
 }
@@ -454,6 +470,30 @@ impl<'a> markdown::Viewer<'a, Message> for Reading {
     }
 }
 
+/// Куда прокрутить страницу.
+#[derive(Debug, Clone, Copy)]
+enum Scroll {
+    By(f32),
+    To(f32),
+}
+
+impl Scroll {
+    fn task(self) -> Task<Message> {
+        let offset = |y| AbsoluteOffset { x: 0.0, y };
+        match self {
+            Scroll::By(delta) => operation::scroll_by(page_id(), offset(delta)),
+            Scroll::To(y) => operation::scroll_to(page_id(), offset(y)),
+        }
+    }
+}
+
+/// Снять фокус со всего. Отдельной операции для этого нет, но `focus`
+/// снимает фокус со всех виджетов, кроме указанного, — наводим его
+/// на заведомо несуществующий.
+fn unfocus() -> Task<Message> {
+    operation::focus(iced::widget::Id::new("brevier-nowhere"))
+}
+
 fn page_id() -> iced::widget::Id {
     iced::widget::Id::new("page")
 }
@@ -475,4 +515,72 @@ fn open_in_system_browser(target: &str) {
         .args(args)
         .arg(target)
         .spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named(key: key::Named) -> key::Key {
+        key::Key::Named(key)
+    }
+
+    #[test]
+    fn scroll_keys_ask_before_scrolling() {
+        // Прокрутка не решается на месте: сначала вопрос про фокус.
+        for key in [key::Named::Space, key::Named::PageDown, key::Named::ArrowDown] {
+            assert!(
+                matches!(
+                    keys(&named(key), Modifiers::default()),
+                    Some(Message::Scrolling(_))
+                ),
+                "{key:?} должна проситься на прокрутку"
+            );
+        }
+    }
+
+    #[test]
+    fn typing_in_the_address_bar_wins_over_scrolling() {
+        let scroll = Scroll::By(PAGE);
+        // Тот же ответ, но с курсором в адресной строке — прокрутки нет.
+        let mut reader = Reader::new(None).0;
+        let _ = reader.update(Message::Scrolled(scroll, true));
+        assert!(matches!(reader.page, Page::Blank), "состояние не должно меняться");
+    }
+
+    #[test]
+    fn horizontal_arrows_belong_to_the_text_field() {
+        // Без Alt они двигают курсор по адресу, а не листают страницу.
+        assert!(keys(&named(key::Named::ArrowLeft), Modifiers::default()).is_none());
+        assert!(keys(&named(key::Named::ArrowRight), Modifiers::default()).is_none());
+    }
+
+    #[test]
+    fn alt_arrows_walk_the_history() {
+        assert!(matches!(
+            keys(&named(key::Named::ArrowLeft), Modifiers::ALT),
+            Some(Message::Back)
+        ));
+        assert!(matches!(
+            keys(&named(key::Named::ArrowRight), Modifiers::ALT),
+            Some(Message::Forward)
+        ));
+    }
+
+    #[test]
+    fn escape_lets_go_of_the_address_bar() {
+        assert!(matches!(
+            keys(&named(key::Named::Escape), Modifiers::default()),
+            Some(Message::Unfocus)
+        ));
+    }
+
+    #[test]
+    fn plain_letters_are_not_shortcuts() {
+        assert!(keys(&key::Key::Character("l".into()), Modifiers::default()).is_none());
+        assert!(matches!(
+            keys(&key::Key::Character("l".into()), Modifiers::COMMAND),
+            Some(Message::FocusAddress)
+        ));
+    }
 }
