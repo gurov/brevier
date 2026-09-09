@@ -340,7 +340,7 @@ fn drop_repeated_captions(lines: &mut Vec<&str>) {
             .map(|offset| i + 1 + offset);
 
         for neighbour in [above, below].into_iter().flatten() {
-            if lines[neighbour].trim() == alt {
+            if same_text(lines[neighbour], alt) {
                 drop[neighbour] = true;
             }
         }
@@ -351,6 +351,20 @@ fn drop_repeated_captions(lines: &mut Vec<&str>) {
         .filter(|(i, _)| !drop[*i])
         .map(|(_, line)| *line)
         .collect();
+}
+
+/// Тот же текст с точностью до пробелов.
+///
+/// habr печатает подпись дважды, но в видимом тексте ставит неразрывные
+/// пробелы, а в `alt` — обычные. Побайтово это разные строки, глазами —
+/// одна и та же, и читателю достаётся дубль.
+fn same_text(line: &str, alt: &str) -> bool {
+    let words = |text: &str| {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    words(line) == words(alt)
 }
 
 /// `![подпись](url)` целой строкой — вернуть подпись.
@@ -1055,6 +1069,16 @@ mod tail_tests {
         let out = article(&doc);
         assert_eq!(out.matches(caption).count(), 1, "подпись должна остаться одна:\n{out}");
         assert!(out.contains("![" ), "сама картинка остаётся:\n{out}");
+    }
+
+    #[test]
+    fn a_caption_with_hard_spaces_still_matches() {
+        // habr ставит неразрывные пробелы в тексте и обычные в alt.
+        let alt = "Это Тристан Бакмастер, математик, и он очень зол";
+        let caption = alt.replace(' ', "\u{a0}");
+        let doc = format!("# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![{alt}](https://cdn.example.com/i.jpg)\n\n{caption}\n\nСледующий абзац статьи.\n");
+        let out = article(&doc);
+        assert!(!out.contains(&caption), "подпись с неразрывными пробелами должна уйти:\n{out}");
     }
 
     #[test]
