@@ -7,8 +7,12 @@
 # статьи там нет, извлекать нечего, и в знаменатель это попадёт как провал
 # экстрактора, которым не является. То же с мёртвыми адресами.
 #
-# Состояние на 9 сентября 2026 (прогон honest): 218 ссылок, из них
-# 66 отдают 404, ещё около шестидесяти ведут на разделы и корни сайтов.
+# Вычищено 9 сентября 2026 по прогону обоих UA. Из двух присланных списков
+# (218 + 49 ссылок) выброшено: 89 мёртвых (404), 4 без DNS, 23 заглушки
+# и 73 ленты и корня сайтов. Разбор с причинами — corpus/out/removed.tsv.
+#
+# Оставлены ссылки, которые отвечают 403, 401 или падают на сертификате:
+# это честные отказы, читателю от них не легче, и в знаменатель они входят.
 
 # блоги
 https://danluu.com/everything-is-broken/
@@ -26,7 +30,6 @@ https://github.com/rust-lang/rust/blob/master/README.md
 # новости и агрегаторы
 https://blog.rust-lang.org/2024/09/05/Rust-1.81.0/
 https://lwn.net/Articles/974752/
-https://arstechnica.com/gadgets/2024/09/
 https://www.opennet.ru/opennews/art.shtml?num=61000
 
 # справочники
@@ -36,286 +39,96 @@ https://en.wikipedia.org/wiki/Rust_(programming_language)
 https://habr.com/ru/articles/915604/
 
 # заведомо трудные: на честный UA отвечают 403 — это тоже результат
-https://medium.com/@nikitonsky/why-i-hate-medium-b0f3a86bf9e6
 https://nplus1.ru/news/2024/09/05/quantum-computing
 https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array
 
-
 # новые
 
-
 https://habr.com/ru/articles/700000/
-https://habr.com/ru/companies/yandex/blog/
-https://vc.ru/services
-https://vc.ru/tribuna
-https://medium.com/tag/software-engineering
-https://medium.com/tag/javascript
-https://dev.to/t/webdev
-https://ixbt.com/live/mobile/
-https://3dnews.ru/assets/
-https://tproger.ru/articles/
 
-
-
-
-https://journal.tinkoff.ru/shorts/
-https://journal.tinkoff.ru/pro/
-https://vc.ru/finance
-https://rb.ru/story/
-https://forbes.ru/business
-https://e-xecutive.ru/management/
-https://substack.com/browse/finance
-https://inc42.com/features/
-https://cossa.ru/articles/
-https://ppc.world/articles/
-
-
-
-
-https://habr.com/ru/hub/design/
-https://uxdesign.cc/
-https://vc.ru/design
-https://smashingmagazine.com/articles/
-https://dribbble.com/stories
-https://prodesign.ru/articles/
-https://uxplanet.org/
-https://awwwards.com/blog/
-https://behance.net/blog
-https://nngroup.com/articles/
-
-
-
-
-https://postnauka.org/longreads
-https://postnauka.org/guides
-https://knife.media/guides/
-https://elements.ru/news/
-https://naked-science.ru/article/
-https://arzamas.academy/materials
-https://nplus1.ru/material/
-https://biomolecula.ru/articles/
-https://theideas.ru/
-https://bigthink.com/articles
-
-
-
-
-https://pikabu.ru/story/
-https://pikabu.ru/community/
-https://reddit.com/r/TodayILearned/
-https://reddit.com/r/AskReddit/
-https://reddit.com/r/IAmA/
-https://dzen.ru/
-https://quora.com/
-https://medium.com/topic/popular
-https://substack.com/
-https://livejournal.com/
-
-
-
-
-https://journal.tinkoff.ru/trips/
-https://aviasales.ru/psgr/articles
-https://challenger.ru/zdorove/
-https://cuprum.media/article/
-https://kinopoisk.ru/media/article/
-https://flacon-magazine.com/rubric/
-https://sports.ru/tribuna/blogs/
-https://the-village.ru/city
-https://lifehacker.ru/topics/lifestyle/
-https://wonderzine.com/life
-
-
-
-
-https://stopgame.ru/blogs
-https://dtf.ru/games
-https://dtf.ru/cinema
-https://igromania.ru/articles/
-https://polygon.com/features
-https://kotaku.com/
-https://kanobu.ru/articles/
-https://mirf.ru/articles/
-https://cybersport.ru/articles
-https://shazoo.ru/articles
-
-
-
-
-https://rbc.ru/technology_and_media/
-https://kommersant.ru/doc/
-https://lenta.ru/articles/
-https://interfax.ru/ftprooot/
-https://bbc.com/russian/features-
-https://republic.ru/posts/
-https://novayagazeta.ru/articles/
-https://fontanka.ru/longreads/
-https://meduza.io/feature/
-https://thebell.io/
-
-
-
-
-https://paulgraham.com/articles.html
-https://seths.blog/
-https://fs.blog/blog/
-https://waitbutwhy.com/
-https://stratechery.com/
-https://danluu.com/
-https://m.gdrive.com/
-https://codinghorror.com/
-https://joelonsoftware.com/
-https://creators.substacks.com/
-
-
-
-
-https://gorky.media/reviews/
-https://labirint.ru/now/
-https://livelib.ru/reviews
-https://theoryandpractice.ru/posts
-https://coursera.org/articles/
-https://stepik.org/catalog
-https://skillbox.ru/media/
-https://netology.ru/blog/
-https://habr.com/ru/hub/education/
-https://edutopia.org/articles
-
-
-
-https://habr.com/ru/articles/789123/
-https://habr.com/ru/companies/vk/blog/712345/
-https://dev.to/thepracticaldev/how-to-write-clean-code-in-javascript-1a2b
-https://medium.com/swlh/how-i-built-a-saas-app-in-30-days-and-got-my-first-100-customers-3c4d5e
 https://habr.com/ru/articles/654321/
-https://tproger.ru/articles/kak-rabotaet-memory-management-v-python/
 https://danluu.com/keyboard-latency/
 https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/
-https://blog.codinghorror.com/the-non-programming-programmer/
-https://habr.com/ru/articles/555123/
-
-
-
 
 https://journal.tinkoff.ru/diary-proffession-frontend/
 https://vc.ru/tribuna/890123-kak-ya-sdelal-svoy-pet-proekt-i-zarabotal-pervye-1000-dollarov
-https://pikabu.ru/story/kak_ya_stroitelstvo_doma_nachinal_i_chto_iz_etogo_vyshlo_789456
 https://pikabu.ru/story/istoriya_odnogo_pereezda_iz_siberia_v_europe_654987
 https://www.reddit.com/r/IAmA/comments/z1385/i_am_a_professional_chef_ask_me_anything/
 https://journal.tinkoff.ru/flat-renovation-experience/
-https://vc.ru/personal/765432-kak-ya-provalil-svoy-pervyy-startap-i-poterayal-50000
-https://medium.com/@user/my-experience-quitting-social-media-for-a-year-8f9e0d
-https://habr.com/ru/articles/690123/
-https://newsletter.example.com/p/how-i-organized-my-life-with-notion
-
-
-
 
 https://paulgraham.com/hs.html
 https://waitbutwhy.com/2013/10/why-procrastinators-procrastinate.html
 https://fs.blog/first-principles/
-https://paulgraham.com/add.html
-https://seths.blog/2020/01/the-lizard-brain/
-https://waitbutwhy.com/2015/11/it-might-be-time-to-stop-worrying-about-what-other-people-think.html
-https://stratechery.com/2020/aggregation-theory/
 https://sive.rs/hellyeah
 https://nav.al/rich
 https://jamesclear.com/four-burners-theory
-
-
-
 
 https://vc.ru/finance/678901-kak-rabotaet-yunit-ekonomika-dlya-novichkov
 https://habr.com/ru/companies/stratoplan/blog/456789/
 https://journal.tinkoff.ru/guide/ip-opening/
 https://rb.ru/story/how-to-pitch-investors/
-https://forbes.ru/business/489012-kak-ustroen-rynok-dostavki-eda-i-produkty
-https://www.cossa.ru/articles/234/567890/
 https://vc.ru/marketing/543210-razbor-marketatiga-apple-pochemu-ih-reklama-rabotaet
-https://incrussia.ru/understand/culture-eats-strategy/
-https://habr.com/ru/articles/711223/
-https://productsense.io/blog/metrics-tree-guide/
-
-
-
 
 https://nplus1.ru/material/2023/11/15/quantum-supremacy
 https://postnauka.org/longreads/156789
 https://elementy.ru/novosti_nauki/434123/kak_rabotaet_crispr_cas9
 https://arzamas.academy/materials/1234
-https://knife.media/cognitive-biases/
-https://naked-science.ru/article/astronomy/james-webb-discoveries
-https://biomolecula.ru/articles/kak-устроена-иммунная-система
 https://theideas.ru/posts/evolution-of-human-brain
 https://nplus1.ru/material/2022/05/10/climate-change-models
-https://postnauka.org/longreads/88901
 
-
-
-
-https://dtf.ru/games/1890123-istoriya-sozdaniya-series-dark-souls
-https://stopgame.ru/show/123456/istoriya_serii_fallout
-https://dtf.ru/cinema/1567890-razbor-sintaksisa-i-rezhissury-kristofera-nolana
-https://mirf.ru/books/tolkien-lore-geography-middle-earth/
-https://www.polygon.com/features/2020/5/12/game-design-architecture
-https://www.igromania.ru/article/31234/pochemu-immersive-sims-umirayut
 https://dtf.ru/gamedev/987654-kak-ustroena-procedurnaya-generaciya-mira
 https://www.kinopoisk.ru/media/article/4001234/
-https://kotaku.com/the-crunch-culture-in-game-development-1830001122
-https://shazoo.ru/articles/123456-kak-pentaiment-perekryvaet-istoriyu
 
-
-
-
-https://uxdesign.cc/the-psychology-of-design-fitts-law-and-beyond-7a8b9c
-https://www.smashingmagazine.com/2022/05/design-systems-guide/
-https://habr.com/ru/articles/678123/
 https://www.nngroup.com/articles/ten-usability-heuristics/
-https://vc.ru/design/654987-razbor-redizayna-izvestnogo-brenda-chto-pшло-ne-tak
-https://www.awwwards.com/blog/web-design-trends-2026/
-https://uxplanet.org/designing-better-tables-for-enterprise-applications-12345
-https://habr.com/ru/companies/yandex/blog/543210/
-https://www.behance.net/blog/behind-the-scenes-branding-project
-https://uxdesign.cc/accessibility-in-design-a-practical-guide-556677
 
-
-
-
-https://cuprum.media/article/how-much-water-to-drink
-https://lifehacker.ru/pomodoro-technique/
 https://challenger.ru/zdorove/pochemu-boli-v-spine-i-kak-s-etim-borotsya/
 https://journal.tinkoff.ru/list/run-guide/
-https://www.bbc.com/russian/features-59001234
-https://cuprum.media/article/vitamins-d-facts
-https://lifehacker.ru/digital-detox-guide/
-https://flacon-magazine.com/rubric/care/spf-creams-guide
 https://journal.tinkoff.ru/mental-health-apps/
 https://habr.com/ru/articles/590123/
 
-
-
-
-https://meduza.io/feature/2023/10/12/explaining-complex-economic-crisis
-https://www.kommersant.ru/doc/5678901
-https://www.bbc.com/russian/features-60123456
-https://republic.ru/posts/102345
-https://forbes.ru/society/456789-kak-izmenilsa-rynok-obrazovania-v-rossii
 https://www.rbc.ru/technology_and_media/15/04/2024/661234
-https://novayagazeta.ru/articles/2023/08/20/social-reportage
-https://thebell.io/analytics-tech-companies-valuation
-https://www.fontanka.ru/longreads/789012/
-https://lenta.ru/articles/2023/05/15/history-archive/
-
-
-
 
 https://journal.tinkoff.ru/sourdough-bread/
 https://habr.com/ru/articles/723456/
-https://pikabu.ru/story/retsept_nastoyashchego_uzbekskogo_plova_s_poyasneniyami_890123
-https://www.drive2.ru/b/567890123/
-https://eda.ru/journal/kak-pravilno-gotovit-steyk
-https://habr.com/ru/articles/612345/
-https://pikabu.ru/story/выращивание_овощей_на_балконе_опыт_и_ошибки_765432
 https://journal.tinkoff.ru/brewing-coffee-guide/
-https://www.drive2.ru/b/123456789/
-https://habr.com/ru/articles/634567/
+
+# ——— второй список ———
+# 1. Инженерия, разработка и архитектура (Software & Web)
+
+https://danluu.com/simple-architectures/
+https://martinfowler.com/articles/microservices.html
+https://stripe.com/blog/rate-limiters
+https://overreacted.io/a-complete-guide-to-useeffect/
+https://brandur.org/postgres-queues
+https://martinfowler.com/articles/lmax.html
+https://queue.acm.org/detail.cfm?id=3212455
+
+# 2. Технологические эссе и культура (Tech Thought Leadership)
+
+https://paulgraham.com/greatwork.html
+https://waitbutwhy.com/2015/01/artificial-intelligence-revolution-1.html
+https://stratechery.com/2015/aggregation-theory/
+https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/
+https://www.eugenewei.com/blog/2019/2/19/status-as-a-service
+https://sive.rs/relax
+https://www.swyx.io/learn-in-public
+https://kk.org/thetechnium/1000-true-fans/
+
+# 3. Продуктивность, мышление и психология (Self-Improvement)
+
+https://fs.blog/mental-models/
+https://jamesclear.com/habit-guide
+https://nesslabs.com/mindful-productivity
+https://www.nateliason.com/blog/pkm
+https://markmanson.net/not-giving-a-fuck
+https://every.to/superorganizers/how-to-build-a-second-brain
+
+# 4. Наука, технологии и космос (Science & Deep Tech)
+
+https://www.theatlantic.com/magazine/archive/2022/09/mri-brain-neuroscience-memory/670597/
+
+# 5. Дизайн, Игры и Поп-культура (Design, Gaming & Culture)
+
+https://www.nngroup.com/articles/f-shaped-pattern-reading-web-content/
+https://www.gamedeveloper.com/design/the-art-of-level-design-in-dark-souls
+https://alistapart.com/article/responsive-web-design/
