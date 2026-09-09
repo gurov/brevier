@@ -11,6 +11,8 @@
 //! который рубрика велит считать дефектом. comrak остаётся парсером: на нём
 //! собираются ссылки, на нём же будет рендер.
 
+use std::borrow::Cow;
+
 use comrak::nodes::NodeValue;
 use comrak::{Arena, Options};
 use htmd::element_handler::{HandlerResult, Handlers};
@@ -55,13 +57,28 @@ pub fn from_html(html: &str) -> Result<String, Error> {
     Ok(tidy(&to_markdown(html)?))
 }
 
-/// Убрать то, что htmd оставляет после вырезанных элементов: хвостовые пробелы
-/// и дыры в три и больше пустых строк.
+/// Убрать то, что мешает читать: хвостовые пробелы, дыры в три и больше пустых
+/// строк, выравнивание таблиц пробелами. Внутрь блоков кода не лезем — там
+/// значим каждый символ.
 fn tidy(md: &str) -> String {
     let mut out = String::with_capacity(md.len());
     let mut blanks = 0;
+    let mut in_code = false;
 
     for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            blanks = 0;
+            out.push_str(line.trim_end());
+            out.push('\n');
+            continue;
+        }
+        if in_code {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
         let line = line.trim_end();
         if line.is_empty() {
             blanks += 1;
@@ -71,7 +88,8 @@ fn tidy(md: &str) -> String {
         } else {
             blanks = 0;
         }
-        out.push_str(line);
+
+        out.push_str(&squeeze_table_row(line));
         out.push('\n');
     }
 
@@ -81,6 +99,62 @@ fn tidy(md: &str) -> String {
     } else {
         trimmed + "\n"
     }
+}
+
+/// htmd выравнивает столбцы по самой длинной ячейке. В инфобоксе википедии это
+/// строка-разделитель в шестьсот дефисов: в `less` не читается, а в диффе
+/// корпуса правка одной ячейки переписывает таблицу целиком. GFM выравнивания
+/// не требует — сжимаем.
+fn squeeze_table_row(line: &str) -> Cow<'_, str> {
+    if !(line.starts_with('|') && line.ends_with('|') && line.len() > 1) {
+        return Cow::Borrowed(line);
+    }
+
+    let cells: Vec<&str> = split_cells(line)
+        .into_iter()
+        .map(|cell| {
+            let cell = cell.trim();
+            if !is_separator(cell) {
+                return cell;
+            }
+            // Разделитель: `-----` → `---`, двоеточия выравнивания целы.
+            match (cell.starts_with(':'), cell.ends_with(':')) {
+                (true, true) => ":---:",
+                (true, false) => ":---",
+                (false, true) => "---:",
+                (false, false) => "---",
+            }
+        })
+        .collect();
+
+    Cow::Owned(format!("| {} |", cells.join(" | ")))
+}
+
+/// Ячейки разделяет `|`; экранированный `\|` — часть содержимого.
+fn split_cells(line: &str) -> Vec<&str> {
+    let inner = &line[1..line.len() - 1];
+    let mut cells = Vec::new();
+    let mut start = 0;
+    let mut escaped = false;
+
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '|' => {
+                cells.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    cells.push(&inner[start..]);
+    cells
+}
+
+fn is_separator(cell: &str) -> bool {
+    let core = cell.trim_matches(':');
+    !core.is_empty() && core.chars().all(|c| c == '-')
 }
 
 /// Исходящие ссылки статьи, в порядке появления, без повторов.
@@ -112,6 +186,10 @@ fn to_markdown(html: &str) -> Result<String, Error> {
         .options(HtmdOptions {
             heading_style: HeadingStyle::Atx,
             bullet_list_marker: BulletListMarker::Dash,
+            // htmd ставит три пробела после маркера — наследство turndown.
+            // Markdown пишут иначе, и в `less` лишний отступ заметен.
+            ul_bullet_spacing: 1,
+            ol_number_spacing: 1,
             link_style: LinkStyle::Inlined,
             code_block_style: CodeBlockStyle::Fenced,
             ..Default::default()
@@ -251,6 +329,25 @@ mod tests {
         // comrak на этом месте выдавал «Ура\!» и «a\_b».
         let md = from_html("<p>Ура! Вот так: a_b, 3 &lt; 5.</p>").unwrap();
         assert_eq!(md, "Ура! Вот так: a\\_b, 3 < 5.\n");
+    }
+
+    #[test]
+    fn wide_tables_are_squeezed() {
+        let md = from_html(
+            "<table><tr><th>очень длинный заголовок столбца</th><th>б</th></tr>\
+             <tr><td>к</td><td>д</td></tr></table>",
+        )
+        .unwrap();
+        assert_eq!(
+            md,
+            "| очень длинный заголовок столбца | б |\n| --- | --- |\n| к | д |\n"
+        );
+    }
+
+    #[test]
+    fn pipes_inside_code_blocks_are_left_alone() {
+        let md = from_html("<pre><code>| не | таблица |\n|  а  |  код  |</code></pre>").unwrap();
+        assert_eq!(md, "```\n| не | таблица |\n|  а  |  код  |\n```\n");
     }
 
     #[test]
