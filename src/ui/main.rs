@@ -10,9 +10,10 @@
 use iced::keyboard::{self, Modifiers, key};
 use iced::widget::scrollable::AbsoluteOffset;
 use iced::widget::{
-    button, column, container, markdown, operation, rich_text, row, scrollable, text, text_input,
+    button, column, container, markdown, mouse_area, operation, rich_text, row, scrollable, stack,
+    text, text_input,
 };
-use iced::{Center, Element, Fill, Subscription, Task, Theme};
+use iced::{Center, Element, Fill, Point, Subscription, Task, Theme};
 
 use brevier::address::{self, Address};
 use brevier::{Document, History, UserAgent};
@@ -91,6 +92,12 @@ struct Reader {
     /// Показывать ли оглавление. Решение читателя, общее для всех вкладок.
     show_toc: bool,
     dark: bool,
+    /// Зажатые клавиши. Клик по ссылке приходит без них — виджет
+    /// сообщает только адрес, — поэтому состояние держим сами.
+    modifiers: Modifiers,
+    /// Где стоит курсор и где открыто контекстное меню.
+    cursor: Point,
+    menu: Option<Point>,
 }
 
 /// Вкладка: своя статья, своя история и своё место в тексте.
@@ -106,6 +113,8 @@ struct Tab {
     page: Page,
     content: markdown::Content,
     outline: Vec<Entry>,
+    /// Текст статьи как есть — для «скопировать статью».
+    source: String,
     /// Ручка загрузки. У каждой вкладки своя: фоновая догружается сама
     /// и переключение на соседнюю её не отменяет.
     loading: Option<iced::task::Handle>,
@@ -121,6 +130,7 @@ impl Tab {
             page: Page::Blank,
             content: markdown::Content::new(),
             outline: Vec::new(),
+            source: String::new(),
             loading: None,
             scroll: 0.0,
         }
@@ -278,6 +288,11 @@ enum Message {
     CycleTab(bool),
     /// Читатель прокрутил страницу — запоминаем место для этой вкладки.
     ScrollChanged(f32),
+    ModifiersChanged(Modifiers),
+    CursorMoved(Point),
+    OpenMenu,
+    CloseMenu,
+    Copy(String),
     LinkClicked(markdown::Uri),
     Back,
     Forward,
@@ -314,6 +329,9 @@ impl Reader {
             next_id,
             show_toc: true,
             dark: true,
+            modifiers: Modifiers::default(),
+            cursor: Point::ORIGIN,
+            menu: None,
         };
 
         // Грузим все сразу: фоновая вкладка приезжает сама, для этого
@@ -364,8 +382,37 @@ impl Reader {
             // а не правит адрес, и клавиши должны листать страницу.
             Message::Go => Task::batch([unfocus(), self.go()]),
             Message::LinkClicked(uri) => {
-                self.tab_mut().input = uri.to_string();
-                self.go()
+                let target = uri.to_string();
+                // Как в браузерах: Ctrl открывает в новой вкладке, Shift
+                // кладёт адрес в буфер, обычный клик уводит на страницу.
+                if self.modifiers.command() {
+                    self.open_in_new_tab(target)
+                } else if self.modifiers.shift() {
+                    iced::clipboard::write(target)
+                } else {
+                    self.tab_mut().input = target;
+                    self.go()
+                }
+            }
+            Message::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers;
+                Task::none()
+            }
+            Message::CursorMoved(point) => {
+                self.cursor = point;
+                Task::none()
+            }
+            Message::OpenMenu => {
+                self.menu = Some(self.cursor);
+                Task::none()
+            }
+            Message::CloseMenu => {
+                self.menu = None;
+                Task::none()
+            }
+            Message::Copy(text) => {
+                self.menu = None;
+                iced::clipboard::write(text)
             }
             Message::Back => match self.tab_mut().history.back().cloned() {
                 Some(address) => self.load(address),
@@ -466,6 +513,7 @@ impl Reader {
                 self.switch_to(landing)
             }
             Message::Loaded(id, result) => {
+                let active = self.tab().id;
                 let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) else {
                     // Вкладку закрыли, пока страница ехала.
                     return Task::none();
@@ -476,11 +524,13 @@ impl Reader {
                         tab.input = document.address.display();
                         tab.outline = outline(&document.markdown);
                         tab.content = markdown::Content::parse(&document.markdown);
+                        tab.source = document.markdown;
                         tab.page = Page::Shown(document.title);
                     }
                     Err(failure) => {
                         tab.content = markdown::Content::new();
                         tab.outline = Vec::new();
+                        tab.source = String::new();
                         tab.page = Page::Failed(failure);
                     }
                 }
@@ -489,13 +539,29 @@ impl Reader {
                 // Новая страница начинается сверху — но только если читатель
                 // на неё смотрит. Догрузка фоновой вкладки чужую прокрутку
                 // трогать не смеет.
-                if self.tab().id == id {
+                if active == id {
                     operation::scroll_to(page_id(), AbsoluteOffset { x: 0.0, y: 0.0 })
                 } else {
                     Task::none()
                 }
             }
         }
+    }
+
+    /// Открыть адрес в новой вкладке, не уводя читателя с текущей.
+    fn open_in_new_tab(&mut self, target: String) -> Task<Message> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.tabs.push(Tab::new(id, target));
+
+        let opened = self.tabs.len() - 1;
+        let here = self.active;
+        self.active = opened;
+        let task = self.go();
+        // Ctrl+клик открывает вкладку в фоне: читатель остался в статье,
+        // а не улетел в ссылку, которую только присмотрел.
+        self.active = here;
+        task
     }
 
     /// Переключиться на вкладку и вернуть читателя туда, где он её бросил.
@@ -611,6 +677,18 @@ impl Reader {
             reading.into()
         };
 
+        // Правая кнопка открывает меню, левая закрывает. `mouse_area`
+        // только смотрит: клики по ссылкам под ним работают как работали.
+        let reading = mouse_area(reading)
+            .on_move(Message::CursorMoved)
+            .on_right_press(Message::OpenMenu)
+            .on_press(Message::CloseMenu);
+
+        let reading: Element<'_, Message> = match self.menu {
+            Some(at) => stack![reading, menu(at, tab)].into(),
+            None => reading.into(),
+        };
+
         // Корешки показываем только со второй вкладки: на одной статье
         // полоса — пустой шум, а «+» и Ctrl+T есть всегда.
         if self.tabs.len() > 1 {
@@ -620,6 +698,60 @@ impl Reader {
         }
     }
 }
+
+/// Контекстное меню. Своего виджета для него в iced нет, поэтому кладём
+/// обычный столбец кнопок поверх страницы через `stack` и сдвигаем отступом
+/// к месту клика.
+///
+/// Пункты только страничные, и это не лень: «скопировать ссылку»
+/// и «скопировать выделенное» сделать нечем. `rich_text` не отдаёт наружу,
+/// какая ссылка под курсором (`hovered_link` — приватное состояние виджета),
+/// а выделения текста в iced 0.14 нет вовсе. Ссылка копируется Shift+кликом,
+/// это работает.
+fn menu(at: Point, tab: &Tab) -> Element<'_, Message> {
+    let address = tab
+        .history
+        .current()
+        .map(brevier::Address::display)
+        .unwrap_or_default();
+
+    let item = |label: &'static str, message: Option<Message>| {
+        let mut b = button(text(label).size(TEXT_SIZE * 0.85))
+            .width(Fill)
+            .padding([6, 12])
+            .style(button::text);
+        if let Some(message) = message {
+            b = b.on_press(message);
+        }
+        b
+    };
+
+    let items = column![
+        item(
+            "Копировать адрес",
+            (!address.is_empty()).then(|| Message::Copy(address.clone()))
+        ),
+        item(
+            "Копировать статью",
+            (!tab.source.is_empty()).then(|| Message::Copy(tab.source.clone()))
+        ),
+        item(
+            "Открыть в системном браузере",
+            (!address.is_empty()).then_some(Message::OpenInBrowser)
+        ),
+    ]
+    .width(MENU_WIDTH);
+
+    container(container(items).style(container::rounded_box).padding(4))
+        .padding(iced::Padding {
+            top: at.y,
+            left: at.x,
+            ..iced::Padding::ZERO
+        })
+        .into()
+}
+
+const MENU_WIDTH: f32 = 260.0;
 
 /// Сколько знаков влезает на корешок. Обрезаем сами: запрет переноса
 /// не мешает длинной подписи вылезти за кнопку и налезть на крестик.
@@ -676,6 +808,9 @@ fn strip(tabs: &[Tab], active: usize) -> Element<'_, Message> {
 fn on_key(event: keyboard::Event) -> Option<Message> {
     match event {
         keyboard::Event::KeyPressed { key, modifiers, .. } => keys(&key, modifiers),
+        // Клик по ссылке приходит без модификаторов, поэтому их состояние
+        // мы отслеживаем отдельно и храним у себя.
+        keyboard::Event::ModifiersChanged(modifiers) => Some(Message::ModifiersChanged(modifiers)),
         _ => None,
     }
 }
@@ -1380,6 +1515,62 @@ mod tests {
         assert!(clipped.chars().count() <= TAB_LABEL, "{clipped:?}");
         assert!(clipped.ends_with('…'));
         assert_eq!(clip("Коротко", TAB_LABEL), "Коротко");
+    }
+
+    fn link(target: &str) -> Message {
+        Message::LinkClicked(target.to_owned())
+    }
+
+    #[test]
+    fn ctrl_click_opens_a_link_in_a_background_tab() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::ModifiersChanged(Modifiers::COMMAND));
+        let _ = reader.update(link("https://example.test/статья"));
+
+        assert_eq!(reader.tabs.len(), 2, "ссылка должна открыться вкладкой");
+        assert_eq!(reader.active, 0, "и открыться в фоне, не уводя читателя");
+        assert_eq!(reader.tabs[1].input, "https://example.test/статья");
+        assert!(matches!(reader.tabs[1].page, Page::Loading));
+        // Читатель остался там, где был.
+        assert!(matches!(reader.tabs[0].page, Page::Blank));
+    }
+
+    #[test]
+    fn shift_click_only_copies_the_link() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::ModifiersChanged(Modifiers::SHIFT));
+        let _ = reader.update(link("https://example.test/"));
+
+        assert_eq!(reader.tabs.len(), 1, "новой вкладки быть не должно");
+        assert!(matches!(reader.tab().page, Page::Blank), "и перехода тоже");
+    }
+
+    #[test]
+    fn a_plain_click_follows_the_link_where_you_are() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(link("https://example.test/"));
+
+        assert_eq!(reader.tabs.len(), 1);
+        assert!(matches!(reader.tab().page, Page::Loading));
+    }
+
+    #[test]
+    fn the_menu_opens_where_you_clicked_and_closes_on_the_next_click() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::CursorMoved(Point::new(120.0, 340.0)));
+        let _ = reader.update(Message::OpenMenu);
+        assert_eq!(reader.menu, Some(Point::new(120.0, 340.0)));
+
+        let _ = reader.update(Message::CloseMenu);
+        assert!(reader.menu.is_none());
+    }
+
+    #[test]
+    fn copying_from_the_menu_closes_it() {
+        let mut reader = Reader::new(Vec::new()).0;
+        let _ = reader.update(Message::OpenMenu);
+        let _ = reader.update(Message::Copy("что-то".to_owned()));
+        assert!(reader.menu.is_none());
     }
 
     #[test]
