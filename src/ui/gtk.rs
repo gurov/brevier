@@ -12,8 +12,10 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 mod article;
+mod formula;
 
 use article::Article;
+use formula::Formula;
 
 use gtk::gio;
 use gtk::glib;
@@ -186,9 +188,30 @@ struct Shot {
     /// Картинка внутри строки — обычно формула: у неё нет ни своей строки,
     /// ни подписи, и роста она с текст, а не с колонку.
     inline: bool,
-    frame: gtk::Box,
+    slot: Slot,
     /// Чтобы второй клик не начинал вторую загрузку той же картинки.
     busy: Rc<Cell<bool>>,
+}
+
+/// Куда приедет картинка.
+///
+/// Иллюстрация — в рамку-виджет на якоре: у неё своя строка, подпись
+/// и клик «открыть в полном размере». Формула — в холст прямо в буфере:
+/// виджет посреди строки текста стоит прокрутки, и это замерено
+/// (см. шапку `formula.rs`).
+#[derive(Clone)]
+enum Slot {
+    Frame(gtk::Box),
+    Canvas(Formula),
+}
+
+impl Slot {
+    fn frame(&self) -> Option<&gtk::Box> {
+        match self {
+            Slot::Frame(frame) => Some(frame),
+            Slot::Canvas(_) => None,
+        }
+    }
 }
 
 impl State {
@@ -994,6 +1017,14 @@ fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
 /// Цвет линейки цитаты: приглушённая краска вполсилы. Линейка отмечает
 /// чужую речь, а не спорит с ней, поэтому берёт не цвет текста и не цвет
 /// линеек таблицы, а середину между ними.
+/// Краска страницы. Нужна холсту формулы: он рисует исходник сам,
+/// в обход тегов буфера, и цвет ему надо дать явно.
+fn ink_color(dark: bool) -> gtk::gdk::RGBA {
+    if dark { INK_DARK } else { INK_LIGHT }
+        .parse::<gtk::gdk::RGBA>()
+        .unwrap_or_else(|_| gtk::gdk::RGBA::new(0.1, 0.1, 0.1, 1.0))
+}
+
 fn rule_color(dark: bool) -> gtk::gdk::RGBA {
     let mut color = colors(dark)
         .dim
@@ -1763,37 +1794,24 @@ impl Writer<'_> {
     /// Картинка — блок: своя строка сверху и снизу. Внутри абзаца её ставят
     /// редко, а разорванная надвое строка читается плохо.
     fn shot(&mut self, source: Source, alt: String, inline: bool) {
-        let frame = if inline {
-            self.inline_anchor()
+        let slot = if inline {
+            // Холст, а не виджет: он занимает тот же один символ, поэтому
+            // смещения ссылок, заголовков и поиска не едут, — а сотня
+            // виджетов в строках текста рвала прокрутку.
+            let canvas = Formula::new();
+            let mut end = self.buffer.end_iter();
+            self.buffer.insert_paintable(&mut end, &canvas);
+            Slot::Canvas(canvas)
         } else {
-            self.anchor()
+            Slot::Frame(self.anchor())
         };
         self.shots.push(Shot {
             source,
             alt,
             inline,
-            frame,
+            slot,
             busy: Rc::new(Cell::new(false)),
         });
-    }
-
-    /// Место под картинку прямо в строке: ни своей строки, ни ширины
-    /// в колонку — иначе формула разорвала бы предложение надвое.
-    fn inline_anchor(&mut self) -> gtk::Box {
-        let mut end = self.buffer.end_iter();
-        let place = self.buffer.create_child_anchor(&mut end);
-
-        let frame = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .valign(gtk::Align::Baseline)
-            // Пустая коробка нулевого размера в строке текста — та самая,
-            // на которую GTK жалуется «snapshot without a current allocation»:
-            // раскладку ей не дают, а рисовать пытаются. Просим хоть пиксель.
-            .width_request(1)
-            .height_request(1)
-            .build();
-        self.view.add_child_at_anchor(&frame, &place);
-        frame
     }
 
     /// Место под виджет в тексте: своя строка, рамка в меру.
@@ -2021,39 +2039,41 @@ impl Writer<'_> {
 /// серьёзной поверхностью атаки, и решение открыть её принимает читатель —
 /// кликом или переключателем в шапке.
 fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble: Option<&str>) {
-    // Формулу, которая всё равно сейчас загрузится, ждём пустой картинкой,
-    // а не подписью: подменять ребёнка в строке текста — способ получить
-    // от GTK жалобу на снимок виджета без раскладки. Ставим `GtkPicture`
-    // сразу и потом только меняем в нём холст.
-    if shot.inline && trouble.is_none() && state.borrow().images {
-        let waiting = gtk::Picture::new();
-        waiting.set_size_request(1, 1);
-        waiting.set_valign(gtk::Align::Baseline);
-        fill(&shot.frame, &waiting);
+    // Формула живёт холстом в буфере: ставить в неё нечего, надо только
+    // решить, чем её показывать до картинки. Исходник `{\displaystyle b}`
+    // читается плохо, но лучше пустого места посреди фразы.
+    if let Slot::Canvas(canvas) = &shot.slot {
+        let waiting = trouble.is_some() || !state.borrow().images;
+        let layout = waiting.then(|| {
+            let view = view_of(state, id);
+            let layout = match &view {
+                Some(view) => view.create_pango_layout(Some(&formula(&shot.alt))),
+                None => return None,
+            };
+            layout.set_font_description(Some(&pango::FontDescription::from_string(&format!(
+                "{BODY_FAMILY} {}",
+                TEXT_SIZE
+            ))));
+            Some(layout)
+        });
+        canvas.set_fallback(layout.flatten(), ink_color(state.borrow().dark));
         return;
     }
 
-    let label = if shot.inline {
-        // Вместо формулы — её исходник: `{\displaystyle b}` читается плохо,
-        // но лучше пустого места, а «image:» в середине фразы — совсем мимо.
-        formula(&shot.alt)
+    let Some(frame) = shot.slot.frame() else { return };
+
+    let name = if shot.alt.is_empty() {
+        "image".to_owned()
     } else {
-        let name = if shot.alt.is_empty() {
-            "image".to_owned()
-        } else {
-            format!("image: {}", clip(&shot.alt, 160))
-        };
-        match trouble {
-            Some(trouble) => format!("{trouble}\n{name}"),
-            None => name,
-        }
+        format!("image: {}", clip(&shot.alt, 160))
+    };
+    let label = match trouble {
+        Some(trouble) => format!("{trouble}\n{name}"),
+        None => name,
     };
 
-    let button = gtk::Button::builder()
-        .label(&label)
-        .has_frame(false)
-        .build();
-    button.add_css_class(if shot.inline { "formula" } else { "shot" });
+    let button = gtk::Button::builder().label(&label).has_frame(false).build();
+    button.add_css_class("shot");
     button.set_cursor_from_name(Some("pointer"));
     button.set_tooltip_text(Some(&shot.source.display()));
     if let Some(text) = button.child().and_downcast::<gtk::Label>() {
@@ -2066,7 +2086,7 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
         let shot = shot.clone();
         button.connect_clicked(move |_| load_shot(&ui, &state, id, &shot));
     }
-    fill(&shot.frame, &button);
+    fill(frame, &button);
 }
 
 /// Загрузить все картинки открытой вкладки.
@@ -2101,13 +2121,13 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         return;
     };
 
-    if !shot.inline {
+    if let Some(frame) = shot.slot.frame() {
         let waiting = gtk::Label::builder()
             .label("loading the image…")
             .wrap(true)
             .build();
         waiting.add_css_class("caption");
-        fill(&shot.frame, &waiting);
+        fill(frame, &waiting);
     }
 
     let source = shot.source.clone();
@@ -2182,30 +2202,29 @@ fn show_shot(shot: &Shot, raster: Raster) {
         raster.width as usize * 4,
     );
 
+    // Формула — холст в буфере: меняем в нём картинку, виджета тут нет вовсе.
+    if let Slot::Canvas(canvas) = &shot.slot {
+        canvas.set_texture(texture.upcast_ref());
+        return;
+    }
+    let Some(frame) = shot.slot.frame() else { return };
+
     // Если картинка уже стоит в рамке — меняем холст, а не ребёнка:
     // перестройка дерева виджетов посреди кадра и есть та самая жалоба
     // GTK на снимок без раскладки.
-    let picture = match shot.frame.first_child().and_downcast::<gtk::Picture>() {
+    let picture = match frame.first_child().and_downcast::<gtk::Picture>() {
         Some(picture) => {
             picture.set_paintable(Some(&texture));
             picture
         }
         None => {
             let picture = gtk::Picture::for_paintable(&texture);
-            fill(&shot.frame, &picture);
+            fill(frame, &picture);
             picture
         }
     };
     picture.set_can_shrink(true);
     picture.set_size_request(raster.width as i32, raster.height as i32);
-    if shot.inline {
-        // Формула стоит в строке: её подпирает базовая линия, а не центр
-        // колонки, и открывать её отдельно незачем.
-        picture.set_valign(gtk::Align::Baseline);
-        picture.set_tooltip_text(Some(&formula(&shot.alt)));
-        return;
-    }
-
     picture.set_cursor_from_name(Some("pointer"));
     picture.set_halign(gtk::Align::Center);
     picture.set_tooltip_text(Some(&shot.source.display()));
@@ -2232,7 +2251,7 @@ fn show_shot(shot: &Shot, raster: Raster) {
             })
             .build();
         caption.add_css_class("caption");
-        shot.frame.append(&caption);
+        frame.append(&caption);
     }
 }
 
