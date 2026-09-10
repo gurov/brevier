@@ -221,15 +221,24 @@ mod tests {
 
     #[test]
     fn the_name_comes_from_the_title() {
-        assert_eq!(slug("Week of 29 August – 4 September 2026"), "Week-of-29-August-4-September-2026");
+        assert_eq!(
+            slug("Week of 29 August – 4 September 2026"),
+            "Week-of-29-August-4-September-2026"
+        );
         assert_eq!(slug("Подводные камни: часть 2"), "Подводные-камни-часть-2");
         assert_eq!(slug("***"), "article");
     }
 
     #[test]
     fn an_image_file_keeps_its_own_name() {
-        assert_eq!(file_name("https://e.com/a/chart.svg?v=2", "image/svg+xml"), "chart.svg");
-        assert_eq!(file_name("https://e.com/img/12345", "image/png"), "12345.png");
+        assert_eq!(
+            file_name("https://e.com/a/chart.svg?v=2", "image/svg+xml"),
+            "chart.svg"
+        );
+        assert_eq!(
+            file_name("https://e.com/img/12345", "image/png"),
+            "12345.png"
+        );
         assert_eq!(file_name("https://e.com/", "image/jpeg"), "image.jpg");
     }
 
@@ -255,10 +264,17 @@ mod tests {
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
         let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
         assert!(names.contains(&"out.md".to_owned()), "{names:?}");
-        assert!(names.contains(&"images/01-chart.png".to_owned()), "{names:?}");
+        assert!(
+            names.contains(&"images/01-chart.png".to_owned()),
+            "{names:?}"
+        );
 
         let mut text = String::new();
-        archive.by_name("out.md").unwrap().read_to_string(&mut text).unwrap();
+        archive
+            .by_name("out.md")
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
         // Ссылка в сохранённом тексте ведёт внутрь архива, а не в интернет.
         assert!(text.contains("](images/01-chart.png)"), "{text}");
 

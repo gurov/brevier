@@ -241,8 +241,8 @@ fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
     let w = ((size.width() * scale).round() as u32).clamp(1, MAX_SIDE);
     let h = ((size.height() * scale).round() as u32).clamp(1, MAX_SIDE);
 
-    let mut pixmap =
-        tiny_skia::Pixmap::new(w, h).ok_or_else(|| Error::Media("no room for the canvas".to_owned()))?;
+    let mut pixmap = tiny_skia::Pixmap::new(w, h)
+        .ok_or_else(|| Error::Media("no room for the canvas".to_owned()))?;
     // Бумагой — до отрисовки: дальше по всему холсту альфа единица, и премножение
     // tiny-skia совпадает с обычным RGBA. Иначе пришлось бы делить обратно.
     pixmap.fill(tiny_skia::Color::from_rgba8(
@@ -382,14 +382,20 @@ mod tests {
     #[test]
     fn a_local_document_looks_next_to_itself() {
         assert_eq!(
-            resolve(&Address::File(PathBuf::from("/docs/guide/readme.md")), "img/a.png"),
+            resolve(
+                &Address::File(PathBuf::from("/docs/guide/readme.md")),
+                "img/a.png"
+            ),
             Some(Source::File(PathBuf::from("/docs/guide/img/a.png")))
         );
     }
 
     #[test]
     fn what_we_cannot_fetch_is_refused_outright() {
-        assert_eq!(resolve(&web("https://e.com/a"), "data:image/png;base64,AAA"), None);
+        assert_eq!(
+            resolve(&web("https://e.com/a"), "data:image/png;base64,AAA"),
+            None
+        );
         assert_eq!(resolve(&web("https://e.com/a"), ""), None);
     }
 
@@ -425,7 +431,11 @@ mod tests {
             big.height,
             small.height
         );
-        assert!(big.width < 100, "формулу растянуло до колонки: {}", big.width);
+        assert!(
+            big.width < 100,
+            "формулу растянуло до колонки: {}",
+            big.width
+        );
     }
 
     #[test]
@@ -444,7 +454,10 @@ mod tests {
     #[test]
     fn transparency_ends_up_on_the_paper() {
         // Чёрный, полностью прозрачный, — становится цветом бумаги.
-        assert_eq!(flatten(vec![0, 0, 0, 0], PAPER), PAPER.iter().copied().chain([255]).collect::<Vec<u8>>());
+        assert_eq!(
+            flatten(vec![0, 0, 0, 0], PAPER),
+            PAPER.iter().copied().chain([255]).collect::<Vec<u8>>()
+        );
         // Непрозрачное не трогаем.
         assert_eq!(flatten(vec![10, 20, 30, 255], PAPER), vec![10, 20, 30, 255]);
     }

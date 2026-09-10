@@ -33,17 +33,118 @@ pub struct Span {
 /// ключевое, а в другом имя, покрасится лишний раз: цена этого — один
 /// цветной идентификатор, а не сломанный разбор.
 const KEYWORDS: &[&str] = &[
-    "abstract", "and", "as", "assert", "async", "await", "begin", "bool", "break", "case",
-    "catch", "char", "class", "const", "constructor", "continue", "def", "default", "defer",
-    "del", "delete", "do", "double", "dyn", "elif", "else", "elseif", "end", "enum", "except",
-    "export", "extends", "extern", "false", "final", "finally", "float", "fn", "for", "foreach",
-    "from", "func", "function", "go", "goto", "if", "impl", "implements", "import", "in", "int",
-    "interface", "is", "lambda", "let", "loop", "macro", "match", "mod", "module", "move", "mut",
-    "namespace", "new", "nil", "none", "not", "null", "object", "or", "package", "pass", "private",
-    "protected", "pub", "public", "raise", "readonly", "ref", "return", "select", "self", "static",
-    "str", "string", "struct", "super", "switch", "template", "then", "this", "throw", "trait",
-    "true", "try", "type", "typedef", "union", "unless", "unsafe", "until", "use", "using", "val",
-    "var", "virtual", "void", "when", "where", "while", "with", "yield",
+    "abstract",
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "begin",
+    "bool",
+    "break",
+    "case",
+    "catch",
+    "char",
+    "class",
+    "const",
+    "constructor",
+    "continue",
+    "def",
+    "default",
+    "defer",
+    "del",
+    "delete",
+    "do",
+    "double",
+    "dyn",
+    "elif",
+    "else",
+    "elseif",
+    "end",
+    "enum",
+    "except",
+    "export",
+    "extends",
+    "extern",
+    "false",
+    "final",
+    "finally",
+    "float",
+    "fn",
+    "for",
+    "foreach",
+    "from",
+    "func",
+    "function",
+    "go",
+    "goto",
+    "if",
+    "impl",
+    "implements",
+    "import",
+    "in",
+    "int",
+    "interface",
+    "is",
+    "lambda",
+    "let",
+    "loop",
+    "macro",
+    "match",
+    "mod",
+    "module",
+    "move",
+    "mut",
+    "namespace",
+    "new",
+    "nil",
+    "none",
+    "not",
+    "null",
+    "object",
+    "or",
+    "package",
+    "pass",
+    "private",
+    "protected",
+    "pub",
+    "public",
+    "raise",
+    "readonly",
+    "ref",
+    "return",
+    "select",
+    "self",
+    "static",
+    "str",
+    "string",
+    "struct",
+    "super",
+    "switch",
+    "template",
+    "then",
+    "this",
+    "throw",
+    "trait",
+    "true",
+    "try",
+    "type",
+    "typedef",
+    "union",
+    "unless",
+    "unsafe",
+    "until",
+    "use",
+    "using",
+    "val",
+    "var",
+    "virtual",
+    "void",
+    "when",
+    "where",
+    "while",
+    "with",
+    "yield",
 ];
 
 /// Чем в этом языке пишут комментарии и строки.
@@ -143,11 +244,7 @@ pub fn spans(code: &str, language: &str) -> Vec<Span> {
 
     while i < bytes.len() {
         // ── комментарий до конца строки
-        if let Some(open) = rules
-            .line
-            .iter()
-            .find(|open| code[i..].starts_with(**open))
-        {
+        if let Some(open) = rules.line.iter().find(|open| code[i..].starts_with(**open)) {
             let _ = open;
             let end = code[i..].find('\n').map(|at| i + at).unwrap_or(code.len());
             spans.push(Span {
@@ -311,10 +408,17 @@ mod tests {
 
     #[test]
     fn the_hash_is_a_comment_only_where_it_is_one() {
-        assert_eq!(painted("x = 1  # готово", "python").last(), Some(&(Kind::Comment, "# готово")));
+        assert_eq!(
+            painted("x = 1  # готово", "python").last(),
+            Some(&(Kind::Comment, "# готово"))
+        );
         // В незнакомом языке решётка комментарием не считается: слишком часто
         // это препроцессор или цвет.
-        assert!(!painted("#include <stdio.h>", "").iter().any(|(kind, _)| *kind == Kind::Comment));
+        assert!(
+            !painted("#include <stdio.h>", "")
+                .iter()
+                .any(|(kind, _)| *kind == Kind::Comment)
+        );
     }
 
     #[test]
@@ -330,7 +434,11 @@ mod tests {
     #[test]
     fn a_word_is_taken_whole() {
         // «utf8» — одно слово, а не «utf» и число.
-        assert!(painted("let utf8 = to_utf8(x);", "rust").iter().all(|(kind, _)| *kind != Kind::Number));
+        assert!(
+            painted("let utf8 = to_utf8(x);", "rust")
+                .iter()
+                .all(|(kind, _)| *kind != Kind::Number)
+        );
         // «format» не ключевое, «for» внутри него — тем более.
         assert_eq!(painted("format(x)", "rust"), vec![]);
     }

@@ -359,11 +359,7 @@ fn drop_repeated_captions(lines: &mut Vec<&str>) {
 /// пробелы, а в `alt` — обычные. Побайтово это разные строки, глазами —
 /// одна и та же, и читателю достаётся дубль.
 fn same_text(line: &str, alt: &str) -> bool {
-    let words = |text: &str| {
-        text.split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
+    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
     words(line) == words(alt)
 }
 
@@ -413,7 +409,9 @@ fn drop_repeats(lines: &mut Vec<&str>) {
             result.push(line);
             continue;
         }
-        let near = seen.insert(text, i).is_some_and(|was| i - was <= REPEAT_WINDOW);
+        let near = seen
+            .insert(text, i)
+            .is_some_and(|was| i - was <= REPEAT_WINDOW);
         if !near {
             result.push(line);
         }
@@ -498,12 +496,14 @@ fn strip_teasers(md: &str) -> Teasers {
     // Снимаем их подряд и только над сеткой: там короткий заголовок —
     // это её название, а не последний раздел статьи.
     while label && cut > 0 {
-        let bare = lines[cut - 1].trim().trim_start_matches('#').trim_matches('*').trim();
+        let bare = lines[cut - 1]
+            .trim()
+            .trim_start_matches('#')
+            .trim_matches('*')
+            .trim();
         let heading = lines[cut - 1].trim_start().starts_with('#');
         let short = bare.chars().count() <= 60 && !bare.ends_with(['.', '!', '?', '…']);
-        if bare.is_empty()
-            || (short && (heading || !bare.starts_with(['|', '>', '-', '`', '['])))
-        {
+        if bare.is_empty() || (short && (heading || !bare.starts_with(['|', '>', '-', '`', '[']))) {
             cut -= 1;
         } else {
             break;
@@ -1061,17 +1061,26 @@ mod tail_tests {
     fn tail_grid_of_image_links_is_cut() {
         let doc = "# Заголовок\n\nПервый абзац статьи, достаточно длинный.\n\n[![](https://cdn.example.com/a.jpg?w=877)](https://cdn.example.com/a.jpg)\n\nВторой абзац статьи, тоже длинный и осмысленный.\n\n[![](https://cdn.example.com/p1.png?w=600)](https://example.com/live/one.html)\n\nАнонс первой чужой статьи.\n\n[![](https://cdn.example.com/p2.png?w=600)](https://example.com/live/two.html)\n\nАнонс второй чужой статьи.\n";
         let out = article(doc);
-        assert!(out.contains("Второй абзац"), "тело статьи должно остаться:\n{out}");
+        assert!(
+            out.contains("Второй абзац"),
+            "тело статьи должно остаться:\n{out}"
+        );
         assert!(!out.contains("one.html"), "анонсы должны уйти:\n{out}");
         // Картинка-ссылка на саму картинку — это увеличение, она остаётся.
-        assert!(out.contains("a.jpg"), "увеличение картинки не трогаем:\n{out}");
+        assert!(
+            out.contains("a.jpg"),
+            "увеличение картинки не трогаем:\n{out}"
+        );
     }
 
     #[test]
     fn a_lone_image_link_is_not_a_grid() {
         let doc = "# Заголовок\n\nТекст статьи, вполне себе содержательный абзац.\n\n[![](https://cdn.example.com/promo.png)](https://example.com/promo)\n\nПодпись к врезке, которая на самом деле часть статьи.\n";
         let out = article(doc);
-        assert!(out.contains("promo"), "одна картинка-ссылка — не сетка:\n{out}");
+        assert!(
+            out.contains("promo"),
+            "одна картинка-ссылка — не сетка:\n{out}"
+        );
     }
 
     #[test]
@@ -1082,7 +1091,12 @@ mod tail_tests {
 
     #[test]
     fn a_far_away_repeat_is_content_not_chrome() {
-        let far = "\n\n".to_owned() + &vec!["Прочий текст статьи, довольно длинная строка."; 20].join("\n\n");
+        let far = "\n\n".to_owned()
+            + &vec![
+                "Прочий текст статьи, довольно длинная строка.";
+                20
+            ]
+            .join("\n\n");
         let line = "Название курса, повторённое в двух разных списках страницы.";
         let doc = format!("# Заголовок\n\n{line}{far}\n\n{line}\n");
         assert_eq!(article(&doc).matches(line).count(), 2);
@@ -1091,10 +1105,16 @@ mod tail_tests {
     #[test]
     fn caption_repeating_the_alt_text_is_dropped() {
         let caption = "Это Тристан Бакмастер, математик, и он очень зол";
-        let doc = format!("# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![{caption}](https://cdn.example.com/i.jpg)\n\n{caption}\n\nСледующий абзац статьи.\n");
+        let doc = format!(
+            "# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![{caption}](https://cdn.example.com/i.jpg)\n\n{caption}\n\nСледующий абзац статьи.\n"
+        );
         let out = article(&doc);
-        assert_eq!(out.matches(caption).count(), 1, "подпись должна остаться одна:\n{out}");
-        assert!(out.contains("![" ), "сама картинка остаётся:\n{out}");
+        assert_eq!(
+            out.matches(caption).count(),
+            1,
+            "подпись должна остаться одна:\n{out}"
+        );
+        assert!(out.contains("!["), "сама картинка остаётся:\n{out}");
     }
 
     #[test]
@@ -1102,9 +1122,14 @@ mod tail_tests {
         // habr ставит неразрывные пробелы в тексте и обычные в alt.
         let alt = "Это Тристан Бакмастер, математик, и он очень зол";
         let caption = alt.replace(' ', "\u{a0}");
-        let doc = format!("# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![{alt}](https://cdn.example.com/i.jpg)\n\n{caption}\n\nСледующий абзац статьи.\n");
+        let doc = format!(
+            "# Заголовок\n\nАбзац статьи, достаточно длинный для проверки.\n\n![{alt}](https://cdn.example.com/i.jpg)\n\n{caption}\n\nСледующий абзац статьи.\n"
+        );
         let out = article(&doc);
-        assert!(!out.contains(&caption), "подпись с неразрывными пробелами должна уйти:\n{out}");
+        assert!(
+            !out.contains(&caption),
+            "подпись с неразрывными пробелами должна уйти:\n{out}"
+        );
     }
 
     #[test]
@@ -1117,7 +1142,10 @@ mod tail_tests {
     fn tail_notice_is_dropped() {
         let doc = "# Заголовок\n\nПоследний абзац статьи, вполне осмысленный и длинный.\n\nНашли ошибку в тексте — выделите её и нажмите Ctrl+Enter.\n";
         let out = article(doc);
-        assert!(!out.contains("Ctrl+Enter"), "хвостовое уведомление должно уйти:\n{out}");
+        assert!(
+            !out.contains("Ctrl+Enter"),
+            "хвостовое уведомление должно уйти:\n{out}"
+        );
         assert!(out.contains("Последний абзац"));
     }
 

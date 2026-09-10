@@ -3,7 +3,6 @@
 //! Живёт в ядре, а не в интерфейсе: разбор заголовков и выбор вех от тулкита
 //! не зависят, а любой второй интерфейс получит их готовыми и с тестами.
 
-
 /// Типографика. Числа связаны между собой, поэтому и живут вместе: мера
 /// задана в кеглях, а не в пикселях, чтобы при смене размера шрифта строка
 /// оставалась той же длины в знаках. Тридцать три кегля — это около
@@ -216,11 +215,7 @@ fn waypoints(blocks: &[Block], height: f32) -> Vec<Entry> {
             .iter()
             .enumerate()
             .skip(taken)
-            .min_by(|(_, a), (_, b)| {
-                (a.at - target)
-                    .abs()
-                    .total_cmp(&(b.at - target).abs())
-            })
+            .min_by(|(_, a), (_, b)| (a.at - target).abs().total_cmp(&(b.at - target).abs()))
         else {
             break;
         };
@@ -286,7 +281,9 @@ fn scan(source: &str) -> (Vec<Block>, f32) {
             continue;
         }
 
-        let rows = (text.chars().count() as f32 / CHARS_PER_LINE).ceil().max(1.0);
+        let rows = (text.chars().count() as f32 / CHARS_PER_LINE)
+            .ceil()
+            .max(1.0);
         if rows >= 2.0 {
             // Вехой может быть только настоящий абзац, а не строка списка
             // или подпись: у коротких строк начало ничего не говорит.
@@ -360,7 +357,6 @@ fn plain(text: &str) -> String {
     out.trim().to_owned()
 }
 
-
 /// Обрезать подпись по границе знака, с многоточием.
 pub fn clip(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -390,7 +386,11 @@ mod tests {
             "# Название статьи\n\n{text}\n\n## Первый\n\n{text}\n\n## Второй\n\n{text}\n\n## Третий\n"
         );
         let entries = outline(&doc);
-        assert_eq!(entries.len(), 3, "название в оглавление не идёт: {entries:?}");
+        assert_eq!(
+            entries.len(),
+            3,
+            "название в оглавление не идёт: {entries:?}"
+        );
         assert_eq!(entries[0].title, "Первый");
         assert_eq!(entries[0].level, 2);
     }
@@ -403,9 +403,15 @@ mod tests {
         );
         let entries = outline(&doc);
         assert_eq!(entries.len(), 3, "{entries:?}");
-        assert!(entries.windows(2).all(|w| w[0].at < w[1].at), "порядок нарушен: {entries:?}");
+        assert!(
+            entries.windows(2).all(|w| w[0].at < w[1].at),
+            "порядок нарушен: {entries:?}"
+        );
         let middle = entries[1].at;
-        assert!((0.35..0.7).contains(&middle), "середина не в середине: {middle}");
+        assert!(
+            (0.35..0.7).contains(&middle),
+            "середина не в середине: {middle}"
+        );
         assert!(entries.iter().all(|e| (0.0..=1.0).contains(&e.at)));
     }
 
@@ -427,14 +433,25 @@ mod tests {
 ## Первый\n\n{text}\n\n## Второй\n\n{text}\n\n## Третий\n\n{text}\n"
         );
         let entries = outline(&doc);
-        assert_eq!(entries.len(), 3, "комментарий в коде — не заголовок: {entries:?}");
-        assert!(entries.iter().all(|e| e.title != "это комментарий, а не заголовок"));
+        assert_eq!(
+            entries.len(),
+            3,
+            "комментарий в коде — не заголовок: {entries:?}"
+        );
+        assert!(
+            entries
+                .iter()
+                .all(|e| e.title != "это комментарий, а не заголовок")
+        );
     }
 
     #[test]
     fn a_short_page_gets_no_contents() {
         let doc = "# Заметка\n\nОдин абзац, и на этом всё.\n";
-        assert!(outline(doc).is_empty(), "короткой странице оглавление не нужно");
+        assert!(
+            outline(doc).is_empty(),
+            "короткой странице оглавление не нужно"
+        );
     }
 
     #[test]
@@ -443,17 +460,28 @@ mod tests {
 он занял несколько строк на нашей мере и попал в разметку вехой.";
         let doc = format!("# Название\n\n{}\n", vec![para; 40].join("\n\n"));
         let entries = outline(&doc);
-        assert!(entries.len() >= 2, "вехи должны появиться: {}", entries.len());
+        assert!(
+            entries.len() >= 2,
+            "вехи должны появиться: {}",
+            entries.len()
+        );
         assert!(entries.len() <= MAX_WAYPOINTS);
-        assert!(entries.windows(2).all(|w| w[0].at <= w[1].at), "порядок вех нарушен");
+        assert!(
+            entries.windows(2).all(|w| w[0].at <= w[1].at),
+            "порядок вех нарушен"
+        );
         assert!(entries.iter().all(|e| !e.title.is_empty()));
     }
 
     #[test]
     fn a_waypoint_label_is_short() {
-        let long = "Это очень длинное начало абзаца, которое ни в какое оглавление целиком не влезет";
+        let long =
+            "Это очень длинное начало абзаца, которое ни в какое оглавление целиком не влезет";
         let label = lead(long);
-        assert!(label.chars().count() <= 42, "подпись слишком длинная: {label:?}");
+        assert!(
+            label.chars().count() <= 42,
+            "подпись слишком длинная: {label:?}"
+        );
         assert!(label.ends_with('…'));
     }
 
@@ -468,7 +496,10 @@ mod tests {
     fn the_link_and_the_heading_meet_in_the_middle() {
         // Слева — то, что стоит в href, справа — заголовок статьи.
         assert_eq!(anchor("#a--b"), anchor("A — B"));
-        assert_eq!(anchor("%D0%9F%D0%BE%D0%B4%D0%B2%D0%BE%D0%B4%D0%BD%D1%8B%D0%B5"), "подводные");
+        assert_eq!(
+            anchor("%D0%9F%D0%BE%D0%B4%D0%B2%D0%BE%D0%B4%D0%BD%D1%8B%D0%B5"),
+            "подводные"
+        );
     }
 
     #[test]
