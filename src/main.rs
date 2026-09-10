@@ -7,19 +7,21 @@ use std::process::ExitCode;
 
 use brevier::error::Error;
 use brevier::fetch::{ContentKind, UserAgent};
-use brevier::{extract, fetch, markdown};
+use brevier::{Address, address, extract, fetch, markdown};
 
 const HELP: &str = "\
 brevier — a JavaScript-free reader: fetches a page, extracts the article,
 prints it as Markdown (CommonMark + GFM).
 
-Usage: brevier [options] <url>
+Usage: brevier [options] <url|gh:owner/repo|gl:owner/repo>
 
 Options:
       --ua <honest|browser>  User-Agent to send (default: honest)
       --raw                  skip extraction, convert the whole page
       --html                 print the extracted HTML instead of Markdown
       --links                print the article's outgoing links, one per line
+      --docs                 for a repository: entry points into its
+                             documentation, one per line
   -h, --help                 this text
   -V, --version              version
 
@@ -33,6 +35,7 @@ struct Args {
     raw: bool,
     html: bool,
     links: bool,
+    docs: bool,
 }
 
 enum Parsed {
@@ -64,20 +67,41 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &Args) -> Result<String, Error> {
-    let page = fetch::fetch(&args.url, args.ua)?;
+    // Точки входа в документацию — вопрос к репозиторию, а не к документу:
+    // отвечаем на него до того, как что-то скачано и разобрано.
+    if args.docs {
+        let Some(Address::Repo(repo)) = repository(args) else {
+            return Err(Error::BadUrl(format!("{} is not a repository", args.url)));
+        };
+        let mut out = String::new();
+        for entry in brevier::repo::documentation(&repo, args.ua) {
+            out.push_str(&format!("{}\t{}\n", entry.path, entry.title));
+        }
+        return Ok(out);
+    }
 
-    let text = match page.kind {
-        // Родной формат: конвертировать нечего, трогать текст автора — тем более.
-        ContentKind::Markdown => page.body,
-        // Простой текст markdown-ом не является — отдаём как есть.
-        ContentKind::Text => page.body,
-        ContentKind::Html if args.raw => markdown::from_html(&page.body)?,
-        ContentKind::Html => {
-            let article = extract::extract(&page.body, &page.url)?;
-            if args.html {
-                return Ok(article.content_html);
+    let text = match repository(args) {
+        // Репозиторий читается своим трактом: конвертировать нечего,
+        // формат родной. Работа там в другом — развернуть ссылки внутри
+        // документа, которых в сыром `.md` нет.
+        Some(address) => brevier::open(&address, args.ua)?.markdown,
+        None => {
+            let page = fetch::fetch(&args.url, args.ua)?;
+
+            match page.kind {
+                // Родной формат: конвертировать нечего, трогать текст автора — тем более.
+                ContentKind::Markdown => page.body,
+                // Простой текст markdown-ом не является — отдаём как есть.
+                ContentKind::Text => page.body,
+                ContentKind::Html if args.raw => markdown::from_html(&page.body)?,
+                ContentKind::Html => {
+                    let article = extract::extract(&page.body, &page.url)?;
+                    if args.html {
+                        return Ok(article.content_html);
+                    }
+                    markdown::from_article(&article)?
+                }
             }
-            markdown::from_article(&article)?
         }
     };
 
@@ -87,6 +111,19 @@ fn run(args: &Args) -> Result<String, Error> {
         return Ok(out);
     }
     Ok(text)
+}
+
+/// Адрес репозитория — или `None`, если это обычная страница. `--raw`
+/// и `--html` спрашивают про извлечение из веба, которого в репозитории
+/// нет вовсе; при них тракт всегда веб-овый.
+fn repository(args: &Args) -> Option<Address> {
+    if args.raw || args.html {
+        return None;
+    }
+    match address::parse(&args.url) {
+        Ok(address @ Address::Repo(_)) => Some(address),
+        _ => None,
+    }
 }
 
 /// Печать с оглядкой на `| less`: если пейджер закрыли раньше, чем мы дописали,
@@ -112,6 +149,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut raw = false;
     let mut html = false;
     let mut links = false;
+    let mut docs = false;
 
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -123,6 +161,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             "--raw" => raw = true,
             "--html" => html = true,
             "--links" => links = true,
+            "--docs" => docs = true,
             "--ua" => match args.next() {
                 Some(value) => match UserAgent::parse(&value) {
                     Some(parsed) => ua = parsed,
@@ -149,6 +188,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             raw,
             html,
             links,
+            docs,
         })),
         None => Parsed::Usage("no url given".to_owned()),
     }

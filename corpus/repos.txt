@@ -1,0 +1,13 @@
+# Незнакомые проекты для замера гейта M2. Выбраны до прогона и по форме,
+# а не по ожидаемому результату: документация в корне, документация
+# в каталоге, mdbook с оглавлением в SUMMARY.md, монорепозиторий.
+gh:BurntSushi/ripgrep
+gh:sharkdp/bat
+gh:tokio-rs/tokio
+gh:rust-lang/book
+gh:denoland/deno
+gh:astral-sh/uv
+gh:helix-editor/helix
+gh:cli/cli
+gh:zed-industries/zed
+gh:pallets/flask

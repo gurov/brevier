@@ -8,16 +8,20 @@
 pub mod address;
 pub mod code;
 pub mod error;
-pub mod failure;
 pub mod extract;
+pub mod failure;
 pub mod fetch;
 pub mod history;
+/// Текст начальной страницы. В ядре по той же причине, что и `failure`.
+pub mod intro;
 pub mod markdown;
 /// Картинки. За фичей `images`: корпусу M0 декодеры не нужны, а лишний
 /// код в бинарнике про безопасность — лишняя поверхность.
 #[cfg(feature = "images")]
 pub mod media;
 pub mod outline;
+/// Режим репозитория: документация читается из репозитория напрямую.
+pub mod repo;
 /// Сохранение статьи на диск. За фичей `save`: zip нужен окну, не корпусу.
 #[cfg(feature = "save")]
 pub mod save;
@@ -29,6 +33,7 @@ pub use error::Error;
 pub use fetch::UserAgent;
 pub use history::History;
 
+use address::Repo;
 use fetch::ContentKind;
 
 /// Прочитанный документ в том виде, в каком его показывает окно.
@@ -51,9 +56,7 @@ pub fn init_crypto() {
 pub fn open(address: &Address, ua: UserAgent) -> Result<Document, Error> {
     match address {
         Address::Web(url) => open_web(url, ua),
-        // Режим репозитория — M2. До тех пор открываем ту же страницу вебом:
-        // честная деградация лучше заглушки «пока не умеем».
-        Address::Repo(repo) => open_web(&repo.web_url(), ua),
+        Address::Repo(repo) => open_repo(repo, ua),
         Address::File(path) => open_file(path),
     }
 }
@@ -84,6 +87,32 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             })
         }
     }
+}
+
+/// Файл из репозитория. Конвертации здесь нет — формат родной; вся работа
+/// в том, чтобы найти файл и вернуть его ссылкам контекст репозитория.
+fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
+    // Исходники и картинки режим репозитория не показывает: это не документы.
+    // Отдаём их страницей хостинга — честная деградация, а не заглушка.
+    if let Some(path) = &repo.path
+        && repo::target(path) == repo::Target::Other
+    {
+        return open_web(&repo.blob_url(path), ua);
+    }
+
+    let loaded = repo::open(repo, ua)?;
+    let address = Address::Repo(Repo {
+        path: Some(loaded.path.clone()),
+        source: None,
+        ..repo.clone()
+    });
+
+    Ok(Document {
+        title: heading_of(&loaded.markdown)
+            .unwrap_or_else(|| format!("{}/{}/{}", repo.owner, repo.name, loaded.path)),
+        markdown: loaded.markdown,
+        address,
+    })
 }
 
 fn open_file(path: &Path) -> Result<Document, Error> {

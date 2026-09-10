@@ -27,11 +27,11 @@ use brevier::address::{self, Address};
 use brevier::code;
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
-use brevier::save;
 use brevier::outline::{
     HEADING_WEIGHTS, HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE,
     anchor, clip, lead,
 };
+use brevier::save;
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
@@ -350,7 +350,7 @@ fn build(app: &Application, start: Vec<String>) {
                 Err(error) => {
                     let problem = describe(&error);
                     if let Some(tab) = current(&ui, &state) {
-                        show_message(&tab, problem.headline, &problem.detail);
+                        show_message(&tab, problem.headline, &problem.detail, None);
                     }
                 }
             }
@@ -359,7 +359,9 @@ fn build(app: &Application, start: Vec<String>) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        ui.back.clone().connect_clicked(move |_| step(&ui, &state, true));
+        ui.back
+            .clone()
+            .connect_clicked(move |_| step(&ui, &state, true));
     }
     {
         let ui = ui.clone();
@@ -386,7 +388,9 @@ fn build(app: &Application, start: Vec<String>) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        ui.save.clone().connect_clicked(move |_| ask_where_to_save(&ui, &state));
+        ui.save
+            .clone()
+            .connect_clicked(move |_| ask_where_to_save(&ui, &state));
     }
     {
         let ui = ui.clone();
@@ -410,7 +414,9 @@ fn build(app: &Application, start: Vec<String>) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        ui.needle.clone().connect_activate(move |_| step_hit(&ui, &state, true));
+        ui.needle
+            .clone()
+            .connect_activate(move |_| step_hit(&ui, &state, true));
     }
     {
         let ui = ui.clone();
@@ -496,7 +502,6 @@ fn build(app: &Application, start: Vec<String>) {
     }
 
     ui.window.present();
-
 }
 
 /// Клавиши, которые GTK сам не разбирает.
@@ -641,11 +646,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         let ui = ui.clone();
         let state = state.clone();
         close.connect_clicked(move |_| {
-            let index = state
-                .borrow()
-                .tabs
-                .iter()
-                .position(|tab| tab.id == id);
+            let index = state.borrow().tabs.iter().position(|tab| tab.id == id);
             if let Some(index) = index {
                 close_tab(&ui, &state, index);
             }
@@ -735,9 +736,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             let page = adjustment.page_size();
             let step = page / 10.0;
             let to = match key {
-                gtk::gdk::Key::space | gtk::gdk::Key::Page_Down => {
-                    adjustment.value() + page * 0.9
-                }
+                gtk::gdk::Key::space | gtk::gdk::Key::Page_Down => adjustment.value() + page * 0.9,
                 gtk::gdk::Key::BackSpace | gtk::gdk::Key::Page_Up => {
                     adjustment.value() - page * 0.9
                 }
@@ -757,7 +756,9 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
     if let Some(address) = address {
         open(ui, state, id, address, true);
     } else {
-        sync(ui, state, None);
+        // Пустая вкладка — не пустой экран: читатель должен узнать,
+        // куда попал. `show_intro` сам зовёт `sync`.
+        show_intro(ui, state, id, &view);
         ui.entry.grab_focus();
     }
 }
@@ -846,20 +847,24 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
     sync(ui, state, None);
 
     if let Some(view) = view_of(state, id) {
-        show_message(&view, "Loading…", "");
+        show_message(&view, "Loading…", "", None);
     }
 
     let ui = ui.clone();
     let state = state.clone();
+    // Чем открыть это в чужом браузере — считаем до того, как адрес уедет
+    // в поток загрузки: на отказе он понадобится, а его уже не будет.
+    let external = address.external();
     glib::spawn_future_local(async move {
-        let loaded =
-            gio::spawn_blocking(move || brevier::open(&address, UserAgent::Honest)).await;
+        let loaded = gio::spawn_blocking(move || brevier::open(&address, UserAgent::Honest)).await;
 
         // Читатель уже ушёл на другую страницу — ответ никому не нужен.
         if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {
             return;
         }
-        let Some(view) = view_of(&state, id) else { return };
+        let Some(view) = view_of(&state, id) else {
+            return;
+        };
 
         match loaded {
             Ok(Ok(document)) => {
@@ -894,7 +899,12 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             }
             Ok(Err(error)) => {
                 let problem = describe(&error);
-                show_message(&view, problem.headline, &problem.detail);
+                show_message(
+                    &view,
+                    problem.headline,
+                    &problem.detail,
+                    problem.offer_browser.then(|| external.clone()),
+                );
                 let mut borrowed = state.borrow_mut();
                 if let Some(tab) = borrowed.find(id) {
                     tab.label.set_text(&clip(problem.headline, TAB_LABEL));
@@ -907,7 +917,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 drop(borrowed);
                 sync(&ui, &state, None);
             }
-            Err(_) => show_message(&view, "The load fell through", ""),
+            Err(_) => show_message(&view, "The load fell through", "", None),
         }
     });
 }
@@ -932,7 +942,10 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             return;
         };
         (
-            tab.history.current().map(Address::display).unwrap_or_default(),
+            tab.history
+                .current()
+                .map(Address::display)
+                .unwrap_or_default(),
             tab.history.can_go_back(),
             tab.history.can_go_forward(),
             tab.marks.clone(),
@@ -1110,7 +1123,11 @@ fn text_px() -> f32 {
 fn dpi() -> f64 {
     let dpi = gtk::Settings::for_display(&gtk::gdk::Display::default().unwrap()).gtk_xft_dpi();
     // Настройка хранится в 1024-х долях точки; 0 или -1 значит «не задано».
-    if dpi > 0 { f64::from(dpi) / 1024.0 } else { 96.0 }
+    if dpi > 0 {
+        f64::from(dpi) / 1024.0
+    } else {
+        96.0
+    }
 }
 
 /// Отдать адрес системному браузеру. Без внешних крейтов: это три команды,
@@ -1141,13 +1158,34 @@ fn open_in_system_browser(target: &str) {
 /// `CTFontManagerRegisterFontsForURL`) — это отдельная работа при упаковке.
 fn use_bundled_fonts() {
     const FONTS: [(&str, &[u8]); 7] = [
-        ("NotoSans-Light.ttf", include_bytes!("../../assets/fonts/NotoSans-Light.ttf")),
-        ("NotoSans-Regular.ttf", include_bytes!("../../assets/fonts/NotoSans-Regular.ttf")),
-        ("NotoSans-Italic.ttf", include_bytes!("../../assets/fonts/NotoSans-Italic.ttf")),
-        ("NotoSans-Medium.ttf", include_bytes!("../../assets/fonts/NotoSans-Medium.ttf")),
-        ("NotoSans-Bold.ttf", include_bytes!("../../assets/fonts/NotoSans-Bold.ttf")),
-        ("NotoSans-BoldItalic.ttf", include_bytes!("../../assets/fonts/NotoSans-BoldItalic.ttf")),
-        ("NotoSansMono-Regular.ttf", include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf")),
+        (
+            "NotoSans-Light.ttf",
+            include_bytes!("../../assets/fonts/NotoSans-Light.ttf"),
+        ),
+        (
+            "NotoSans-Regular.ttf",
+            include_bytes!("../../assets/fonts/NotoSans-Regular.ttf"),
+        ),
+        (
+            "NotoSans-Italic.ttf",
+            include_bytes!("../../assets/fonts/NotoSans-Italic.ttf"),
+        ),
+        (
+            "NotoSans-Medium.ttf",
+            include_bytes!("../../assets/fonts/NotoSans-Medium.ttf"),
+        ),
+        (
+            "NotoSans-Bold.ttf",
+            include_bytes!("../../assets/fonts/NotoSans-Bold.ttf"),
+        ),
+        (
+            "NotoSans-BoldItalic.ttf",
+            include_bytes!("../../assets/fonts/NotoSans-BoldItalic.ttf"),
+        ),
+        (
+            "NotoSansMono-Regular.ttf",
+            include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf"),
+        ),
     ];
 
     let home = glib::user_cache_dir().join("brevier");
@@ -1194,7 +1232,7 @@ fn link_at<'a>(view: &gtk::TextView, links: &'a [Link], x: f64, y: f64) -> Optio
         .find(|link| offset >= link.start && offset < link.end)
 }
 
-fn show_message(view: &gtk::TextView, headline: &str, detail: &str) {
+fn show_message(view: &gtk::TextView, headline: &str, detail: &str, offer: Option<String>) {
     let buffer = view.buffer();
     buffer.set_text("");
     let mut end = buffer.end_iter();
@@ -1203,7 +1241,42 @@ fn show_message(view: &gtk::TextView, headline: &str, detail: &str) {
         buffer.insert(&mut end, "\n\n");
         buffer.insert(&mut end, detail);
     }
-}/// Теги — вся типографика статьи. Кегли и интерлиньяж те же, что были
+
+    // Кнопка, а не только Ctrl+O: на странице, где ничего не показалось,
+    // читателю нужен выход, а не память о сочетании клавиш. Что предлагать
+    // её, решает ядро (`Failure::offer_browser`) — 403 не лечится ничем,
+    // а пустое извлечение лечится именно этим.
+    let Some(target) = offer else { return };
+    buffer.insert(&mut end, "\n\n");
+    let anchor = buffer.create_child_anchor(&mut end);
+    let button = gtk::Button::builder()
+        .label("Open in your browser")
+        .halign(gtk::Align::Start)
+        .build();
+    button.connect_clicked(move |_| open_in_system_browser(&target));
+    view.add_child_at_anchor(&button, &anchor);
+}
+
+/// Начальная страница. Рисуется тем же трактом, что и статья: текст в ядре,
+/// разметка markdown, рендерер общий. Историю и адресную строку не трогает —
+/// это не открытая страница, а пустая вкладка, которой есть что сказать.
+fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView) {
+    let document = Document {
+        address: Address::Web(String::new()),
+        title: brevier::intro::TITLE.to_owned(),
+        markdown: brevier::intro::MARKDOWN.to_owned(),
+    };
+    let page = render(view, &document, None);
+    let mut borrowed = state.borrow_mut();
+    if let Some(tab) = borrowed.find(id) {
+        tab.links = page.links;
+        tab.marks = page.marks;
+        tab.anchors = page.anchors;
+    }
+    drop(borrowed);
+    sync(ui, state, None);
+}
+/// Теги — вся типографика статьи. Кегли и интерлиньяж те же, что были
 /// в прошлом интерфейсе: они живут в ядре и от тулкита не зависят.
 fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     let extra = ((LINE_HEIGHT - 1.0) * TEXT_SIZE).round() as i32;
@@ -1283,7 +1356,10 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     buffer.create_tag(Some("num"), &[("foreground", &colors.number)]);
     buffer.create_tag(
         Some("com"),
-        &[("foreground", &colors.comment), ("style", &pango::Style::Italic)],
+        &[
+            ("foreground", &colors.comment),
+            ("style", &pango::Style::Italic),
+        ],
     );
     // Поле слева пошире обычного: в нём стоит линейка, которую рисует
     // виджет статьи.
@@ -1309,7 +1385,10 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     let (link, dim) = (colors.link, colors.dim);
     buffer.create_tag(
         Some("link"),
-        &[("underline", &pango::Underline::Single), ("foreground", &link)],
+        &[
+            ("underline", &pango::Underline::Single),
+            ("foreground", &link),
+        ],
     );
     buffer.create_tag(Some("dim"), &[("foreground", &dim)]);
 
@@ -1434,7 +1513,10 @@ fn settle(view: &gtk::TextView, offset: i32, align: f64) {
         // когда высота уже настоящая.
         scroll_to(view, offset, align);
 
-        let height = view.vadjustment().map(|bar| bar.upper()).unwrap_or_default();
+        let height = view
+            .vadjustment()
+            .map(|bar| bar.upper())
+            .unwrap_or_default();
         if (height - was.get()).abs() > 0.5 {
             was.set(height);
             stable.set(0);
@@ -1967,7 +2049,10 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
         }
     };
 
-    let button = gtk::Button::builder().label(&label).has_frame(false).build();
+    let button = gtk::Button::builder()
+        .label(&label)
+        .has_frame(false)
+        .build();
     button.add_css_class(if shot.inline { "formula" } else { "shot" });
     button.set_cursor_from_name(Some("pointer"));
     button.set_tooltip_text(Some(&shot.source.display()));
@@ -2208,10 +2293,8 @@ fn save_to(ui: &Ui, path: std::path::PathBuf, document: Document) {
     let ui = ui.clone();
 
     glib::spawn_future_local(async move {
-        let done = gio::spawn_blocking(move || {
-            save::write(&path, &document, UserAgent::Honest)
-        })
-        .await;
+        let done =
+            gio::spawn_blocking(move || save::write(&path, &document, UserAgent::Honest)).await;
 
         match done {
             Ok(Ok(saved)) => {
@@ -2355,7 +2438,11 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
     let Some((from, to)) = hit else { return };
 
     ui.tally.set_text(&format!("{} of {total}", at + 1));
-    buffer.apply_tag_by_name("here", &buffer.iter_at_offset(from), &buffer.iter_at_offset(to));
+    buffer.apply_tag_by_name(
+        "here",
+        &buffer.iter_at_offset(from),
+        &buffer.iter_at_offset(to),
+    );
     // Треть экрана сверху: совпадение нужно видеть в контексте, а не в самом
     // верху окна.
     scroll_to(view, from, 0.3);

@@ -56,22 +56,82 @@ impl RepoHost {
 }
 
 impl Repo {
-    /// Тот же репозиторий обычной ссылкой. Пока режима репозитория нет,
-    /// по ней и открываем — это честная деградация, а не заглушка.
+    /// Тот же файл обычной ссылкой на хостинг. По ней открываются вещи,
+    /// которые режим репозитория не показывает, — исходники и картинки.
     ///
-    /// Вставленную ссылку возвращаем как есть: собрать её заново нельзя,
-    /// потому что путь к файлу на хостинге идёт через `blob/<ветка>`,
-    /// а ветку мы выбросили — она деталь хостинга, а не адрес документа.
-    /// Короткая форма с путём до M2 открывает корень репозитория.
+    /// Вставленную ссылку возвращаем как есть: пользователь дал точный
+    /// адрес, включая ветку, и угадывать за него нечего.
     pub fn web_url(&self) -> String {
-        match &self.source {
-            Some(url) => url.clone(),
-            None => format!("https://{}/{}/{}", self.host.domain(), self.owner, self.name),
+        match (&self.source, &self.path) {
+            (Some(url), _) => url.clone(),
+            (None, Some(path)) => self.blob_url(path),
+            (None, None) => format!(
+                "https://{}/{}/{}",
+                self.host.domain(),
+                self.owner,
+                self.name
+            ),
+        }
+    }
+
+    /// Адрес файла на CDN хостинга: сырые байты, без страницы вокруг.
+    ///
+    /// Ветку не называем: `HEAD` хостинг сам разворачивает в основную,
+    /// поэтому отдельного запроса «а какая тут ветка по умолчанию»
+    /// не нужно — а он стоил бы обращения к API, где лимит.
+    pub fn raw_url(&self, path: &str) -> String {
+        let (owner, name) = (&self.owner, &self.name);
+        match self.host {
+            RepoHost::GitHub => {
+                format!("https://raw.githubusercontent.com/{owner}/{name}/HEAD/{path}")
+            }
+            RepoHost::GitLab => format!("https://gitlab.com/{owner}/{name}/-/raw/HEAD/{path}"),
+        }
+    }
+
+    /// Профиль человека на хостинге. Нужен для `@user`: в сыром файле это
+    /// просто текст, а хостинг при показе делает из него ссылку.
+    pub fn host_url(&self, handle: &str) -> String {
+        format!("https://{}/{handle}", self.host.domain())
+    }
+
+    /// Обсуждение по номеру — то, что в тексте написано как `#123`.
+    /// У github ссылка на issue сама уводит на pull request, если номер
+    /// оказался его, поэтому различать их не нужно.
+    pub fn issue_url(&self, number: &str) -> String {
+        let (owner, name) = (&self.owner, &self.name);
+        match self.host {
+            RepoHost::GitHub => format!("https://github.com/{owner}/{name}/issues/{number}"),
+            RepoHost::GitLab => format!("https://gitlab.com/{owner}/{name}/-/issues/{number}"),
+        }
+    }
+
+    /// Адрес файла страницей хостинга. В него разворачиваются ссылки внутри
+    /// документа: такую ссылку [`parse`] узнаёт и возвращает читателя
+    /// в режим репозитория, а у того, кто откроет её без Brevier, она просто
+    /// работает. Своя короткая форма ни того, ни другого не умеет.
+    pub fn blob_url(&self, path: &str) -> String {
+        let (owner, name) = (&self.owner, &self.name);
+        match self.host {
+            RepoHost::GitHub => format!("https://github.com/{owner}/{name}/blob/HEAD/{path}"),
+            RepoHost::GitLab => format!("https://gitlab.com/{owner}/{name}/-/blob/HEAD/{path}"),
         }
     }
 }
 
 impl Address {
+    /// Чем этот адрес открыть в системном браузере.
+    ///
+    /// Не то же самое, что [`display`](Self::display): короткую форму
+    /// `gh:owner/repo` чужой браузер не понимает, ему нужен настоящий URL.
+    pub fn external(&self) -> String {
+        match self {
+            Address::Web(url) => url.clone(),
+            Address::Repo(repo) => repo.web_url(),
+            Address::File(path) => format!("file://{}", path.display()),
+        }
+    }
+
     /// Как показать адрес в строке. Для веба — сам URL, для репозитория —
     /// короткая форма, которую человек и напечатал бы.
     pub fn display(&self) -> String {
@@ -166,23 +226,47 @@ fn from_url(url: &str, after_scheme: &str) -> Address {
     }
 }
 
-/// `owner/repo`, `owner/repo/blob/<ref>/путь`, `owner/repo/tree/<ref>/путь`.
+/// `owner/repo`, `owner/repo/blob/<ref>/путь`, `owner/repo/tree/<ref>/путь`,
+/// а у gitlab — ещё и подгруппы: `group/sub/project/-/blob/<ref>/путь`.
 fn repo_from_path(host: RepoHost, path: &str) -> Option<Repo> {
     let path = path.split(['?', '#']).next().unwrap_or(path);
-    let mut parts = path.split('/').filter(|p| !p.is_empty());
-    let owner = parts.next()?.to_owned();
-    let name = parts.next()?.to_owned();
 
-    let inner = match parts.next() {
-        // Ветка в адресе нам не нужна: имя ветки — деталь хостинга, а читателю
-        // нужен файл. На M2 ветку возьмём из самого репозитория.
-        Some("blob" | "tree") => {
-            let _branch = parts.next();
-            let rest: Vec<&str> = parts.collect();
-            (!rest.is_empty()).then(|| rest.join("/"))
+    // У gitlab проект живёт в подгруппах любой глубины, и от пути внутри
+    // проекта его отделяет `/-/`. У github такого разделителя нет: там
+    // всегда ровно owner и repo, а дальше уже `blob` или `tree`.
+    let (owner, name, rest) = match host {
+        RepoHost::GitLab => {
+            let (project, tail) = path.split_once("/-/").unwrap_or((path, ""));
+            let mut segments: Vec<&str> = project.split('/').filter(|p| !p.is_empty()).collect();
+            let name = segments.pop()?;
+            if segments.is_empty() {
+                return None;
+            }
+            (segments.join("/"), name.to_owned(), tail)
         }
-        Some(_) => return None,
+        RepoHost::GitHub => {
+            let mut segments = path.splitn(3, '/').filter(|p| !p.is_empty());
+            let owner = segments.next()?;
+            let name = segments.next()?;
+            (
+                owner.to_owned(),
+                name.to_owned(),
+                segments.next().unwrap_or(""),
+            )
+        }
+    };
+
+    let rest: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+    let inner = match rest.first().copied() {
         None => None,
+        // Ветку из адреса выбрасываем: имя ветки — деталь хостинга,
+        // а читателю нужен файл. `HEAD` хостинг развернёт сам.
+        Some("blob" | "tree" | "raw") => {
+            let tail = rest.get(2..).unwrap_or_default();
+            (!tail.is_empty()).then(|| tail.join("/"))
+        }
+        // issues, pulls, settings, releases — это не документация.
+        Some(_) => return None,
     };
 
     Some(Repo {
@@ -242,7 +326,10 @@ mod tests {
     fn shorthand_is_a_repository() {
         let repo = repo("gh:rust-lang/rust");
         assert_eq!(repo.host, RepoHost::GitHub);
-        assert_eq!((repo.owner.as_str(), repo.name.as_str()), ("rust-lang", "rust"));
+        assert_eq!(
+            (repo.owner.as_str(), repo.name.as_str()),
+            ("rust-lang", "rust")
+        );
         assert_eq!(repo.path, None);
     }
 
@@ -256,6 +343,38 @@ mod tests {
             repo.web_url(),
             "https://github.com/rust-lang/rust/blob/master/README.md"
         );
+    }
+
+    #[test]
+    fn gitlab_subgroups_are_part_of_the_project_path() {
+        // У gitlab проект живёт в подгруппах любой глубины; отделяет их
+        // от пути внутри проекта `/-/`, которого у github нет вовсе.
+        let repo = repo("https://gitlab.com/gnome/world/podcasts/-/blob/main/README.md");
+        assert_eq!(repo.host, RepoHost::GitLab);
+        assert_eq!(repo.owner, "gnome/world");
+        assert_eq!(repo.name, "podcasts");
+        assert_eq!(repo.path.as_deref(), Some("README.md"));
+    }
+
+    #[test]
+    fn a_rewritten_link_parses_back_into_the_same_repository() {
+        // Ссылки внутри документа мы разворачиваем в адреса хостинга.
+        // Если разбор их не узнаёт, читатель на первой же внутренней
+        // ссылке вываливается из режима репозитория в веб.
+        for host in [RepoHost::GitHub, RepoHost::GitLab] {
+            let source = Repo {
+                host,
+                owner: "o".to_owned(),
+                name: "n".to_owned(),
+                path: None,
+                source: None,
+            };
+            let back = repo(&source.blob_url("docs/guide.md"));
+            assert_eq!(back.host, host);
+            assert_eq!(back.owner, "o");
+            assert_eq!(back.name, "n");
+            assert_eq!(back.path.as_deref(), Some("docs/guide.md"));
+        }
     }
 
     #[test]

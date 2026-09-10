@@ -812,7 +812,7 @@ fn language_from_attrs(element: &Element) -> Option<String> {
 }
 
 /// CommonMark + GFM. Таблицы — обязательная часть, из-за них GFM и выбран.
-fn options() -> Options<'static> {
+pub(crate) fn options() -> Options<'static> {
     let mut options = Options::default();
     options.extension.table = true;
     options.extension.strikethrough = true;
