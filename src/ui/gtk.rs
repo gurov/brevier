@@ -46,6 +46,8 @@ const TOC_WIDTH: i32 = 260;
 const MIN_DOC_CHARS: i32 = 4000;
 /// Сколько знаков влезает на корешок вкладки.
 const TAB_LABEL: usize = 24;
+/// Что говорим на странице, оказавшейся списком ссылок, а не статьёй.
+const LISTING: &str = "A list of links, not an article — pick one to read.";
 /// Сколько совпадений подсвечиваем. Дальше это уже не поиск, а заливка.
 const MAX_HITS: usize = 2000;
 /// Метка, которой прокручивают буфер: одна на все прыжки.
@@ -951,6 +953,11 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             Ok(Ok(document)) => {
                 let page = render(&view, &document, anchor.as_deref());
                 view.grab_focus();
+                // Список ссылок показываем как есть, но говорим, что это он:
+                // читатель пришёл на главную блога не читать, а выбирать.
+                if document.kind == brevier::Kind::Listing {
+                    notice(&ui, LISTING);
+                }
                 let mut borrowed = state.borrow_mut();
                 if let Some(tab) = borrowed.find(id) {
                     tab.label.set_text(&clip(&document.title, TAB_LABEL));
@@ -1357,6 +1364,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         address: Address::Web(String::new()),
         title: brevier::intro::TITLE.to_owned(),
         markdown: brevier::intro::MARKDOWN.to_owned(),
+        kind: brevier::Kind::Article,
     };
     let page = render(view, &document, None);
     let mut borrowed = state.borrow_mut();

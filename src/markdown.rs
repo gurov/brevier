@@ -50,7 +50,24 @@ const MAX_NEST: usize = 3;
 const INDENT_MARK: char = '\u{1}';
 
 /// Статья: заголовок, автор, текст.
-pub fn from_article(article: &Article) -> Result<String, Error> {
+/// Что получилось из страницы.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Статья: связный текст, ради которого читатель и пришёл.
+    Article,
+    /// Список ссылок: главная блога, лента раздела, каталог. Статьи здесь
+    /// нет, но есть куда пойти дальше.
+    Listing,
+}
+
+/// Переваренная страница вместе с ответом на вопрос «что это было».
+#[derive(Debug, Clone)]
+pub struct Reading {
+    pub markdown: String,
+    pub kind: Kind,
+}
+
+pub fn from_article(article: &Article) -> Result<Reading, Error> {
     let body = to_markdown(&article.content_html)?;
 
     let mut doc = String::with_capacity(body.len() + 128);
@@ -68,10 +85,19 @@ pub fn from_article(article: &Article) -> Result<String, Error> {
     doc.push('\n');
 
     let doc = tidy(&doc);
-    match strip_teasers(&doc) {
-        Teasers::Article(text) => Ok(strip_chrome(&text)),
-        Teasers::Listing => Err(Error::EmptyExtraction),
-    }
+    // Лента — не ошибка. Раньше на неё отвечали «статьи нет», и читатель,
+    // открывший главную блога, не получал ничего: ни списка, ни ссылок,
+    // по которым он бы ушёл в статью. Страница показывается как есть,
+    // а «это список, а не статья» интерфейс говорит словами.
+    let (text, kind) = match strip_teasers(&doc) {
+        Teasers::Article(text) => (text, Kind::Article),
+        Teasers::Listing => (doc, Kind::Listing),
+    };
+
+    Ok(Reading {
+        markdown: strip_chrome(&text),
+        kind,
+    })
 }
 
 /// Страница целиком, без Readability (`--raw`). Нужен, чтобы отличать
@@ -1197,6 +1223,41 @@ mod tests {
     fn a_page_of_teasers_is_not_an_article() {
         let md = "# Блог компании\n\n## [Первая](https://e.com/1)\n\nанонс\n\n                  ## [Вторая](https://e.com/2)\n\nанонс\n\n## [Третья](https://e.com/3)\n\nанонс\n";
         assert!(matches!(strip_teasers(md), Teasers::Listing));
+    }
+
+    /// Главная блога — не ошибка и не пустая страница: читателю нужен
+    /// список, по которому он уйдёт в статью.
+    #[test]
+    fn a_listing_is_shown_with_its_links_intact() {
+        let article = Article {
+            title: "Блог компании".to_owned(),
+            byline: None,
+            content_html: "<h2><a href=\"https://e.com/1\">Первая</a></h2><p>анонс</p>\
+                <h2><a href=\"https://e.com/2\">Вторая</a></h2><p>анонс</p>\
+                <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
+                .to_owned(),
+        };
+
+        let reading = from_article(&article).unwrap();
+        assert_eq!(reading.kind, Kind::Listing);
+        assert_eq!(links(&reading.markdown).len(), 3);
+        assert!(reading.markdown.contains("Третья"));
+    }
+
+    /// Обычная статья остаётся статьёй: признак ленты не должен срабатывать
+    /// на тексте со ссылками.
+    #[test]
+    fn an_article_is_still_an_article() {
+        let article = Article {
+            title: "Статья".to_owned(),
+            byline: None,
+            content_html: "<p>Первый абзац со <a href=\"https://e.com/1\">ссылкой</a>.</p>\
+                <h2>Раздел</h2><p>Второй абзац.</p>"
+                .to_owned(),
+        };
+
+        let reading = from_article(&article).unwrap();
+        assert_eq!(reading.kind, Kind::Article);
     }
 
     #[test]

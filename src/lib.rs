@@ -32,6 +32,7 @@ pub use address::Address;
 pub use error::Error;
 pub use fetch::UserAgent;
 pub use history::History;
+pub use markdown::Kind;
 
 use address::Repo;
 use fetch::ContentKind;
@@ -44,6 +45,9 @@ pub struct Document {
     pub title: String,
     /// Тело в markdown: и переваренная веб-страница, и родной `.md`.
     pub markdown: String,
+    /// Статья или список ссылок. Знать это нужно интерфейсу: список ссылок
+    /// читатель открывает не для чтения, а чтобы уйти дальше.
+    pub kind: Kind,
 }
 
 /// Установить провайдер шифров. `rustls` собран без встроенного, выбираем явно;
@@ -71,13 +75,16 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
         ContentKind::Markdown | ContentKind::Text => Ok(Document {
             title: heading_of(&page.body).unwrap_or_else(|| page.url.clone()),
             markdown: page.body,
+            kind: Kind::Article,
             address,
         }),
         ContentKind::Html => {
             let article = extract::extract(&page.body, &page.url)?;
             let title = article.title.clone();
+            let reading = markdown::from_article(&article)?;
             Ok(Document {
-                markdown: markdown::from_article(&article)?,
+                markdown: reading.markdown,
+                kind: reading.kind,
                 title: if title.trim().is_empty() {
                     page.url.clone()
                 } else {
@@ -111,6 +118,7 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         title: heading_of(&loaded.markdown)
             .unwrap_or_else(|| format!("{}/{}/{}", repo.owner, repo.name, loaded.path)),
         markdown: loaded.markdown,
+        kind: Kind::Article,
         address,
     })
 }
@@ -128,6 +136,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         address: Address::File(path.to_path_buf()),
         title,
         markdown: body,
+        kind: Kind::Article,
     })
 }
 

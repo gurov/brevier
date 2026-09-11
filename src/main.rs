@@ -99,7 +99,14 @@ fn run(args: &Args) -> Result<String, Error> {
                     if args.html {
                         return Ok(article.content_html);
                     }
-                    markdown::from_article(&article)?
+                    let reading = markdown::from_article(&article)?;
+                    // Сказать, что это не статья, надо так, чтобы не испортить
+                    // `| less` и перенаправление в файл: в stdout идёт только
+                    // документ.
+                    if reading.kind == markdown::Kind::Listing {
+                        eprintln!("brevier: a list of links, not an article");
+                    }
+                    reading.markdown
                 }
             }
         }

@@ -254,6 +254,7 @@ mod tests {
             address: crate::Address::File(dir.join("article.md")),
             title: "Как это работает".to_owned(),
             markdown: "# Как это работает\n\n![схема](img/chart.png)\n".to_owned(),
+            kind: crate::Kind::Article,
         };
         assert_eq!(suggested_name(&document), "Как-это-работает.zip");
 
@@ -287,6 +288,7 @@ mod tests {
             address: crate::Address::Web("https://e.com/a".to_owned()),
             title: "Plain".to_owned(),
             markdown: "# Plain\n\nтекст\n".to_owned(),
+            kind: crate::Kind::Article,
         };
         assert_eq!(suggested_name(&document), "Plain.md");
 
