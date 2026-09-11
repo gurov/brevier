@@ -9,6 +9,7 @@
 //! ошибок лежат в ядре и про GTK не знают ничего.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 mod article;
@@ -31,7 +32,7 @@ use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
     HEADING_WEIGHTS, HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE,
-    anchor, clip, lead,
+    ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
 };
 use brevier::save;
 use brevier::{Document, History, UserAgent};
@@ -154,6 +155,10 @@ struct Ui {
     show_contents: gtk::ToggleButton,
     dark_mode: gtk::ToggleButton,
     show_images: gtk::ToggleButton,
+    /// Ступень масштаба. Появляется в шапке, только когда она не сто
+    /// процентов, и одним нажатием возвращает к ним: панель не свалка,
+    /// а кнопка, которая всегда показывает «100%», не говорит ничего.
+    zoom_level: gtk::Button,
     save: gtk::Button,
     /// Строка состояния внизу: что сохранилось, что не загрузилось.
     notice: gtk::Label,
@@ -205,6 +210,14 @@ struct State {
     /// после отказа от JS декодер картинок — единственная серьёзная
     /// поверхность атаки, и закрыть её должно быть чем.
     images: bool,
+    /// Ступень масштаба по хостам. По хостам — потому что разная у сайтов
+    /// не типографика (её задаём мы, CSS сайта не читаем вовсе), а материал:
+    /// страница сплошных таблиц и длинных строк кода просится отдалиться,
+    /// чтобы строка влезала целиком, а длинный текст — наоборот. Только
+    /// на этот запуск: иначе это уже хранилище настроек на диске, со своим
+    /// форматом, починкой при обновлении и вопросом «почему этот сайт
+    /// открывается странно» через полгода.
+    zoom: HashMap<String, usize>,
     /// Поиск: строка одна на окно, поэтому и состояние одно.
     search: Search,
     /// Что делает строка полки. Полка одна на окно, значит и список один,
@@ -356,6 +369,10 @@ fn build(app: &Application, start: Vec<String>) {
             .tooltip_text("Images")
             .active(true)
             .build(),
+        zoom_level: gtk::Button::builder()
+            .tooltip_text("Reset zoom (Ctrl+0)")
+            .visible(false)
+            .build(),
         save: gtk::Button::from_icon_name("document-save-symbolic"),
         notice: gtk::Label::builder()
             .xalign(0.0)
@@ -414,6 +431,7 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_start(&ui.forward);
     header.pack_start(&new_tab_button);
     header.pack_end(&ui.dark_mode);
+    header.pack_end(&ui.zoom_level);
     header.pack_end(&ui.show_contents);
     header.pack_end(&ui.show_images);
     header.pack_end(&ui.save);
@@ -455,6 +473,7 @@ fn build(app: &Application, start: Vec<String>) {
         // жмёт кнопку.
         dark: false,
         images: true,
+        zoom: HashMap::new(),
         search: Search::default(),
         shelf: Vec::new(),
     }));
@@ -512,6 +531,13 @@ fn build(app: &Application, start: Vec<String>) {
         ui.save
             .clone()
             .connect_clicked(move |_| ask_where_to_save(&ui, &state));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.zoom_level
+            .clone()
+            .connect_clicked(move |_| zoom_by(&ui, &state, 0));
     }
     {
         let ui = ui.clone();
@@ -689,6 +715,28 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("new-tab", &["<Control>t"], new);
 
+    // Масштаб страницы. Лестница и сочетания знакомые — читатель приходит
+    // с ними из браузера и не разбирается заново.
+    for (name, step, keys) in [
+        (
+            "zoom-in",
+            1,
+            &["<Control>plus", "<Control>equal", "<Control>KP_Add"][..],
+        ),
+        (
+            "zoom-out",
+            -1,
+            &["<Control>minus", "<Control>KP_Subtract"][..],
+        ),
+        ("zoom-reset", 0, &["<Control>0", "<Control>KP_0"][..]),
+    ] {
+        let zoom = gio::SimpleAction::new(name, None);
+        let ui = ui.clone();
+        let state = state.clone();
+        zoom.connect_activate(move |_, _| zoom_by(&ui, &state, step));
+        add(name, keys, zoom);
+    }
+
     let close = gio::SimpleAction::new("close-tab", None);
     {
         let ui = ui.clone();
@@ -757,7 +805,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
     view.set_halign(gtk::Align::Center);
     view.set_top_margin(28);
     view.set_bottom_margin(80);
-    tags(&view.buffer(), state.borrow().dark);
+    tags(&view.buffer(), state.borrow().dark, ZOOM_STEPS[ZOOM_NORMAL]);
     view.set_width_request(measure_px());
 
     let scroller = gtk::ScrolledWindow::builder()
@@ -934,6 +982,34 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
     }
     view.add_controller(keys);
 
+    // Масштаб колесом с Ctrl, как в браузере. Шаги копим: у мыши одно
+    // движение колеса это ровно единица, а тачпад сыплет долями, и без
+    // накопления страница улетала бы на край лестницы от одного жеста.
+    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let spun = Cell::new(0.0f64);
+        wheel.connect_scroll(move |controller, _, dy| {
+            if !controller
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                return glib::Propagation::Proceed;
+            }
+            let total = spun.get() + dy;
+            if total.abs() >= 1.0 {
+                spun.set(0.0);
+                // Колесо от себя — ближе, как и везде.
+                zoom_by(&ui, &state, if total < 0.0 { 1 } else { -1 });
+            } else {
+                spun.set(total);
+            }
+            glib::Propagation::Stop
+        });
+    }
+    view.add_controller(wheel);
+
     if let Some(address) = address {
         open(ui, state, id, address, true);
     } else {
@@ -1055,6 +1131,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
 
         match loaded {
             Ok(Ok(document)) => {
+                dress(&state, &view, &document.address);
                 let page = render(&view, &document, anchor.as_deref());
                 view.grab_focus();
                 // Список ссылок показываем как есть, но говорим, что это он:
@@ -1150,6 +1227,19 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     ui.entry.set_text(&address);
     ui.back.set_sensitive(can_back);
     ui.forward.set_sensitive(can_forward);
+
+    // Ступень видна, только когда она не «как задумано»: кнопка, всегда
+    // показывающая «100%», не говорит ничего и занимает место в панели.
+    let step = {
+        let borrowed = state.borrow();
+        zoom_index(&borrowed, &address_of(&borrowed, index))
+    };
+    ui.zoom_level
+        .set_label(&format!("{}%", (ZOOM_STEPS[step] * 100.0).round() as i32));
+    ui.zoom_level.set_visible(step != ZOOM_NORMAL);
+    // Ступень видимой вкладки — та, в которой считается ширина колонки
+    // ниже по этой же функции.
+    set_zoom(ZOOM_STEPS[step]);
     ui.window.set_title(Some(&if address.is_empty() {
         "Brevier".to_owned()
     } else {
@@ -1192,9 +1282,19 @@ fn fit_shelf(ui: &Ui) {
         });
         return;
     }
+    // Полке достаётся то, чего не заняла колонка. На большой ступени
+    // колонка растёт, и место кончается: тогда полка уходит целиком,
+    // а не мельчает до переносов по слогам. Мера — обещание продукта,
+    // полка — удобство; уступает удобство. Вернётся само, как только
+    // масштаб или окно позволят.
+    let free = width - measure_px();
+    if free < TOC_MIN {
+        ui.shelf.set_visible(false);
+        return;
+    }
     // Шире половины окна полки не бывает: она рядом со статьёй, а не вместо
     // неё. Снизу её держит `width_request`, и делитель туда не пустит.
-    let room = TOC_MAX.min((width / 2).max(TOC_MIN));
+    let room = TOC_MAX.min((width / 2).max(TOC_MIN)).min(free);
     ui.split
         .set_position(width - ui.shelf_width.get().clamp(TOC_MIN, room));
 }
@@ -1429,17 +1529,195 @@ fn rgb(hex: &str) -> [u8; 3] {
     [byte(0), byte(2), byte(4)]
 }
 
+thread_local! {
+    static ZOOM: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// По какому ключу помнится ступень. Для страницы — хост, для репозитория
+/// и файла — сам адрес: там «сайта» нет, а материал у каждого свой.
+fn zoom_key(address: &Address) -> String {
+    let shown = address.display();
+    match address {
+        Address::Web(_) => shown
+            .split_once("://")
+            .map_or(shown.as_str(), |(_, rest)| rest)
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_owned(),
+        _ => shown,
+    }
+}
+
+fn zoom_index(state: &State, address: &Address) -> usize {
+    state
+        .zoom
+        .get(&zoom_key(address))
+        .copied()
+        .unwrap_or(ZOOM_NORMAL)
+        .min(ZOOM_STEPS.len() - 1)
+}
+
+/// Адрес открытой страницы во вкладке. У пустой вкладки его нет —
+/// начальная страница тоже имеет право на свою ступень.
+fn address_of(state: &State, index: usize) -> Address {
+    state
+        .tabs
+        .get(index)
+        .and_then(|tab| tab.history.current().cloned())
+        .unwrap_or_else(|| Address::Web(String::new()))
+}
+
+/// Приготовить вкладку к отрисовке: ступень по хосту, теги под неё,
+/// колонка под меру. Всё, что зависит от масштаба, ставится здесь —
+/// иначе кегли, картинки и сетка таблицы разъедутся между собой.
+fn dress(state: &Rc<RefCell<State>>, view: &gtk::TextView, address: &Address) {
+    let (scale, dark) = {
+        let borrowed = state.borrow();
+        (ZOOM_STEPS[zoom_index(&borrowed, address)], borrowed.dark)
+    };
+    set_zoom(scale);
+    tags(&view.buffer(), dark, scale);
+    view.set_width_request(measure_px());
+}
+
+/// Сменить ступень у открытой страницы: `step` — насколько сдвинуться
+/// по лестнице, ноль возвращает к «как задумано».
+fn zoom_by(ui: &Ui, state: &Rc<RefCell<State>>, step: i32) {
+    let Some(index) = ui.notebook.current_page().map(|page| page as usize) else {
+        return;
+    };
+    let address = address_of(&state.borrow(), index);
+    let was = zoom_index(&state.borrow(), &address);
+    let now = if step == 0 {
+        ZOOM_NORMAL
+    } else {
+        (was as i32 + step).clamp(0, ZOOM_STEPS.len() as i32 - 1) as usize
+    };
+    if now == was {
+        return;
+    }
+    // Выше того, что помещается на экран, не поднимаемся. Колонка держит
+    // меру жёстко, окно растёт вслед за ней, и на узком экране следующая
+    // ступень уехала бы за край — вместе с текстом. Обещать меру и не дать
+    // её увидеть хуже, чем не увеличить.
+    if now > was && !fits_on_screen(ui, ZOOM_STEPS[now]) {
+        notice(ui, "That step would not fit on this screen");
+        return;
+    }
+    state.borrow_mut().zoom.insert(zoom_key(&address), now);
+    redraw(ui, state, index);
+}
+
+/// Поместится ли колонка такой ступени на экран, где стоит окно.
+fn fits_on_screen(ui: &Ui, scale: f32) -> bool {
+    let monitor = ui.window.surface().and_then(|surface| {
+        gtk::gdk::Display::default().and_then(|display| display.monitor_at_surface(&surface))
+    });
+    let Some(monitor) = monitor else {
+        // Про экран ничего не известно — не мешаем читателю.
+        return true;
+    };
+    let column = (f64::from(MEASURE) * f64::from(scale) * dpi() / 72.0).round() as i32;
+    column <= monitor.geometry().width()
+}
+
+/// Перерисовать открытую страницу на новой ступени.
+///
+/// Текст в буфере от масштаба не зависит — от него зависят кегли, поля,
+/// ширина картинок и сетка таблицы, — поэтому после перерисовки смещения
+/// те же самые. На этом и держится возврат: место чтения и выделение
+/// запоминаются смещениями, а не пикселями, которые как раз уехали.
+fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
+    let (id, view, document) = {
+        let borrowed = state.borrow();
+        let Some(tab) = borrowed.tabs.get(index) else {
+            return;
+        };
+        (tab.id, tab.view.clone(), tab.document.clone())
+    };
+    // Пустая вкладка: на ней начальная страница, и у неё свой тракт.
+    let Some(document) = document else {
+        show_intro(ui, state, id, &view);
+        return;
+    };
+
+    let buffer = view.buffer();
+    let selection = buffer
+        .selection_bounds()
+        .map(|(from, to)| (from.offset(), to.offset()));
+    let place = top_of(&view);
+
+    dress(state, &view, &document.address);
+    let page = render(&view, &document, None);
+    {
+        let mut borrowed = state.borrow_mut();
+        if let Some(tab) = borrowed.find(id) {
+            tab.links = page.links;
+            tab.marks = page.marks;
+            tab.anchors = page.anchors;
+            tab.shots = page.shots.clone();
+        }
+    }
+    sync(ui, state, None);
+
+    // Картинки декодируются под меру, а мера уехала: заглушки ставим заново
+    // и заново же оживляем — иначе на увеличении осталось бы мыло.
+    let eager = state.borrow().images;
+    for shot in &page.shots {
+        place_shot(ui, state, id, shot, None);
+        if eager {
+            load_shot(ui, state, id, shot);
+        }
+    }
+    for cell in &page.cells {
+        follow_cell_links(ui, state, id, cell);
+    }
+
+    if let Some((from, to)) = selection {
+        let (from, to) = (buffer.iter_at_offset(from), buffer.iter_at_offset(to));
+        buffer.select_range(&from, &to);
+    }
+    settle(&view, place, 0.0);
+}
+
+/// Смещение строки у верхнего края окна: ею читатель и мерит, где он
+/// в тексте.
+fn top_of(view: &gtk::TextView) -> i32 {
+    view.iter_at_location(0, view.visible_rect().y())
+        .map(|iter| iter.offset())
+        .unwrap_or_default()
+}
+
+/// Масштаб страницы, в котором рисуем прямо сейчас.
+///
+/// Окружающий, как и `dpi()`, и по той же причине: это свойство рисования,
+/// а не аргумент. Протаскивать его через два десятка функций до разбора svg
+/// значило бы переписать их все ради одного числа. Ставится перед
+/// отрисовкой страницы и перед загрузкой её картинок — то есть там, где
+/// известно, какой вкладке рисуем.
+fn zoom() -> f64 {
+    f64::from(ZOOM.with(Cell::get))
+}
+
+fn set_zoom(scale: f32) {
+    ZOOM.with(|cell| cell.set(scale));
+}
+
 /// Мера в пикселях. В GTK кегль задаётся пунктами, а ширина виджета
 /// пикселями; без пересчёта по разрешению в строке оказывалось бы разное
 /// число знаков на разных экранах.
+///
+/// Масштаб входит и сюда: мера задана в кеглях, поэтому колонка растёт
+/// вместе с кеглем и строка остаётся той же длины в знаках.
 fn measure_px() -> i32 {
-    (f64::from(MEASURE) * dpi() / 72.0).round() as i32
+    (f64::from(MEASURE) * zoom() * dpi() / 72.0).round() as i32
 }
 
 /// Кегль текста в пикселях. Нужен не окну, а разбору svg: MathJax печатает
-/// формулы в `ex`, и они обязаны быть ростом с текст.
+/// формулы в `ex`, и они обязаны быть ростом с текст — на любой ступени.
 fn text_px() -> f32 {
-    (f64::from(TEXT_SIZE) * dpi() / 72.0) as f32
+    (f64::from(TEXT_SIZE) * zoom() * dpi() / 72.0) as f32
 }
 
 fn dpi() -> f64 {
@@ -1589,6 +1867,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         markdown: brevier::intro::MARKDOWN.to_owned(),
         kind: brevier::Kind::Article,
     };
+    dress(state, view, &document.address);
     let page = render(view, &document, None);
     let mut borrowed = state.borrow_mut();
     if let Some(tab) = borrowed.find(id) {
@@ -1599,14 +1878,39 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
     drop(borrowed);
     sync(ui, state, None);
 }
+/// Завести тег или переписать ему свойства.
+///
+/// Дважды тег в таблицу буфера не заводят, а масштаб страницы меняет ровно
+/// те же свойства, что ставит первая отрисовка. Значит список должен быть
+/// один: `tags` вызывается и на сборке вкладки, и на смене ступени.
+/// Приоритет при этом остаётся от первого захода — на нём держатся
+/// подпись оповещения поверх курсива цитаты и подсветка поиска поверх
+/// цвета ссылки.
+fn style(buffer: &gtk::TextBuffer, name: &str, properties: &[(&str, &dyn glib::value::ToValue)]) {
+    if let Some(tag) = buffer.tag_table().lookup(name) {
+        for (property, value) in properties {
+            tag.set_property_from_value(property, &value.to_value());
+        }
+    } else {
+        buffer.create_tag(Some(name), properties);
+    }
+}
+
 /// Теги — вся типографика статьи. Кегли и интерлиньяж те же, что были
 /// в прошлом интерфейсе: они живут в ядре и от тулкита не зависят.
-fn tags(buffer: &gtk::TextBuffer, dark: bool) {
-    let extra = ((LINE_HEIGHT - 1.0) * TEXT_SIZE).round() as i32;
-    let body = f64::from(TEXT_SIZE);
+///
+/// Масштаб умножает модель целиком — кегль, воздух между строками, шкалу
+/// заголовков, отступы списка и цитаты, поля блока кода. Умножить один
+/// кегль значило бы развалить их между собой.
+fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
+    let scale = f64::from(scale);
+    let px = |value: f64| (value * scale).round() as i32;
+    let extra = px(f64::from((LINE_HEIGHT - 1.0) * TEXT_SIZE));
+    let body = f64::from(TEXT_SIZE) * scale;
 
-    buffer.create_tag(
-        Some("body"),
+    style(
+        buffer,
+        "body",
         &[
             ("family", &BODY_FAMILY),
             ("size-points", &body),
@@ -1615,13 +1919,14 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         ],
     );
 
-    for (index, scale) in HEADINGS.iter().enumerate() {
+    for (index, ratio) in HEADINGS.iter().enumerate() {
         let name = format!("h{}", index + 1);
-        buffer.create_tag(
-            Some(&name),
+        style(
+            buffer,
+            &name,
             &[
                 ("family", &BODY_FAMILY),
-                ("size-points", &(body * f64::from(*scale))),
+                ("size-points", &(body * f64::from(*ratio))),
                 ("weight", &HEADING_WEIGHTS[index]),
                 // Воздух сверху, а не снизу: заголовок принадлежит тому,
                 // что под ним.
@@ -1631,14 +1936,15 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         );
     }
 
-    buffer.create_tag(Some("em"), &[("style", &pango::Style::Italic)]);
-    buffer.create_tag(Some("strong"), &[("weight", &BOLD)]);
+    style(buffer, "em", &[("style", &pango::Style::Italic)]);
+    style(buffer, "strong", &[("weight", &BOLD)]);
     let colors = colors(dark);
 
     // Код в строке отличается не только гарнитурой: подложка отделяет его
     // от текста там, где моноширинного мало — в одном-двух знаках.
-    buffer.create_tag(
-        Some("code"),
+    style(
+        buffer,
+        "code",
         &[
             ("family", &MONO_FAMILY),
             ("size-points", &(body * 0.9)),
@@ -1648,24 +1954,26 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     // Блок кода — панель: подложка во всю меру, поля по краям, строки плотнее,
     // чем в тексте. `paragraph-background` красит строку целиком, поэтому
     // панель получается без единого виджета.
-    buffer.create_tag(
-        Some("codeblock"),
+    style(
+        buffer,
+        "codeblock",
         &[
             ("family", &MONO_FAMILY),
             ("size-points", &(body * 0.9)),
             // Висячий отступ наоборот: продолжение длинной строки уходит
             // правее её начала, и перенос видно. Строку кода не перенести
             // нельзя — колонок в буфере нет.
-            ("left-margin", &40),
-            ("indent", &-18),
-            ("right-margin", &22),
-            ("pixels-below-lines", &2),
+            ("left-margin", &px(40.0)),
+            ("indent", &px(-18.0)),
+            ("right-margin", &px(22.0)),
+            ("pixels-below-lines", &px(2.0)),
             ("paragraph-background", &colors.panel),
         ],
     );
     // Пустая строка с той же подложкой — это поля панели сверху и снизу.
-    buffer.create_tag(
-        Some("pad"),
+    style(
+        buffer,
+        "pad",
         &[
             ("size-points", &(body * 0.4)),
             ("paragraph-background", &colors.panel),
@@ -1674,11 +1982,12 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         ],
     );
 
-    buffer.create_tag(Some("kw"), &[("foreground", &colors.keyword)]);
-    buffer.create_tag(Some("lit"), &[("foreground", &colors.literal)]);
-    buffer.create_tag(Some("num"), &[("foreground", &colors.number)]);
-    buffer.create_tag(
-        Some("com"),
+    style(buffer, "kw", &[("foreground", &colors.keyword)]);
+    style(buffer, "lit", &[("foreground", &colors.literal)]);
+    style(buffer, "num", &[("foreground", &colors.number)]);
+    style(
+        buffer,
+        "com",
         &[
             ("foreground", &colors.comment),
             ("style", &pango::Style::Italic),
@@ -1688,11 +1997,12 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     // виджет статьи. Уровень вложенности — свой отступ и своя линейка:
     // на треде обсуждения ответ на ответ иначе неотличим от новой реплики.
     for level in 1..=QUOTE_LEVELS {
-        buffer.create_tag(
-            Some(&format!("quote{level}")),
+        style(
+            buffer,
+            &format!("quote{level}"),
             &[
                 ("style", &pango::Style::Italic),
-                ("left-margin", &(26 * level)),
+                ("left-margin", &px(f64::from(26 * level))),
             ],
         );
     }
@@ -1700,11 +2010,12 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
     // Список: маркер выступает влево, перенос строки встаёт под текст,
     // а не под маркер. Уровни вложенности — свой отступ каждому.
     for level in 1..=LIST_LEVELS {
-        buffer.create_tag(
-            Some(&format!("list{level}")),
+        style(
+            buffer,
+            &format!("list{level}"),
             &[
-                ("left-margin", &(26 * level)),
-                ("indent", &-18),
+                ("left-margin", &px(f64::from(26 * level))),
+                ("indent", &px(-18.0)),
                 // Пункты стоят плотнее абзацев: список — одна мысль, разбитая
                 // на части, а не несколько абзацев подряд.
                 ("pixels-below-lines", &(extra / 2)),
@@ -1712,34 +2023,38 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         );
     }
     let (link, dim) = (colors.link, colors.dim);
-    buffer.create_tag(
-        Some("link"),
+    style(
+        buffer,
+        "link",
         &[
             ("underline", &pango::Underline::Single),
             ("foreground", &link),
         ],
     );
-    buffer.create_tag(Some("dim"), &[("foreground", &dim)]);
+    style(buffer, "dim", &[("foreground", &dim)]);
     // Подпись оповещения: заводится после цитаты, чтобы её курсив перебить —
     // у наложенного позже тега приоритет выше.
-    buffer.create_tag(
-        Some("alert"),
+    style(
+        buffer,
+        "alert",
         &[
             ("weight", &700),
             ("style", &pango::Style::Normal),
             ("size-points", &(body * 0.85)),
-            ("letter-spacing", &(pango::SCALE * 3 / 4)),
+            ("letter-spacing", &px(f64::from(pango::SCALE) * 0.75)),
         ],
     );
 
     // Подсветка поиска. Заводится последней: у тегов, наложенных позже,
     // приоритет выше, и жёлтое ложится поверх цвета ссылки.
-    buffer.create_tag(
-        Some("found"),
+    style(
+        buffer,
+        "found",
         &[("background", &FOUND), ("foreground", &FOUND_INK)],
     );
-    buffer.create_tag(
-        Some("here"),
+    style(
+        buffer,
+        "here",
         &[("background", &FOUND_HERE), ("foreground", &FOUND_INK)],
     );
 }
@@ -2590,6 +2905,15 @@ fn show_all_shots(ui: &Ui, state: &Rc<RefCell<State>>) {
 fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     if shot.busy.replace(true) {
         return;
+    }
+    // Под меру своей вкладки, а не открытой: пока страница грузилась,
+    // читатель мог уйти в соседнюю, где ступень другая.
+    {
+        let borrowed = state.borrow();
+        if let Some(index) = borrowed.tabs.iter().position(|tab| tab.id == id) {
+            let address = address_of(&borrowed, index);
+            set_zoom(ZOOM_STEPS[zoom_index(&borrowed, &address)]);
+        }
     }
     let Some(generation) = state.borrow_mut().find(id).map(|tab| tab.generation) else {
         return;

@@ -103,6 +103,8 @@ Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extra
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
 | `Ctrl+Tab`, `Ctrl+PageUp`/`PageDown` | switch tabs |
 | `Ctrl+F` | find on page |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | zoom the page in, out, back to 100% |
+| `Ctrl`+wheel | the same, with the mouse |
 | `Ctrl+S` | save the article |
 | `Ctrl+O` | hand the page to your system browser |
 
@@ -116,6 +118,10 @@ menu come from GTK.
   rather than bolder — at a large size weight shouts instead of leading.
 - **Ivory paper** (`#faf5ea`) instead of white, which glows on a screen; a warm dark
   theme is one button away.
+- **Page zoom on the browser's own ladder** (67…200%), and it scales the whole
+  typographic model, not just the body size — so a line still holds about 65 characters
+  at every step. The step is remembered per site for this run only, and a button in the
+  header shows it whenever it is not 100%.
 - **Fonts ship inside the binary** — Noto Sans and Noto Sans Mono, under the OFL. If the
   operating system picked the type, the promise would not hold on any of the three.
 - **A shelf on the right:** entry points into a repository's documentation on top, the
