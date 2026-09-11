@@ -4,8 +4,11 @@
 //! Поэтому вывод отсюда фиксируется в корпусе эталонов и служит базой
 //! регрессионных тестов на всю жизнь проекта.
 
+use std::collections::HashMap;
+
 use dom_query::Document;
 use dom_smoothie::{Config, Readability, ReadabilityError};
+use url::Url;
 
 use crate::error::Error;
 
@@ -14,6 +17,10 @@ pub struct Article {
     pub byline: Option<String>,
     /// Очищенный HTML статьи. Относительные ссылки уже развёрнуты в абсолютные.
     pub content_html: String,
+    /// Миниатюры записей: адрес ссылки → адрес картинки внутри неё.
+    /// Собраны со всей страницы, до извлечения; подставляются обратно
+    /// только в ленте — см. [`thumbs`].
+    pub thumbs: HashMap<String, String>,
 }
 
 pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
@@ -21,6 +28,9 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
 
     let doc = Document::from(html);
     unlazy(&doc);
+    // Снять до извлечения: `Readability` документ перебирает и чистит,
+    // и половины картинок после него в дереве уже нет.
+    let thumbs = thumbs(&doc, url);
 
     let mut readability =
         Readability::with_document(doc, Some(url), Some(cfg)).map_err(|e| match e {
@@ -38,7 +48,69 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         title: article.title.to_string(),
         byline: article.byline.filter(|b| !b.trim().is_empty()),
         content_html: article.content.to_string(),
+        thumbs,
     })
+}
+
+/// Картинки, спрятанные за ссылками: адрес ссылки → адрес картинки.
+///
+/// Лента состоит из карточек «миниатюра плюс заголовок», и миниатюру сайт
+/// помечает `aria-hidden="true"` — для скринридера она дубль соседнего
+/// заголовка, и размечено это правильно. Readability понимает подсказку
+/// буквально и выбрасывает картинку вместе со ссылкой; читателю, который
+/// смотрит глазами, карточка без картинки уже не карточка.
+///
+/// Поэтому миниатюры снимаются с исходного дерева, до извлечения, и в текст
+/// возвращаются только там, где страница оказалась лентой: в статье такая
+/// подстановка была бы отсебятиной.
+///
+/// Адреса разворачиваем сами: `fix_relative_uris` из dom_smoothie правит
+/// только извлечённое содержимое, а мы берём картинки мимо него.
+fn thumbs(doc: &Document, base: &str) -> HashMap<String, String> {
+    /// Насколько глубоко картинка сидит внутри ссылки. Обычно `<a><img>`,
+    /// но между ними бывает `<figure>` или `<span>` с рамкой.
+    const DEPTH: usize = 4;
+
+    let base = Url::parse(base).ok();
+    let mut out = HashMap::new();
+
+    for img in doc.select("img[src]").nodes() {
+        let Some(src) = img.attr("src") else {
+            continue;
+        };
+        let Some(link) = img
+            .ancestors_it(Some(DEPTH))
+            .find(|node| node.node_name().as_deref() == Some("a"))
+        else {
+            continue;
+        };
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
+
+        let (Some(href), Some(src)) = (
+            absolute(base.as_ref(), &href),
+            absolute(base.as_ref(), &src),
+        ) else {
+            continue;
+        };
+        // Первая картинка ссылки и есть её миниатюра: дальше идут значки
+        // вроде «комментарии» и «поделиться».
+        out.entry(href).or_insert(src);
+    }
+
+    out
+}
+
+fn absolute(base: Option<&Url>, link: &str) -> Option<String> {
+    let link = link.trim();
+    if link.is_empty() || link.starts_with("data:") {
+        return None;
+    }
+    match base {
+        Some(base) => base.join(link).ok().map(String::from),
+        None => Url::parse(link).ok().map(String::from),
+    }
 }
 
 /// Снять подсказку `loading="lazy"` с картинок, у которых адрес и так на месте.

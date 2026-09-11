@@ -94,10 +94,53 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
         Teasers::Listing => (doc, Kind::Listing),
     };
 
-    Ok(Reading {
-        markdown: strip_chrome(&text),
-        kind,
-    })
+    let text = strip_chrome(&text);
+    let markdown = match kind {
+        Kind::Article => text,
+        Kind::Listing => with_thumbs(&text, &article.thumbs),
+    };
+
+    Ok(Reading { markdown, kind })
+}
+
+/// Вернуть ленте миниатюры записей.
+///
+/// Картинку карточки извлечение выбрасывает, потому что сайт пометил её
+/// `aria-hidden` (см. `extract::thumbs`). Ставим её обратно перед заголовком
+/// записи — и только там, где заголовок и правда ведёт на другую страницу,
+/// а картинка нашлась ровно по его адресу. Отсебятины тут нет: обе половины
+/// карточки взяты с самой страницы и стояли рядом.
+fn with_thumbs(md: &str, thumbs: &HashMap<String, String>) -> String {
+    if thumbs.is_empty() {
+        return md.to_owned();
+    }
+
+    let mut out = String::with_capacity(md.len());
+    let mut previous = "";
+
+    for line in md.lines() {
+        if let Some((title, url)) = teaser_link(line)
+            && let Some(src) = thumbs.get(url)
+            // Картинка уже стоит рядом — второй раз не надо.
+            && !previous.contains(src.as_str())
+        {
+            // В `alt` — заголовок записи: с выключенными картинками рамка
+            // должна говорить, что за ней, а не молчать.
+            let alt = if title.contains(['[', ']']) {
+                ""
+            } else {
+                title
+            };
+            out.push_str(&format!("![{alt}]({src})\n\n"));
+        }
+        out.push_str(line);
+        out.push('\n');
+        if !line.trim().is_empty() {
+            previous = line;
+        }
+    }
+
+    out
 }
 
 /// Страница целиком, без Readability (`--raw`). Нужен, чтобы отличать
@@ -714,21 +757,22 @@ fn points_at_image(url: &str) -> bool {
 }
 
 fn is_teaser_heading(line: &str) -> bool {
-    let Some(rest) = line.trim_start().strip_prefix('#') else {
-        return false;
-    };
+    teaser_link(line).is_some()
+}
+
+/// Заголовок-анонс, разобранный на текст и адрес.
+fn teaser_link(line: &str) -> Option<(&str, &str)> {
+    let rest = line.trim_start().strip_prefix('#')?;
     let text = rest.trim_start_matches('#').trim();
-    let Some(inner) = text.strip_prefix('[') else {
-        return false;
-    };
+    let inner = text.strip_prefix('[')?;
     // Ровно одна ссылка на другую страницу и ничего кроме неё.
-    let Some((_, target)) = inner.split_once("](") else {
-        return false;
-    };
-    let Some(url) = target.strip_suffix(')') else {
-        return false;
-    };
-    !url.contains(&['[', ']'][..]) && (url.starts_with("http://") || url.starts_with("https://"))
+    let (title, target) = inner.split_once("](")?;
+    let url = target.strip_suffix(')')?;
+    if url.contains(&['[', ']'][..]) || !(url.starts_with("http://") || url.starts_with("https://"))
+    {
+        return None;
+    }
+    Some((title, url))
 }
 
 /// htmd выравнивает столбцы по самой длинной ячейке. В инфобоксе википедии это
@@ -1236,12 +1280,69 @@ mod tests {
                 <h2><a href=\"https://e.com/2\">Вторая</a></h2><p>анонс</p>\
                 <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
                 .to_owned(),
+            thumbs: HashMap::new(),
         };
 
         let reading = from_article(&article).unwrap();
         assert_eq!(reading.kind, Kind::Listing);
         assert_eq!(links(&reading.markdown).len(), 3);
         assert!(reading.markdown.contains("Третья"));
+    }
+
+    /// Карточку ленты сайт помечает `aria-hidden`, и картинка до нас
+    /// не доезжает. Ставим её обратно — перед заголовком её же записи.
+    #[test]
+    fn a_listing_gets_its_thumbnails_back() {
+        let mut thumbs = HashMap::new();
+        thumbs.insert(
+            "https://e.com/2".to_owned(),
+            "https://e.com/img/2.webp".to_owned(),
+        );
+        let article = Article {
+            title: "Блог".to_owned(),
+            byline: None,
+            content_html: "<h2><a href=\"https://e.com/1\">Первая</a></h2><p>анонс</p>\
+                <h2><a href=\"https://e.com/2\">Вторая</a></h2><p>анонс</p>\
+                <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
+                .to_owned(),
+            thumbs,
+        };
+
+        let reading = from_article(&article).unwrap();
+        let lines: Vec<&str> = reading.markdown.lines().collect();
+        let picture = lines
+            .iter()
+            .position(|line| line.starts_with("![Вторая](https://e.com/img/2.webp)"))
+            .expect("миниатюры нет");
+        let heading = lines
+            .iter()
+            .position(|line| line.starts_with("## [Вторая]"))
+            .expect("заголовка нет");
+        assert!(picture < heading, "миниатюра должна стоять над записью");
+        // Записям без миниатюры картинку не выдумываем.
+        assert_eq!(images(&reading.markdown).len(), 1);
+    }
+
+    /// Статья миниатюр не получает: там это была бы отсебятина.
+    #[test]
+    fn an_article_gets_no_thumbnails() {
+        let mut thumbs = HashMap::new();
+        thumbs.insert(
+            "https://e.com/1".to_owned(),
+            "https://e.com/img/1.webp".to_owned(),
+        );
+        let article = Article {
+            title: "Статья".to_owned(),
+            byline: None,
+            content_html: "<p>Первый абзац со <a href=\"https://e.com/1\">ссылкой</a>.</p>\
+                <h2>Раздел</h2><p>Второй абзац.</p>"
+                .to_owned(),
+            thumbs,
+        };
+
+        let reading = from_article(&article).unwrap();
+        assert_eq!(reading.kind, Kind::Article);
+        assert!(images(&reading.markdown).is_empty());
     }
 
     /// Обычная статья остаётся статьёй: признак ленты не должен срабатывать
@@ -1254,6 +1355,7 @@ mod tests {
             content_html: "<p>Первый абзац со <a href=\"https://e.com/1\">ссылкой</a>.</p>\
                 <h2>Раздел</h2><p>Второй абзац.</p>"
                 .to_owned(),
+            thumbs: HashMap::new(),
         };
 
         let reading = from_article(&article).unwrap();
