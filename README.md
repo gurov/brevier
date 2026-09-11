@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brevier.svg" alt="" width="104">
+</p>
+
 # Brevier
 
 A browser for reading. It fetches a page, reduces it to Markdown on your own machine,
