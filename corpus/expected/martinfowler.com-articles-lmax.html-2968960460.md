@@ -63,6 +63,8 @@ Snapshots make starting up a new Business Logic Processor faster, but not quickl
 
 By event sourcing into replicas they can switch between processors in a matter of micro-seconds. As well as taking snapshots every night, they also restart the Business Logic Processors every night. The replication allows them to do this with no downtime, so they continue to process trades 24/7.
 
+For more background on Event Sourcing, see the [draft pattern](https://martinfowler.com/eaaDev/EventSourcing.html) on my site from a few years ago. The article is more focused on handling temporal relationships rather than the benefits that LMAX use, but it does explain the core idea.
+
 Event Sourcing is valuable because it allows the processor to run entirely in-memory, but it has another considerable advantage for diagnostics. If some unexpected behavior occurs, the team copies the sequence of events to their development environment and replays them there. This allows them to examine what happened much more easily than is possible in most environments.
 
 This diagnostic capability extends to business diagnostics. There are some business tasks, such as in risk management, that require significant computation that isn't needed for processing orders. An example is getting a list of the top 20 customers by risk profile based on their current trading positions. The team handles this by spinning up a replicate domain model and carrying out the computation there, where it won't interfere with the core order processing. These analysis domain models can have variant data models, keep different data sets in memory, and run on different machines.

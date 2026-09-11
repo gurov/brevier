@@ -4,7 +4,7 @@
 //! Поэтому вывод отсюда фиксируется в корпусе эталонов и служит базой
 //! регрессионных тестов на всю жизнь проекта.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dom_query::{Document, NodeRef};
 use dom_smoothie::{Config, Readability, ReadabilityError};
@@ -50,6 +50,28 @@ const ICON_PX: u32 = 48;
 /// внутри обёртки.
 const LANG_DEPTH: usize = 3;
 
+/// Короче этого абзац для сверки не годится: по трём словам не отличить
+/// один абзац от другого.
+const KEY_WORDS: usize = 6;
+
+/// По скольким знакам начала узнаём абзац. Извлечение текст абзаца
+/// не переписывает, поэтому начала хватает.
+const KEY_LEN: usize = 60;
+
+/// Короче этого выпавший абзац не возвращаем: это подпись, дата
+/// или обрезок интерфейса, а не проза.
+const ORPHAN_WORDS: usize = 8;
+
+/// А из врезки — только настоящий текст. Замер 11 сентября 2026: во врезках
+/// лежат и абзацы статьи (сноски и вставки Фаулера, 43–97 слов), и рекламные
+/// блюрбы (alistapart, nngroup, smashing — 10–36 слов). Ни `aside`,
+/// ни доля ссылок их не различают, а длина различает.
+const ASIDE_WORDS: usize = 40;
+
+/// Куда абзац попадает не как часть статьи: во врезку, в подвал, в меню,
+/// в форму, в подпись к картинке.
+const ASIDE_TAGS: [&str; 5] = ["aside", "footer", "nav", "form", "figure"];
+
 /// Лента, снятая с исходного дерева: её html и её же текст — по тексту
 /// потом решают, лента это или статья с витриной в хвосте.
 struct Listing {
@@ -74,6 +96,9 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
     let listing = listing(&doc, url);
+    // Копия — под сверку с извлечённым: `Readability` документ забирает себе
+    // и чистит на месте, а сироты ищутся в исходном дереве (см. `restore`).
+    let source = doc.clone();
 
     let mut readability =
         Readability::with_document(doc, Some(url), Some(cfg)).map_err(|e| match e {
@@ -91,6 +116,14 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let listing_html = listing
         .filter(|listing| listing.holds(&content_html))
         .map(|listing| listing.html);
+
+    // Сироты возвращаем только в статью: в ленте абзацев статьи нет,
+    // а решение «лента или статья» принято по строгому содержимому.
+    let content_html = if listing_html.is_none() {
+        restore(&source, &content_html, url).unwrap_or(content_html)
+    } else {
+        content_html
+    };
 
     Ok(Article {
         title: article.title.to_string(),
@@ -207,6 +240,195 @@ fn is_icon(image: &NodeRef) -> bool {
 
 fn captioned(image: &NodeRef) -> bool {
     image.attr("alt").is_some_and(|alt| !alt.trim().is_empty())
+}
+
+/// Вернуть в статью прозу, выпавшую внутри её же границ.
+///
+/// Readability выбирает один узел-кандидата и его соседей, а что лежит
+/// в стороне — врезка, сноска, абзац в своей обёртке — теряет целиком,
+/// и никакими настройками не возвращается: ослабление флагов у самого
+/// `dom_smoothie` меняет отбор кандидата, а не добирает потерянное
+/// (проверено на шести страницах — у Фаулера все политики дают один
+/// и тот же текст). Это и есть «каскад с перезапуском» соседей в том
+/// единственном месте, где он работает: сравниваем исходное дерево
+/// с извлечённым и возвращаем то, что лежит **между** абзацами статьи.
+///
+/// Границы и решают. Абзац выше первого взятого — шапка, ниже последнего —
+/// подвал и комментарии; между ними сайт обвязку почти не кладёт. Замер
+/// по корпусу 11 сентября 2026: сироты нашлись на 12 страницах из 86,
+/// и настоящей прозой оказались шесть — два потерянных абзаца
+/// доказательства у ru.wikipedia (459 слов), врезки и сноски Фаулера
+/// (1111 и 57), куски статьи у tim.blog (1178) и sqlite.org (332),
+/// реплики у danluu. На остальных шести сироты — рекламные блюрбы,
+/// и от прозы их отделяет длина, а не место: см. `ASIDE_WORDS`.
+///
+/// Порядок сохраняем, вставляя накопленное одним куском: `after_html`
+/// ставит новое сразу за якорем, и два вызова подряд перевернули бы пару
+/// абзацев местами.
+fn restore(source: &Document, content: &str, base: &str) -> Option<String> {
+    let article = Document::from(content.to_string());
+
+    let mut places: HashMap<String, NodeRef> = HashMap::new();
+    for node in article.select("p").nodes() {
+        if let Some((key, _)) = para_key(node) {
+            places.entry(key).or_insert(*node);
+        }
+    }
+    if places.is_empty() {
+        return None;
+    }
+
+    // Текст статьи целиком — под проверку на дубль, и он растёт вместе
+    // с возвращённым. Сверять абзацем мало с двух сторон: сноски Фаулера
+    // лежат в статье списком, а на странице абзацем внутри врезки, и друг
+    // друга по разметке не узнают; сама же врезка на странице стоит дважды —
+    // обычная адаптивная вёрстка, копия на узкий экран. И там и там читатель
+    // получал один и тот же текст по второму разу.
+    let mut inside = squeeze(&article.select("body").text());
+
+    let page: Vec<(NodeRef, String, usize)> = source
+        .select("p")
+        .nodes()
+        .iter()
+        .filter_map(|node| para_key(node).map(|(key, words)| (*node, key, words)))
+        .collect();
+
+    let first = page
+        .iter()
+        .position(|(_, key, _)| places.contains_key(key))?;
+    let last = page
+        .iter()
+        .rposition(|(_, key, _)| places.contains_key(key))?;
+
+    let mut anchor: Option<NodeRef> = None;
+    let mut pending: Vec<String> = Vec::new();
+    let mut blocks: HashSet<dom_query::NodeId> = HashSet::new();
+    let mut restored = 0;
+
+    for (node, key, words) in &page[first..=last] {
+        if let Some(place) = places.get(key) {
+            if let Some(previous) = anchor.take()
+                && !pending.is_empty()
+            {
+                previous.after_html(pending.concat());
+                pending.clear();
+            }
+            anchor = Some(place_after(place));
+            continue;
+        }
+        if !worth_restoring(node, *words) || inside.contains(key.as_str()) {
+            continue;
+        }
+        let block = lost_block(node, &places);
+        if !blocks.insert(block.id) {
+            // Вторая сирота из того же куска: кусок уже возвращён целиком.
+            continue;
+        }
+        pending.push(fragment(&block.html(), base));
+        inside.push(' ');
+        inside.push_str(&squeeze(&block.text()));
+        restored += 1;
+    }
+    if let Some(previous) = anchor
+        && !pending.is_empty()
+    {
+        previous.after_html(pending.concat());
+    }
+
+    if restored == 0 {
+        return None;
+    }
+
+    // Отдаём в той же форме, в какой пришло: `#readability-page-1` —
+    // обёртка самого Readability, и дальше по тракту ждут именно её.
+    let page_node = article.select("#readability-page-1");
+    Some(match page_node.nodes().first() {
+        Some(node) => node.html().to_string(),
+        None => article.select("body").inner_html().to_string(),
+    })
+}
+
+/// Что именно вернуть: сам абзац или обёртку, в которой он потерялся.
+///
+/// Абзац в `<li>` без своего пункта — половина мысли: у sqlite.org в пункте
+/// лежат заголовок и объяснение, и без заголовка объяснение повисает.
+/// Цитата, потерянная целиком, должна вернуться цитатой, а не строкой текста.
+/// Поэтому поднимаемся на шаг — но только через обёртки известной формы
+/// и только если в обёртке нет ничего из статьи: иначе абзац приедет
+/// вместе с тем, что уже стоит на своём месте.
+fn lost_block<'a>(para: &NodeRef<'a>, places: &HashMap<String, NodeRef>) -> NodeRef<'a> {
+    const WRAPPERS: [&str; 4] = ["li", "aside", "blockquote", "figure"];
+
+    let Some(parent) = para.parent() else {
+        return *para;
+    };
+    let wrapper = parent
+        .node_name()
+        .is_some_and(|name| WRAPPERS.contains(&name.as_ref()));
+    if !wrapper {
+        return *para;
+    }
+    let mixed = parent.descendants().iter().any(|node| {
+        node.node_name().as_deref() == Some("p")
+            && para_key(node).is_some_and(|(key, _)| places.contains_key(&key))
+    });
+    if mixed { *para } else { parent }
+}
+
+/// За чем встанет возвращённое.
+///
+/// За самим абзацем — кроме случая, когда абзац в обёртке один: тогда
+/// за обёрткой. Иначе проза статьи уезжает внутрь цитаты и читается
+/// цитатой — поймано на доказательстве теоремы Эрроу в википедии.
+fn place_after<'a>(anchor: &NodeRef<'a>) -> NodeRef<'a> {
+    const WRAPPERS: [&str; 3] = ["blockquote", "li", "figure"];
+
+    let Some(parent) = anchor.parent() else {
+        return *anchor;
+    };
+    let wrapper = parent
+        .node_name()
+        .is_some_and(|name| WRAPPERS.contains(&name.as_ref()));
+    if !wrapper {
+        return *anchor;
+    }
+    let alone = parent
+        .descendants()
+        .iter()
+        .filter(|node| node.node_name().as_deref() == Some("p"))
+        .count()
+        == 1;
+    if alone { parent } else { *anchor }
+}
+
+/// Ключ абзаца и его вес в словах. Ключ — начало текста без лишних
+/// пробелов: этого хватает, чтобы узнать абзац в извлечённом.
+fn para_key(node: &NodeRef) -> Option<(String, usize)> {
+    let text = squeeze(&node.text());
+    let words = text.split_whitespace().count();
+    if words < KEY_WORDS {
+        return None;
+    }
+    Some((text.chars().take(KEY_LEN).collect(), words))
+}
+
+/// Стоит ли возвращать выпавший абзац.
+fn worth_restoring(node: &NodeRef, words: usize) -> bool {
+    if words < ORPHAN_WORDS {
+        return false;
+    }
+    let aside = node.ancestors_it(None).any(|up| {
+        up.node_name()
+            .is_some_and(|name| ASIDE_TAGS.contains(&name.as_ref()))
+    });
+    !aside || words >= ASIDE_WORDS
+}
+
+/// Развернуть адреса в куске, оставив его куском: `absolute_html` отдаёт
+/// целый документ, а этот кусок встаёт соседом абзаца внутри статьи.
+fn fragment(html: &str, base: &str) -> String {
+    let doc = Document::from(absolute_html(html, base));
+    doc.select("body").inner_html().to_string()
 }
 
 /// Язык блока кода — в атрибут, который переживёт извлечение.
@@ -555,6 +777,109 @@ mod tests {
                 .content_html
                 .contains(r#"src="https://example.org/wiki/File:Portrait.jpg""#)
         );
+    }
+
+    /// Проза, выпавшая внутри статьи, возвращается на своё место;
+    /// обвязка за её границами и короткая врезка — нет.
+    #[test]
+    fn lost_prose_comes_back_and_boilerplate_does_not() {
+        let long = "слово ".repeat(50);
+        let source = Document::from(format!(
+            "<body>\
+             <header><p>Шапка сайта: разделы, поиск и вход в личный кабинет</p></header>\
+             <article>\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <p>Выпавший абзац, который лежит между своими: {long}</p>\
+             <p>Второй выпавший подряд, и порядок двух должен сохраниться</p>\
+             <aside><p>Реклама курса: успейте записаться сегодня со скидкой</p></aside>\
+             <aside><p>Врезка в полновесный абзац, и она часть статьи: {long}</p></aside>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </article>\
+             <footer><p>Подвал сайта: копирайт, ссылки на соцсети и лицензия</p></footer>\
+             </body>"
+        ));
+        let content = "<div id=\"readability-page-1\">\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </div>";
+
+        let restored = restore(&source, content, "https://example.org/post").expect("ничего");
+
+        assert!(restored.contains("Выпавший абзац"), "{restored}");
+        assert!(
+            restored.contains("Врезка в полновесный абзац"),
+            "{restored}"
+        );
+        // Порядок двух подряд идущих сирот сохраняется.
+        let second = restored
+            .find("Второй выпавший подряд")
+            .expect("нет второго");
+        assert!(restored.find("Выпавший абзац").unwrap() < second);
+        // Шапка и подвал лежат за границами статьи, короткая врезка —
+        // реклама: ни того, ни другого в статье быть не должно.
+        assert!(!restored.contains("Шапка сайта"), "{restored}");
+        assert!(!restored.contains("Подвал сайта"), "{restored}");
+        assert!(!restored.contains("Реклама курса"), "{restored}");
+    }
+
+    /// Дубль — не сирота, и ловится он текстом, а не разметкой: в статье
+    /// сноска лежит списком, на странице — абзацем во врезке; а сама врезка
+    /// на странице стоит дважды, копией на узкий экран.
+    #[test]
+    fn the_same_text_comes_back_once_and_only_if_missing() {
+        let long = "слово ".repeat(50);
+        let note = format!("Сноска про шину предприятия, и она длинная: {long}");
+        let page = |note: &str| {
+            format!(
+                "<body><article>\
+                 <p>Первый абзац статьи, с которого всё начинается тут</p>\
+                 <aside><p>{note}</p></aside>\
+                 <aside><p>{note}</p></aside>\
+                 <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+                 </article></body>"
+            )
+        };
+        let head = "<p>Первый абзац статьи, с которого всё начинается тут</p>";
+        let tail = "<p>Последний абзац статьи, на котором она заканчивается тут</p>";
+
+        // Сноски в статье нет — возвращается, и один раз, а не два.
+        let restored = restore(
+            &Document::from(page(&note)),
+            &format!("<div id=\"readability-page-1\">{head}{tail}</div>"),
+            "https://example.org/post",
+        )
+        .expect("сноска не вернулась");
+        assert_eq!(restored.matches("Сноска про шину").count(), 1, "{restored}");
+
+        // Сноска в статье уже есть, только другой разметкой — не трогаем.
+        let already =
+            format!("<div id=\"readability-page-1\">{head}<ul><li>{note}</li></ul>{tail}</div>");
+        assert!(
+            restore(
+                &Document::from(page(&note)),
+                &already,
+                "https://example.org/post"
+            )
+            .is_none()
+        );
+    }
+
+    /// Возвращать нечего — возвращаем `None`, а не переписанный html:
+    /// на подавляющем большинстве страниц сирот нет вовсе.
+    #[test]
+    fn a_whole_article_is_left_alone() {
+        let source = Document::from(
+            "<body><article>\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </article></body>"
+                .to_string(),
+        );
+        let content = "<div id=\"readability-page-1\">\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </div>";
+        assert!(restore(&source, content, "https://example.org/post").is_none());
     }
 
     /// Значок против картинки: правило проверяется на всех местах сразу,
