@@ -73,6 +73,8 @@ brevier --docs gh:rust-lang/book        # entry points into its documentation
 brevier --links <url>                   # the article's outgoing links, one per line
 brevier --raw <url>                     # no extraction, the whole page
 brevier --html <url>                    # the extracted HTML, before conversion
+brevier --stdin <url> < page.html       # HTML you already have; the url is
+                                        # where it came from, for its links
 brevier <url> | less
 
 brevier-ui <url> [<url>…]               # read in a window, one tab per address

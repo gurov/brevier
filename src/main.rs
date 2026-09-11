@@ -2,7 +2,7 @@
 //!
 //!     brevier https://example.com/article | less
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
 use brevier::error::Error;
@@ -17,6 +17,8 @@ Usage: brevier [options] <url|gh:owner/repo|gl:owner/repo>
 
 Options:
       --ua <honest|browser>  User-Agent to send (default: honest)
+      --stdin                read the page's HTML from stdin instead of
+                             fetching it; the url tells where it came from
       --raw                  skip extraction, convert the whole page
       --html                 print the extracted HTML instead of Markdown
       --links                print the article's outgoing links, one per line
@@ -32,6 +34,9 @@ Exit codes: 1 bad url, 2 network, 3 http status,
 struct Args {
     url: String,
     ua: UserAgent,
+    /// HTML приходит из stdin, а не из сети. Адрес при этом всё равно нужен:
+    /// по нему разворачиваются относительные ссылки.
+    stdin: bool,
     raw: bool,
     html: bool,
     links: bool,
@@ -80,33 +85,27 @@ fn run(args: &Args) -> Result<String, Error> {
         return Ok(out);
     }
 
-    let text = match repository(args) {
-        // Репозиторий читается своим трактом: конвертировать нечего,
-        // формат родной. Работа там в другом — развернуть ссылки внутри
-        // документа, которых в сыром `.md` нет.
-        Some(address) => brevier::open(&address, args.ua)?.markdown,
-        None => {
-            let page = fetch::fetch(&args.url, args.ua)?;
+    let text = if args.stdin {
+        let mut html = String::new();
+        io::stdin()
+            .read_to_string(&mut html)
+            .map_err(Error::Convert)?;
+        page_text(&html, &args.url, args)?
+    } else {
+        match repository(args) {
+            // Репозиторий читается своим трактом: конвертировать нечего,
+            // формат родной. Работа там в другом — развернуть ссылки внутри
+            // документа, которых в сыром `.md` нет.
+            Some(address) => brevier::open(&address, args.ua)?.markdown,
+            None => {
+                let page = fetch::fetch(&args.url, args.ua)?;
 
-            match page.kind {
-                // Родной формат: конвертировать нечего, трогать текст автора — тем более.
-                ContentKind::Markdown => page.body,
-                // Простой текст markdown-ом не является — отдаём как есть.
-                ContentKind::Text => page.body,
-                ContentKind::Html if args.raw => markdown::from_html(&page.body)?,
-                ContentKind::Html => {
-                    let article = extract::extract(&page.body, &page.url)?;
-                    if args.html {
-                        return Ok(article.content_html);
-                    }
-                    let reading = markdown::from_article(&article)?;
-                    // Сказать, что это не статья, надо так, чтобы не испортить
-                    // `| less` и перенаправление в файл: в stdout идёт только
-                    // документ.
-                    if reading.kind == markdown::Kind::Listing {
-                        eprintln!("brevier: a list of links, not an article");
-                    }
-                    reading.markdown
+                match page.kind {
+                    // Родной формат: конвертировать нечего, трогать текст автора — тем более.
+                    ContentKind::Markdown => page.body,
+                    // Простой текст markdown-ом не является — отдаём как есть.
+                    ContentKind::Text => page.body,
+                    ContentKind::Html => page_text(&page.body, &page.url, args)?,
                 }
             }
         }
@@ -118,6 +117,28 @@ fn run(args: &Args) -> Result<String, Error> {
         return Ok(out);
     }
     Ok(text)
+}
+
+/// Страница в том виде, в каком её печатают: тракт один и для скачанного
+/// тела, и для поданного в stdin. Адрес нужен и без сети — по нему
+/// разворачиваются относительные ссылки и решается, что тут за документ.
+fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
+    if args.raw {
+        return markdown::from_html(html);
+    }
+
+    let article = extract::extract(html, url)?;
+    if args.html {
+        return Ok(article.content_html);
+    }
+
+    let reading = markdown::from_article(&article)?;
+    // Сказать, что это не статья, надо так, чтобы не испортить `| less`
+    // и перенаправление в файл: в stdout идёт только документ.
+    if reading.kind == markdown::Kind::Listing {
+        eprintln!("brevier: a list of links, not an article");
+    }
+    Ok(reading.markdown)
 }
 
 /// Адрес репозитория — или `None`, если это обычная страница. `--raw`
@@ -153,6 +174,7 @@ fn out(text: &str) -> ExitCode {
 fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut url: Option<String> = None;
     let mut ua = UserAgent::default();
+    let mut stdin = false;
     let mut raw = false;
     let mut html = false;
     let mut links = false;
@@ -165,6 +187,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             "-V" | "--version" => {
                 return Parsed::Print(format!("brevier {}\n", env!("CARGO_PKG_VERSION")));
             }
+            "--stdin" => stdin = true,
             "--raw" => raw = true,
             "--html" => html = true,
             "--links" => links = true,
@@ -188,10 +211,19 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
         }
     }
 
+    // Точки входа ищутся в репозитории, а в stdin приходит страница:
+    // вопросы разные, и молча предпочесть один другому нельзя.
+    if stdin && docs {
+        return Parsed::Usage("--docs asks a repository, not stdin".to_owned());
+    }
+
     match url {
+        // Адрес обязателен и при `--stdin`: сеть он не трогает, но без него
+        // относительные ссылки страницы разворачивать не во что.
         Some(url) => Parsed::Run(Box::new(Args {
             url,
             ua,
+            stdin,
             raw,
             html,
             links,
@@ -225,6 +257,23 @@ mod tests {
             panic!("не разобралось");
         };
         assert_eq!(args.ua, UserAgent::Honest);
+    }
+
+    #[test]
+    fn html_comes_from_stdin_but_the_url_is_still_needed() {
+        let Parsed::Run(args) = parse(&["--stdin", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert!(args.stdin);
+        assert_eq!(args.url, "https://e.com/a");
+
+        // Адрес нужен и здесь: по нему разворачиваются ссылки страницы.
+        assert!(matches!(parse(&["--stdin"]), Parsed::Usage(_)));
+        // А точки входа в документацию спрашивают репозиторий, не страницу.
+        assert!(matches!(
+            parse(&["--stdin", "--docs", "gh:o/n"]),
+            Parsed::Usage(_)
+        ));
     }
 
     #[test]
