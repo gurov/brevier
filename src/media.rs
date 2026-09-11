@@ -282,7 +282,9 @@ fn trim(raster: Raster, paper: [u8; 3]) -> Raster {
     let row = raster.width as usize * 4;
     let blank = |line: usize| {
         raster.rgba[line * row..(line + 1) * row]
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .all(|pixel| pixel[..3] == paper[..])
     };
 
@@ -332,7 +334,7 @@ fn fonts() -> Arc<usvg::fontdb::Database> {
 /// Цвет всегда светлый, даже когда читатель выбрал тёмную тему: схема
 /// нарисована тёмным по светлому, и другого выхода у неё нет.
 fn flatten(mut rgba: Vec<u8>, paper: [u8; 3]) -> Vec<u8> {
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         let alpha = u32::from(pixel[3]);
         if alpha == 255 {
             continue;

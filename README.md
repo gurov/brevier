@@ -24,7 +24,8 @@ and the product is the window: your measure, your leading, your type, on every s
 
 ## Build
 
-Rust 1.85 or newer (edition 2024).
+Rust 1.88 or newer — edition 2024 needs 1.85, and `slice::as_chunks` in the image
+decoder needs 1.88. CI builds on current stable.
 
 ```sh
 cargo build --release                  # brevier — the cli
