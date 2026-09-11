@@ -83,7 +83,7 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
         });
     }
 
-    let body = to_markdown(&article.content_html)?;
+    let body = convert(&article.content_html, &article.notes.numbers)?;
 
     let mut doc = String::with_capacity(body.len() + 128);
     let title = article.title.trim();
@@ -114,8 +114,81 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
         Kind::Article => text,
         Kind::Listing => with_thumbs(&text, &article.thumbs),
     };
+    // Сноски дописываем последними, уже после вычитания хвоста: тело сноски
+    // из одной ссылки для правила про витрину неотличимо от анонса,
+    // и весь блок уехал бы в вырезанное.
+    let markdown = with_notes(&markdown, &article.notes)?;
 
     Ok(Reading { markdown, kind })
+}
+
+/// Дописать сноски единым блоком в конец статьи.
+///
+/// В тексте на их месте уже стоит `[^N]` — это сделал конвертер. Тела
+/// приходят html-ом и переводятся здесь: в одну строку каждое, потому что
+/// сноска в GFM продолжается отступом, а лишний отступ в `less` читается
+/// как блок кода.
+fn with_notes(markdown: &str, notes: &extract::Notes) -> Result<String, Error> {
+    if notes.bodies.is_empty() {
+        return Ok(markdown.to_owned());
+    }
+
+    let mut out = unbracket(markdown.trim_end()).into_owned();
+    out.push('\n');
+    for (index, body) in notes.bodies.iter().enumerate() {
+        let text = squeeze_lines(&to_markdown(body)?);
+        if text.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("\n[^{}]: {text}\n", index + 1));
+    }
+    Ok(out)
+}
+
+/// Скобки вокруг метки сноски, оставшиеся от вёрстки.
+///
+/// Сайт пишет `[1]`, где ссылка только на цифре: у Грэма — `[` плюс ссылка
+/// плюс `]`, у википедии скобки лежат внутри ссылки и уходят вместе с ней.
+/// Первый случай оставляет в тексте `\[[^1]\]`, и это не сноска, а мусор
+/// вокруг неё.
+fn unbracket(markdown: &str) -> Cow<'_, str> {
+    if !markdown.contains("[^") {
+        return Cow::Borrowed(markdown);
+    }
+    let mut out = String::with_capacity(markdown.len());
+    let mut rest = markdown;
+    while let Some(at) = rest.find("[^") {
+        let (head, tail) = rest.split_at(at);
+        let Some(close) = tail.find(']') else {
+            out.push_str(head);
+            out.push_str(tail);
+            return Cow::Owned(out);
+        };
+        let (mark, after) = tail.split_at(close + 1);
+        let opened = head.strip_suffix("\\[").or_else(|| head.strip_suffix('['));
+        let closed = after
+            .strip_prefix("\\]")
+            .or_else(|| after.strip_prefix(']'));
+        match (opened, closed) {
+            (Some(head), Some(after)) => {
+                out.push_str(head);
+                out.push_str(mark);
+                rest = after;
+            }
+            _ => {
+                out.push_str(head);
+                out.push_str(mark);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    Cow::Owned(out)
+}
+
+/// Многострочное тело сноски — в одну строку.
+fn squeeze_lines(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Поставить документу заголовок страницы, если своего у него нет.
@@ -934,11 +1007,27 @@ pub fn images(md: &str) -> Vec<String> {
 }
 
 fn to_markdown(html: &str) -> Result<String, Error> {
+    convert(html, &HashMap::new())
+}
+
+/// То же, но со сносками: ссылка на снятую сноску становится `[^N]`.
+///
+/// Номера приходят готовыми — их раздаёт [`extract::notes`], там, где ещё
+/// видно и ссылку, и её цель. Обработчик замыкает их в себе: другого
+/// способа донести знание о статье до обработчика htmd нет.
+fn convert(html: &str, notes: &HashMap<String, usize>) -> Result<String, Error> {
+    let notes = notes.clone();
     let converter = HtmlToMarkdown::builder()
         .skip_tags(SKIP.to_vec())
         .add_handler(vec!["code"], code_handler)
         .add_handler(vec!["span"], span_handler)
-        .add_handler(vec!["a"], anchor_handler)
+        .add_handler(
+            vec!["a"],
+            move |handlers: &dyn Handlers, element: Element| match note_number(&element, &notes) {
+                Some(number) => Some(format!("[^{number}]").into()),
+                None => anchor_handler(handlers, element),
+            },
+        )
         .add_handler(vec!["img"], image_handler)
         .options(HtmdOptions {
             heading_style: HeadingStyle::Atx,
@@ -1037,6 +1126,22 @@ fn image_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerRes
 
 /// Размер, объявленный атрибутом. Пиксели в атрибуте пишут числом;
 /// проценты и `px` внутри `style` — не наше дело, там не распорки.
+/// Номер сноски, на которую ведёт ссылка, — или `None`, если это обычная
+/// ссылка. Решает не вид ссылки, а список снятых сносок: форму разобрали
+/// по дереву, здесь остаётся сверка по цели.
+fn note_number(element: &Element, notes: &HashMap<String, usize>) -> Option<usize> {
+    if notes.is_empty() {
+        return None;
+    }
+    let href = element
+        .attrs
+        .iter()
+        .find(|attr| &attr.name.local == "href")?
+        .value
+        .trim();
+    notes.get(href.strip_prefix('#')?).copied()
+}
+
 fn px(element: &Element, name: &str) -> Option<u32> {
     element
         .attrs
@@ -1105,6 +1210,9 @@ pub fn options() -> Options<'static> {
     // первой строкой которой написано «[!NOTE]». В README они сплошь,
     // и рисует их хостинг коробкой, а не текстом.
     options.extension.alerts = true;
+    // Сноски: единый вид, к которому сводятся все веб-формы — см.
+    // `extract::notes`. Без этого `[^1]` доехало бы до читателя текстом.
+    options.extension.footnotes = true;
     // Ширина колонки — дело рендерера и читателя, не файла: строка = абзац,
     // так диффы корпуса показывают правку, а не переливание переносов.
     options.render.width = 0;
@@ -1390,6 +1498,7 @@ mod tests {
                 .to_owned(),
             thumbs: HashMap::new(),
             listing_html: None,
+            notes: Default::default(),
         };
 
         let reading = from_article(&article).unwrap();
@@ -1428,6 +1537,7 @@ mod tests {
                 .to_owned(),
             thumbs,
             listing_html: None,
+            notes: Default::default(),
         };
 
         let reading = from_article(&article).unwrap();
@@ -1461,6 +1571,7 @@ mod tests {
                 .to_owned(),
             thumbs,
             listing_html: None,
+            notes: Default::default(),
         };
 
         let reading = from_article(&article).unwrap();
@@ -1480,6 +1591,7 @@ mod tests {
                 .to_owned(),
             thumbs: HashMap::new(),
             listing_html: None,
+            notes: Default::default(),
         };
 
         let reading = from_article(&article).unwrap();

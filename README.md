@@ -117,7 +117,7 @@ menu come from GTK.
   (about 65 characters), 1.55 leading, and headings that are *lighter* than the text
   rather than bolder — at a large size weight shouts instead of leading.
 - **Ivory paper** (`#faf5ea`) instead of white, which glows on a screen; a warm dark
-  theme is one button away.
+  theme is one switch away, behind the gear.
 - **Page zoom on the browser's own ladder** (67…200%), and it scales the whole
   typographic model, not just the body size — so a line still holds about 65 characters
   at every step. The step is remembered per site for this run only, and a button in the
@@ -127,8 +127,9 @@ menu come from GTK.
 - **A shelf on the right:** entry points into a repository's documentation on top, the
   open page's table of contents under them, with the section under your eyes marked as
   you scroll. Its width is yours, by dragging the divider.
-- **Images load right away, and a button switches them off** — the decoder is the one
-  serious attack surface once JavaScript is gone, and closing it should be possible.
+- **Images load right away, and a switch in Settings turns them off** — the decoder is
+  the one serious attack surface once JavaScript is gone, and closing it should be
+  possible.
   A formula standing in a line of text is drawn as a canvas, an illustration gets its
   own line and a caption.
 - **Code blocks get a deliberately dumb highlighter** — comment, string, number,
@@ -195,6 +196,12 @@ ruby. That loss is also the noise removal this program is for.
 GitHub alerts (`> [!NOTE]`) are read as alerts: a quote that says what it is, not a quote
 whose first line reads "[!NOTE]". No coloured box — the colour would be the site's
 typography, the label is the meaning.
+
+Footnotes are reduced to one form. On the web a footnote is a link to an anchor with its
+text in a list at the bottom, and every site spells it differently; none of it survived
+conversion, so the mark became a dead link and, in `less`, a line of noise — 277 of them
+on one Wikipedia article. They now become GFM footnotes, and in the window the mark is a
+superscript that jumps to the note and back.
 
 ## On the network
 

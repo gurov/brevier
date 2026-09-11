@@ -11,7 +11,7 @@ Imagine that your life is represented by a stove with four burners on it. Each b
 3. The third burner is your health.
 4. The fourth burner is your work.
 
-**The Four Burners Theory** says that “in order to be successful you have to cut off one of your burners. And in order to be *really* successful you have to cut off two.” [1](#footnote-1-17224)
+**The Four Burners Theory** says that “in order to be successful you have to cut off one of your burners. And in order to be *really* successful you have to cut off two.” [^1]
 
 ![Four Burners Theory of Work-Life Balance](https://jamesclear.com/wp-content/uploads/2016/05/four-burners-theory.jpg)
 
@@ -35,7 +35,7 @@ We outsource small aspects of our lives all the time. We buy fast food so we don
 
 Outsourcing small portions of your life allows you to save time and spend it elsewhere. Can you apply the same idea to one quadrant of your life and free up time to focus on the other three burners?
 
-Work is the best example. For many people, work is the hottest burner on the stove. It is where they spend the most time and it is the last burner to get turned off. In theory, entrepreneurs and business owners can outsource the work burner. They do it by hiring employees. [2](#footnote-2-17224)
+Work is the best example. For many people, work is the hottest burner on the stove. It is where they spend the most time and it is the last burner to get turned off. In theory, entrepreneurs and business owners can outsource the work burner. They do it by hiring employees. [^2]
 
 In my article on [The 3 Stages of Failure](https://jamesclear.com/3-stages-of-failure), I covered Sam Carpenter’s story about building business systems that allowed him to work just 2 hours per week. He outsourced himself from the daily work of the business while still reaping the financial benefits.
 
@@ -83,6 +83,6 @@ Which burners have you cut off?
 
 Footnotes
 
-1. I first heard about The Four Burners Theory from [Chris Guillebeau](http://chrisguillebeau.com/the-four-burners-theory/), who heard about it from Jocelyn Glei, who read about it in [this New Yorker article](http://www.newyorker.com/magazine/2009/08/24/laugh-kookaburra) by David Sedaris, who was told about it by an Australian woman named Pat, who heard about it at a management seminar she attended. If you’re keeping score at home and trying to figure out where The Four Burners Theory originated from, well, good luck. The above quote comes from the New Yorker article by Sedaris.
+[^1]: I first heard about The Four Burners Theory from [Chris Guillebeau](http://chrisguillebeau.com/the-four-burners-theory/), who heard about it from Jocelyn Glei, who read about it in [this New Yorker article](http://www.newyorker.com/magazine/2009/08/24/laugh-kookaburra) by David Sedaris, who was told about it by an Australian woman named Pat, who heard about it at a management seminar she attended. If you’re keeping score at home and trying to figure out where The Four Burners Theory originated from, well, good luck. The above quote comes from the New Yorker article by Sedaris.
 
-2. In practice, the opposite usually occurs. In most cases, entrepreneurs spend at least their first five years in business working longer hours and making less money than they would as an employee.
+[^2]: In practice, the opposite usually occurs. In most cases, entrepreneurs spend at least their first five years in business working longer hours and making less money than they would as an employee.

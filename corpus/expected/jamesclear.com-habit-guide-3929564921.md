@@ -2,7 +2,7 @@
 
 James Clear
 
-According to researchers at Duke University, habits account for about 40 percent of our behaviors on any given day. [1](#footnote-1-5984) Understanding how to build new habits (and how your current ones work) is essential for making progress in your health, your happiness, and your life in general.
+According to researchers at Duke University, habits account for about 40 percent of our behaviors on any given day. [^1] Understanding how to build new habits (and how your current ones work) is essential for making progress in your health, your happiness, and your life in general.
 
 But there can be a lot of information out there and most of it isn’t very simple to digest. To solve this problem and break things down in a very simple manner, I have created this strategy guide for how to build new habits that actually stick.
 
@@ -73,14 +73,14 @@ Learning to be patient is perhaps the most critical skill of all. You can make i
 
 If you are adding weight in the gym, you should probably go slower than you think. If you are adding daily sales calls to your business strategy, you should probably start with fewer than you expect to handle. Patience is everything. [Do things you can sustain](https://jamesclear.com/upper-bound "upper bound").
 
-New habits should feel easy, especially in the beginning. If you stay consistent and continue increasing your habit it will get hard enough, fast enough. It always does. [2](#footnote-2-5984)
+New habits should feel easy, especially in the beginning. If you stay consistent and continue increasing your habit it will get hard enough, fast enough. It always does. [^2]
 
 If you want more practical ideas for how to build new habits (and break bad ones), check out my book [*Atomic* *Habits*](https://jamesclear.com/book/atomic-habits), which will show you how small changes in habits can lead to remarkable results.
 
 Footnotes
 
-1. [Habits: A Repeat Performance](http://web.archive.org/web/20110526144503/http://dornsife.usc.edu/wendywood/research/documents/Neal.Wood.Quinn.2006.pdf "Habits - A Repeat Performance by David T. Neal, Wendy Wood, and Jeffrey M. Quinn") by David T. Neal, Wendy Wood, and Jeffrey M. Quinn
-
-2. Special thanks to BJ Fogg, Leo Babauta, and Kelly McGonigal for their research and work on habit formation and willpower. I have learned a lot from each of you.
-
 Thanks for reading. You can get more actionable ideas in my popular email newsletter. Each week, I share 3 short ideas from me, 2 quotes from others, and 1 question to think about. **Over 3,000,000 people subscribe**. Enter your email now and join us.
+
+[^1]: [Habits: A Repeat Performance](http://web.archive.org/web/20110526144503/http://dornsife.usc.edu/wendywood/research/documents/Neal.Wood.Quinn.2006.pdf "Habits - A Repeat Performance by David T. Neal, Wendy Wood, and Jeffrey M. Quinn") by David T. Neal, Wendy Wood, and Jeffrey M. Quinn
+
+[^2]: Special thanks to BJ Fogg, Leo Babauta, and Kelly McGonigal for their research and work on habit formation and willpower. I have learned a lot from each of you.

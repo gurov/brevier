@@ -153,8 +153,13 @@ struct Ui {
     /// ширину.
     shelf_width: Rc<Cell<i32>>,
     show_contents: gtk::ToggleButton,
-    dark_mode: gtk::ToggleButton,
-    show_images: gtk::ToggleButton,
+    /// Настройки: шестерёнка в шапке и окно за ней. Панель — для того,
+    /// что нужно на каждой странице; настройка нужна раз и надолго,
+    /// и место ей за одной дверью.
+    settings: gtk::Button,
+    settings_window: gtk::Window,
+    dark_mode: gtk::Switch,
+    show_images: gtk::Switch,
     /// Ступень масштаба. Появляется в шапке, только когда она не сто
     /// процентов, и одним нажатием возвращает к ним: панель не свалка,
     /// а кнопка, которая всегда показывает «100%», не говорит ничего.
@@ -360,13 +365,20 @@ fn build(app: &Application, start: Vec<String>) {
             .active(true)
             .sensitive(false)
             .build(),
-        dark_mode: gtk::ToggleButton::builder()
-            .icon_name("weather-clear-night-symbolic")
-            .tooltip_text("Dark theme")
+        settings: gtk::Button::builder()
+            .icon_name("emblem-system-symbolic")
+            .tooltip_text("Settings")
             .build(),
-        show_images: gtk::ToggleButton::builder()
-            .icon_name("image-x-generic-symbolic")
-            .tooltip_text("Images")
+        settings_window: gtk::Window::builder()
+            .title("Settings")
+            .modal(false)
+            .hide_on_close(true)
+            .default_width(420)
+            .resizable(false)
+            .build(),
+        dark_mode: gtk::Switch::builder().valign(gtk::Align::Center).build(),
+        show_images: gtk::Switch::builder()
+            .valign(gtk::Align::Center)
             .active(true)
             .build(),
         zoom_level: gtk::Button::builder()
@@ -430,13 +442,13 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_start(&ui.back);
     header.pack_start(&ui.forward);
     header.pack_start(&new_tab_button);
-    header.pack_end(&ui.dark_mode);
+    header.pack_end(&ui.settings);
     header.pack_end(&ui.zoom_level);
     header.pack_end(&ui.show_contents);
-    header.pack_end(&ui.show_images);
     header.pack_end(&ui.save);
     header.set_title_widget(Some(&ui.entry));
     ui.window.set_titlebar(Some(&header));
+    build_settings(&ui);
 
     let find_previous = gtk::Button::from_icon_name("go-up-symbolic");
     let find_next = gtk::Button::from_icon_name("go-down-symbolic");
@@ -520,8 +532,8 @@ fn build(app: &Application, start: Vec<String>) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        ui.dark_mode.clone().connect_toggled(move |button| {
-            state.borrow_mut().dark = button.is_active();
+        ui.dark_mode.clone().connect_active_notify(move |switch| {
+            state.borrow_mut().dark = switch.is_active();
             apply_theme(&ui, &state);
         });
     }
@@ -542,9 +554,9 @@ fn build(app: &Application, start: Vec<String>) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        ui.show_images.clone().connect_toggled(move |button| {
-            state.borrow_mut().images = button.is_active();
-            if button.is_active() {
+        ui.show_images.clone().connect_active_notify(move |switch| {
+            state.borrow_mut().images = switch.is_active();
+            if switch.is_active() {
                 show_all_shots(&ui, &state);
             }
         });
@@ -696,6 +708,79 @@ fn build(app: &Application, start: Vec<String>) {
     }
 
     ui.window.present();
+}
+
+/// Окно настроек: переключатели того, что читатель решает раз и надолго.
+///
+/// Почему отдельным окном, а не кнопками в шапке: панель — место для того,
+/// что нужно на каждой странице, и свалкой быть не должна. Тема и картинки
+/// нужны не на каждой, зато у каждой настройки есть причина, которую надо
+/// объяснить строкой, — в кнопку с иконкой такое не помещается.
+fn build_settings(ui: &Ui) {
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    page.set_margin_top(18);
+    page.set_margin_bottom(18);
+    page.set_margin_start(18);
+    page.set_margin_end(18);
+
+    let title = gtk::Label::builder()
+        .label("Reading")
+        .xalign(0.0)
+        .build();
+    title.add_css_class("shelf-title");
+    page.append(&title);
+
+    let rows = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    rows.add_css_class("rich-list");
+    rows.append(&setting_row(
+        "Dark theme",
+        "Warm dark, in the same row as the ivory paper.",
+        &ui.dark_mode,
+    ));
+    rows.append(&setting_row(
+        "Images",
+        "Off means no decoding at all: after JavaScript is gone, the image \
+         decoder is the one serious attack surface left.",
+        &ui.show_images,
+    ));
+    page.append(&rows);
+
+    ui.settings_window.set_transient_for(Some(&ui.window));
+    ui.settings_window.set_child(Some(&page));
+
+    let window = ui.settings_window.clone();
+    ui.settings.connect_clicked(move |_| window.present());
+}
+
+/// Строка настройки: что делает, почему так и сам переключатель.
+fn setting_row(title: &str, why: &str, switch: &gtk::Switch) -> gtk::ListBoxRow {
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    text.set_hexpand(true);
+    let name = gtk::Label::builder().label(title).xalign(0.0).build();
+    let note = gtk::Label::builder()
+        .label(why)
+        .xalign(0.0)
+        .wrap(true)
+        .max_width_chars(44)
+        .build();
+    note.add_css_class("caption");
+    text.append(&name);
+    text.append(&note);
+
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.set_margin_top(10);
+    row.set_margin_bottom(10);
+    row.set_margin_start(12);
+    row.set_margin_end(12);
+    row.append(&text);
+    row.append(switch);
+
+    gtk::ListBoxRow::builder()
+        .child(&row)
+        .activatable(false)
+        .build()
 }
 
 /// Клавиши, которые GTK сам не разбирает.
@@ -2045,6 +2130,30 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         ],
     );
 
+    // Метка сноски в тексте — верхним индексом: мельче и выше строки.
+    // Не юникодными «¹²³», потому что номер бывает трёхзначным, а набор
+    // таких знаков в гарнитурах кончается на девятке.
+    style(
+        buffer,
+        "noteref",
+        &[
+            ("size-points", &(body * 0.72)),
+            ("rise", &px(f64::from(pango::SCALE) * 4.5)),
+        ],
+    );
+    // Сама сноска под статьёй: мельче текста, с висячим отступом, как пункт
+    // списка, — она и есть пункт списка.
+    style(
+        buffer,
+        "note",
+        &[
+            ("size-points", &(body * 0.9)),
+            ("left-margin", &px(30.0)),
+            ("indent", &px(-22.0)),
+            ("pixels-below-lines", &(extra / 2)),
+        ],
+    );
+
     // Подсветка поиска. Заводится последней: у тегов, наложенных позже,
     // приоритет выше, и жёлтое ложится поверх цвета ссылки.
     style(
@@ -2740,6 +2849,43 @@ impl Writer<'_> {
                     self.put("\n", &["body"]);
                 }
             }
+            NodeValue::FootnoteDefinition(note) => {
+                let mut tags = outer.to_vec();
+                tags.push("body");
+                tags.push("note");
+                let start = self.offset();
+                self.anchors
+                    .push((anchor(&format!("fn-{}", note.name)), start));
+
+                let mut marker = tags.clone();
+                marker.push("dim");
+                self.put(&format!("{}.  ", note.name), &marker);
+
+                for child in node.children() {
+                    match &child.data.borrow().value {
+                        NodeValue::Paragraph => {
+                            self.inlines(child, &tags);
+                            self.put(" ", &tags);
+                        }
+                        _ => self.block(child, outer),
+                    }
+                }
+
+                // Дорога назад. Без неё сноска — тупик: истории внутри
+                // страницы нет, и читатель возвращается прокруткой наугад.
+                let back = self.offset();
+                let mut arrow = tags.clone();
+                arrow.push("link");
+                // Стрелка простая, а не «↩»: у той есть эмодзи-вариант,
+                // и система рисует её цветной картинкой посреди текста.
+                self.put("↑", &arrow);
+                self.links.push(Link {
+                    start: back,
+                    end: self.offset(),
+                    target: format!("#fnref-{}", note.name),
+                });
+                self.put("\n", &tags);
+            }
             NodeValue::ThematicBreak => self.put("* * *\n\n", &["dim"]),
             NodeValue::Table(table) => {
                 let alignments = table.alignments.clone();
@@ -2805,6 +2951,25 @@ impl Writer<'_> {
                             self.put(&label, &with);
                         }
                     }
+                }
+                // Сноска: метка ведёт вниз, к тексту сноски, и обратно —
+                // за это отвечает якорь, поставленный здесь же.
+                NodeValue::FootnoteReference(note) => {
+                    let start = self.offset();
+                    let mut with = tags.to_vec();
+                    with.push("noteref");
+                    with.push("link");
+                    self.put(&note.name, &with);
+                    let end = self.offset();
+                    // Якорь ставится на первой ссылке: к ней и возвращает
+                    // стрелка снизу, если на сноску ссылались не раз.
+                    self.anchors
+                        .push((anchor(&format!("fnref-{}", note.name)), start));
+                    self.links.push(Link {
+                        start,
+                        end,
+                        target: format!("#fn-{}", note.name),
+                    });
                 }
                 NodeValue::SoftBreak => self.put(" ", tags),
                 NodeValue::LineBreak => self.put("\n", tags),

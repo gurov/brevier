@@ -50,9 +50,9 @@ The fact is, the Instant Gratification Monkey is the last creature who should be
 
 In the monkey world, he’s got it all figured out—if you eat when you’re hungry, sleep when you’re tired, and don’t do anything difficult, you’re a pretty successful monkey. The problem for the procrastinator is that he happens to live in the human world, making the Instant Gratification Monkey a highly unqualified navigator. Meanwhile, the Rational Decision-Maker, who was trained to make rational decisions, not to deal with competition over the controls, doesn’t know how to put up an effective fight—he just feels worse and worse about himself the more he fails and the more the suffering procrastinator whose head he’s in berates him.
 
-It’s a mess. And with the monkey in charge, the procrastinator finds himself spending a lot of time in a place called the Dark Playground.[1](#footnote-1-502)
+It’s a mess. And with the monkey in charge, the procrastinator finds himself spending a lot of time in a place called the Dark Playground.[^1]
 
-The Dark Playground is a place every procrastinator knows well. It’s a place where leisure activities happen at times when leisure activities are not supposed to be happening. The fun you have in the Dark Playground isn’t actually fun because it’s completely unearned and the air is filled with guilt, anxiety, self-hatred, and dread. Sometimes the Rational Decision-Maker puts his foot down and refuses to let you waste time doing normal leisure things, and since the Instant Gratification Monkey sure as hell isn’t gonna let you work, you find yourself in a bizarre purgatory of weird activities where everyone loses.[2](#footnote-2-502)
+The Dark Playground is a place every procrastinator knows well. It’s a place where leisure activities happen at times when leisure activities are not supposed to be happening. The fun you have in the Dark Playground isn’t actually fun because it’s completely unearned and the air is filled with guilt, anxiety, self-hatred, and dread. Sometimes the Rational Decision-Maker puts his foot down and refuses to let you waste time doing normal leisure things, and since the Instant Gratification Monkey sure as hell isn’t gonna let you work, you find yourself in a bizarre purgatory of weird activities where everyone loses.[^2]
 
 [![](https://3.bp.blogspot.com/-vg18-8Nm9yg/Upvh006UpSI/AAAAAAAAGbg/y0zGXUVInlE/s640/Dark+Playground.png)](https://store.waitbutwhy.com/collections/posters/products/dark-playground-poster-18x24)
 
@@ -114,8 +114,6 @@ To support Wait But Why, visit our **[Patreon page](https://patreon.com/waitbutw
 
 [![plushies ad for post](https://waitbutwhy.com/wp-content/uploads/2013/11/plushies-ad-for-post.jpg)](https://store.waitbutwhy.com/collections/plush-toys)
 
-* * *
+[^1]: A lot of you are probably reading this article while in the Dark Playground.
 
-1. A lot of you are probably reading this article while in the Dark Playground.[↩](#note-1-502)
-
-2. I spent two hours in the Dark Playground *right* before I drew the Dark Playground drawing, because I was dreading having to draw the signpost, which I knew would be hard and take forever (which it did).[↩](#note-2-502)
+[^2]: I spent two hours in the Dark Playground *right* before I drew the Dark Playground drawing, because I was dreading having to draw the signpost, which I knew would be hard and take forever (which it did).

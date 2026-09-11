@@ -61,7 +61,7 @@ The result is the shift in value predicted by the [Conservation of Attractive Pr
 
 * * *
 
-It’s interesting to consider the order of these examples: the pioneer of this model was Google which modularized content providers. It’s easy to see why this is the case: content has always been monetized by proxy, whether it be paying for newspapers (or advertising space in those newspapers), paying for CDs, or paying for cable TV. The shift to digital has exposed these proxies for the rent-collection mechanisms they are.[1](#fn1-1768 "This is, first and foremost, why Stratechery spends a lot of time covering the media. It is simply the first example of the disruption that is happening everywhere")
+It’s interesting to consider the order of these examples: the pioneer of this model was Google which modularized content providers. It’s easy to see why this is the case: content has always been monetized by proxy, whether it be paying for newspapers (or advertising space in those newspapers), paying for CDs, or paying for cable TV. The shift to digital has exposed these proxies for the rent-collection mechanisms they are.[^1]
 
 Facebook, though, has built in some respects an even stronger position: its suppliers are its users, so while it, like Google, aggregates content that it gets for free, it also has exclusive access to that content. Snapchat and other user-generated content networks are similar.
 
@@ -79,6 +79,4 @@ The Uber and Airbnb examples are especially important: vacant rooms and taxis ha
 
 *For more on Aggregation Theory, please see the 2017 Update: [Defining Aggregators](https://stratechery.com/2017/defining-aggregators/)*
 
-* * *
-
-1. This is, first and foremost, why Stratechery spends a lot of time covering the media. It is simply the first example of the disruption that is happening everywhere [↩](#rf1-1768 "Return to footnote 1.")
+[^1]: This is, first and foremost, why Stratechery spends a lot of time covering the media. It is simply the first example of the disruption that is happening everywhere

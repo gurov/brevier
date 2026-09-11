@@ -25,6 +25,22 @@ pub struct Article {
     /// принесло из неё одну карточку. HTML с абсолютными адресами,
     /// см. [`listing`].
     pub listing_html: Option<String>,
+    /// Сноски статьи, снятые с дерева до конвертации, — см. [`notes`].
+    pub notes: Notes,
+}
+
+/// Сноски статьи в едином виде.
+///
+/// Тела лежат html-ом, а не markdown-ом, намеренно: перевод в markdown —
+/// работа конвертера, и делать её дважды в двух модулях незачем.
+#[derive(Debug, Clone, Default)]
+pub struct Notes {
+    /// id цели → номер сноски. Номера идут в порядке первой ссылки
+    /// в тексте, а не в порядке списка в конце: читателю сноска
+    /// встречается там.
+    pub numbers: HashMap<String, usize>,
+    /// Тела сносок: `bodies[0]` — сноска номер один.
+    pub bodies: Vec<String>,
 }
 
 /// Сколько карточек делают страницу лентой.
@@ -71,6 +87,15 @@ const ASIDE_WORDS: usize = 40;
 /// Куда абзац попадает не как часть статьи: во врезку, в подвал, в меню,
 /// в форму, в подпись к картинке.
 const ASIDE_TAGS: [&str; 5] = ["aside", "footer", "nav", "form", "figure"];
+
+/// Чем бывает тело сноски. Только блок: ссылка-номер ведёт и на `<sup>`
+/// в самом тексте — так устроена обратная ссылка у википедии, — а телом
+/// сноски `<sup>` не бывает нигде.
+const NOTE_TAGS: [&str; 6] = ["li", "p", "dd", "div", "td", "blockquote"];
+
+/// Длиннее этого номер сноски не бывает: три знака — это 999, а дальше
+/// начинается не сноска, а год или сумма.
+const NOTE_DIGITS: usize = 3;
 
 /// Лента, снятая с исходного дерева: её html и её же текст — по тексту
 /// потом решают, лента это или статья с витриной в хвосте.
@@ -125,12 +150,18 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         content_html
     };
 
+    // Сноски снимаем последними: к этому времени статья собрана целиком,
+    // вместе с вернувшейся прозой, и ссылка со своей целью наконец лежат
+    // в одном дереве.
+    let (content_html, notes) = lift_notes(content_html);
+
     Ok(Article {
         title: article.title.to_string(),
         byline: article.byline.filter(|b| !b.trim().is_empty()),
         content_html,
         thumbs,
         listing_html,
+        notes,
     })
 }
 
@@ -700,6 +731,156 @@ fn thumbs(doc: &Document, base: &str) -> HashMap<String, String> {
     }
 
     out
+}
+
+/// Снять сноски со статьи, отдав её html без их тел.
+fn lift_notes(content_html: String) -> (String, Notes) {
+    let article = Document::from(content_html.as_str());
+    let notes = notes(&article);
+    if notes.bodies.is_empty() {
+        return (content_html, Notes::default());
+    }
+
+    // В той же форме, в какой пришло, — как и в `restore`.
+    let page = article.select("#readability-page-1");
+    let html = match page.nodes().first() {
+        Some(node) => node.html().to_string(),
+        None => article.select("body").inner_html().to_string(),
+    };
+    (html, notes)
+}
+
+/// Сноски к единому виду.
+///
+/// В вебе сноска — это ссылка на якорь внутри страницы, а её текст лежит
+/// пунктом списка в конце: `[1](#fn:R)` у danluu, `[1](#footnote-1)`
+/// у brandur, `[\[1\]](#cite_note-…)` у википедии, `[[1](#f1n)` у Грэма.
+/// До читателя не доезжало ни то ни другое: markdown несёт только текст
+/// ссылки, а id пункта теряется при конвертации. В окне сноска выходила
+/// мёртвой ссылкой, в `less` — строкой мусора, и на статье о Rust таких
+/// строк двести семьдесят семь.
+///
+/// Поэтому сноски снимаются здесь, по дереву, где ещё видно и ссылку,
+/// и цель; дальше они живут сносками GFM, которые умеет и конвертер,
+/// и окно.
+///
+/// Форма узкая, и каждое условие поймано на живой странице: текст ссылки —
+/// только число (иначе в сноски уедет оглавление, у которого ссылки
+/// такие же), цель — блок (обратная ссылка википедии ведёт на `<sup>`
+/// посреди текста), цель — внутри статьи (ссылка в никуда сноской
+/// не была).
+fn notes(doc: &Document) -> Notes {
+    // Тела ищем среди блоков с id: по ним и опознаётся сноска.
+    let mut blocks: HashMap<String, NodeRef> = HashMap::new();
+    for node in doc.select("[id]").nodes() {
+        let Some(id) = node.attr("id") else { continue };
+        if node
+            .node_name()
+            .is_some_and(|name| NOTE_TAGS.contains(&name.as_ref()))
+        {
+            blocks.entry(id.to_string()).or_insert(*node);
+        }
+    }
+    if blocks.is_empty() {
+        return Notes::default();
+    }
+
+    // Номера раздаём в порядке ссылок в тексте: читателю сноска встречается
+    // там, а не в списке под статьёй.
+    let mut numbers: HashMap<String, usize> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for link in doc.select("a[href]").nodes() {
+        let Some(href) = link.attr("href") else { continue };
+        let Some(id) = href.strip_prefix('#') else {
+            continue;
+        };
+        if !is_note_mark(&squeeze(&link.text())) || !blocks.contains_key(id) {
+            continue;
+        }
+        let id = id.to_owned();
+        if !numbers.contains_key(&id) {
+            numbers.insert(id.clone(), order.len() + 1);
+            order.push(id);
+        }
+    }
+    if order.is_empty() {
+        return Notes::default();
+    }
+
+    // Тело берём после того, как раздали номера: внутри сноски бывают
+    // ссылки на другие сноски, и они тоже должны получить свой номер.
+    let mut bodies = Vec::with_capacity(order.len());
+    for id in &order {
+        let body = blocks[id];
+        // Обратная ссылка («↑», «1 2» у википедии, «[return]» у danluu)
+        // ведёт назад в текст: в едином виде дорогу назад даёт окно,
+        // и здесь она лишняя. Остальные ссылки внутрь страницы ведут туда,
+        // куда markdown дойти не может, — у них снимаем адрес, но оставляем
+        // текст. Снять вместе с текстом значит потерять прозу: у википедии
+        // короткая ссылка на источник («Klabnik & Nichols 2023») набрана
+        // именно так, и на одной статье их двести восемьдесят.
+        let inside: Vec<NodeRef> = body
+            .descendants_it()
+            .filter(|node| node.node_name().as_deref() == Some("a"))
+            .collect();
+        for inner in inside {
+            let Some(href) = inner.attr("href") else {
+                continue;
+            };
+            if let Some(target) = href.strip_prefix('#')
+                && !numbers.contains_key(target)
+            {
+                if is_backlink(&squeeze(&inner.text())) {
+                    inner.remove_from_parent();
+                } else {
+                    inner.remove_attr("href");
+                }
+            }
+        }
+        bodies.push(body.inner_html().to_string());
+    }
+
+    // Тела из статьи убираем: они уезжают в свой блок, и остаться на месте
+    // значило бы приехать к читателю дважды.
+    for id in &order {
+        blocks[id].remove_from_parent();
+    }
+    // Список, из которого всё вынули, — пустая строка перед хвостом.
+    for list in doc.select("ol, ul, dl").nodes() {
+        let holds_picture = list
+            .descendants_it()
+            .any(|node| node.node_name().as_deref() == Some("img"));
+        if squeeze(&list.text()).is_empty() && !holds_picture {
+            list.remove_from_parent();
+        }
+    }
+
+    Notes { numbers, bodies }
+}
+
+/// Обратная ссылка сноски — та, что ведёт из неё назад в текст.
+fn is_backlink(text: &str) -> bool {
+    let text = text.trim_matches(|c: char| "[]() ".contains(c)).trim();
+    text.is_empty()
+        || text.chars().all(|c| "↑↩⇑^".contains(c))
+        || text.chars().all(|c| c.is_ascii_digit())
+        || matches!(
+            text.to_lowercase().as_str(),
+            "return" | "back" | "jump up" | "назад" | "вверх"
+        )
+}
+
+/// Похож ли текст ссылки на номер сноски: «1», «\[1\]», «(1)».
+fn is_note_mark(text: &str) -> bool {
+    let digits = text.trim_matches(|c: char| !c.is_ascii_digit());
+    !digits.is_empty()
+        && digits.len() <= NOTE_DIGITS
+        && digits.chars().all(|c| c.is_ascii_digit())
+        // Кроме цифр и скобок в метке сноски ничего не бывает; «глава 2»
+        // и «2 сентября» — это текст, а не метка.
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || "[]()（）【】 \u{00a0}".contains(c))
 }
 
 fn absolute(base: Option<&Url>, link: &str) -> Option<String> {
