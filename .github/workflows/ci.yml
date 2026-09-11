@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: core — fmt, clippy, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  ui:
+    name: window — clippy with the GTK4 feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - name: Install GTK 4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev
+      - run: cargo clippy --all-targets --features ui -- -D warnings
+
+  tls:
+    name: trust stays delegated to the OS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      # An architectural decision, checkable by a command rather than on trust:
+      # no bundled root store, so revoked CAs are the operating system's problem
+      # and not a pet project's release cadence.
+      - name: No webpki roots in the tree
+        run: |
+          if cargo tree | grep -q webpki-roots; then
+            echo "webpki-roots linked in: trust must stay with the OS store" >&2
+            exit 1
+          fi
