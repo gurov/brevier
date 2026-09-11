@@ -40,6 +40,23 @@ sudo apt install libgtk-4-dev build-essential   # Debian/Ubuntu
 `ui` pulls in image decoding (`images`) and saving (`save`). The cli builds without any
 of them.
 
+## A desktop entry
+
+The window gets its icon from the desktop entry — that is how a Wayland compositor finds
+it, by matching the application id. To install both for your user:
+
+```sh
+cargo install --path . --features ui
+install -Dm644 packaging/dev.brevier.Brevier.desktop \
+        ~/.local/share/applications/dev.brevier.Brevier.desktop
+install -Dm644 assets/brevier.svg \
+        ~/.local/share/icons/hicolor/scalable/apps/dev.brevier.Brevier.svg
+update-desktop-database ~/.local/share/applications
+```
+
+The entry declares `http`, `https` and `text/markdown`, so Brevier appears in "Open with"
+and can be chosen as the browser for a link. It does not make itself the default.
+
 ## Use
 
 ```sh
