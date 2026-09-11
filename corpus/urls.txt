@@ -13,6 +13,21 @@
 #
 # Оставлены ссылки, которые отвечают 403, 401 или падают на сертификате:
 # это честные отказы, читателю от них не легче, и в знаменатель они входят.
+#
+# Чистка 11 сентября 2026 по `corpus/verify.sh`, выброшено три адреса:
+# habr.com/ru/articles/915604 (статьи больше нет, редирект уводит на индекс
+# блога компании — и до чистки на этом месте лежал чужой материал),
+# postnauka.org/longreads/156789 (по этому id лежит видео, а не лонгрид —
+# адрес был выдуман), nateliason.com/blog/pkm (устойчивый 500 с двух разных
+# сетей при живом корне сайта). Остальные восемь пометок verify.sh проверены
+# и оставлены: github разворачивает master в main, habr дописывает к id
+# раздел или блог компании, nesslabs переименовал слаг той же статьи,
+# danluu и kk.org пишут кривой canonical.
+#
+# Два адреса (rachelbythebay.com, challenger.ru) не открываются с машины
+# разработки: A-записи у них есть, IPv6 у нас нет вовсе, но и по IPv4
+# соединение не доходит. Оставлены: непроверенная догадка «сайт умер»
+# хуже честного провала в знаменателе.
 
 # блоги
 https://danluu.com/everything-is-broken/
@@ -36,7 +51,6 @@ https://www.opennet.ru/opennews/art.shtml?num=61000
 https://en.wikipedia.org/wiki/Rust_(programming_language)
 
 # русскоязычное
-https://habr.com/ru/articles/915604/
 
 # заведомо трудные: на честный UA отвечают 403 — это тоже результат
 https://nplus1.ru/news/2024/09/05/quantum-computing
@@ -64,7 +78,6 @@ https://jamesclear.com/four-burners-theory
 https://journal.tinkoff.ru/guide/ip-opening/
 
 https://nplus1.ru/material/2023/11/15/quantum-supremacy
-https://postnauka.org/longreads/156789
 https://arzamas.academy/materials/1234
 https://theideas.ru/posts/evolution-of-human-brain
 https://nplus1.ru/material/2022/05/10/climate-change-models
@@ -111,7 +124,6 @@ https://kk.org/thetechnium/1000-true-fans/
 https://fs.blog/mental-models/
 https://jamesclear.com/habit-guide
 https://nesslabs.com/mindful-productivity
-https://www.nateliason.com/blog/pkm
 https://markmanson.net/not-giving-a-fuck
 https://every.to/superorganizers/how-to-build-a-second-brain
 
