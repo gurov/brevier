@@ -669,6 +669,14 @@ const TAIL_STARTS_AT: f32 = 0.6;
 /// это лента (habr отдавал ленту блога компании как статью); один в хвосте —
 /// виджет «читайте ещё», которым fasterthanli.me дописывал к статье кусок
 /// другой статьи.
+///
+/// Место решает и в обратную сторону, и это выстрадано внешним замером
+/// 11 сентября 2026: раньше заголовок-анонс резал документ до конца
+/// **с любого места**, и страница, у которой бейдж раздела стоит третьей
+/// строкой, теряла всё. У smithsonianmag («SmartNews — Keeping you current»,
+/// целиком ссылка) от статьи в 745 слов доезжало десять, у foxnews —
+/// восемнадцать из 542. Вне хвоста заголовок-ссылка остаётся: лишняя строка
+/// читателю дешевле потерянного абзаца.
 fn strip_teasers(md: &str) -> Teasers {
     let lines: Vec<&str> = md.lines().collect();
     let teasers: Vec<usize> = lines
@@ -683,10 +691,13 @@ fn strip_teasers(md: &str) -> Teasers {
         return Teasers::Listing;
     }
 
-    // Заголовок-анонс режет с любого места, виджет без заголовка — только
-    // в хвосте. Берём то, что встретилось раньше.
+    // И заголовок-анонс, и виджет без заголовка режут только хвост: для
+    // виджета это требование стоит внутри `teaser_grid_start` (сетка обязана
+    // доходить до конца документа), для заголовка — здесь. Берём то,
+    // что встретилось раньше.
+    let heading = teasers.iter().copied().find(|&at| at >= tail_starts);
     let widget = teaser_grid_start(&lines);
-    let (mut cut, label) = match (teasers.first().copied(), widget) {
+    let (mut cut, label) = match (heading, widget) {
         (Some(heading), Some(at)) if at < heading => (at, true),
         (Some(heading), _) => (heading, false),
         (None, Some(at)) => (at, true),
@@ -1346,6 +1357,18 @@ mod tests {
             "не отрезано:\n{kept}"
         );
         assert!(!kept.contains("another article"));
+    }
+
+    /// Бейдж раздела — тоже заголовок-ссылка, но стоит он в начале,
+    /// и после него идёт вся статья. Резать по нему значит выбросить её
+    /// целиком: так у smithsonianmag доезжало десять слов из семисот сорока.
+    #[test]
+    fn a_heading_link_at_the_top_leaves_the_article_alone() {
+        let md = "# Статья\n\n### [SmartNews](https://e.com/smart-news/)\n\nПервый абзац, ради которого всё затевалось.\n\nВторой абзац, он тоже должен доехать.\n\nТретий абзац, и на нём статья кончается.\n";
+        let Teasers::Article(kept) = strip_teasers(md) else {
+            panic!("статью приняли за ленту");
+        };
+        assert!(kept.contains("Третий абзац"), "статью срезало:\n{kept}");
     }
 
     #[test]

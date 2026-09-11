@@ -147,7 +147,7 @@ live in `corpus/`.
 
 Measured against someone else's ruler — `scrapinghub/article-extraction-benchmark`, 181
 saved pages, article body scored on word 4-grams — the whole reading pipeline gets
-**F1 0.918** (precision 0.875, recall 0.967); the extraction alone gets 0.951, against
+**F1 0.929** (precision 0.885, recall 0.978); the extraction alone gets 0.951, against
 0.947 for Readability.js and 0.958 for trafilatura in the same table. Two thirds of the
 gap between those two numbers is the headline and the byline, which we print on purpose
 and that benchmark's ground truth excludes by definition. `corpus/bench.py` reproduces
