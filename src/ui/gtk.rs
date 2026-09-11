@@ -25,7 +25,7 @@ use gtk::{Application, ApplicationWindow};
 
 use comrak::nodes::{ListType, NodeValue, TableAlignment};
 
-use brevier::address::{self, Address};
+use brevier::address::{self, Address, Repo};
 use brevier::code;
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
@@ -147,6 +147,12 @@ struct Tab {
     anchors: Vec<(String, i32)>,
     /// Места картинок в тексте.
     shots: Vec<Shot>,
+    /// Точки входа в документацию проекта. Свойство репозитория, а не файла:
+    /// при переходе между файлами одного проекта заново не ищутся.
+    entries: Vec<Entry>,
+    /// Для какого проекта они найдены. Ставится до того, как проба вернулась,
+    /// иначе каждый открытый файл запускал бы её снова.
+    entries_for: Option<Repo>,
     /// Что показано. Нужно для сохранения: на экране текст уже разложен
     /// по буферу, а на диск ложится markdown.
     document: Option<Document>,
@@ -166,6 +172,10 @@ struct State {
     images: bool,
     /// Поиск: строка одна на окно, поэтому и состояние одно.
     search: Search,
+    /// Что делает строка полки. Полка одна на окно, значит и список один,
+    /// а обработчик подключён раз при сборке: иначе на каждой открытой
+    /// странице копился бы ещё один, со ссылками на прошлую.
+    shelf: Vec<Row>,
 }
 
 /// Что нашёл поиск и на котором совпадении стоим.
@@ -224,6 +234,24 @@ struct Link {
     start: i32,
     end: i32,
     target: String,
+}
+
+/// Точка входа в документацию проекта: строка полки, ведущая в другой файл.
+#[derive(Clone)]
+struct Entry {
+    title: String,
+    address: Address,
+}
+
+/// Что делает строка полки. Две группы рядом означают две разные работы:
+/// строка оглавления прокручивает открытый документ, строка проекта уводит
+/// в другой файл.
+#[derive(Clone)]
+enum Row {
+    Jump(i32),
+    Open(Address),
+    /// Подпись над группой, а не строка: нажать её нельзя.
+    Header,
 }
 
 /// Строка оглавления: что показать и куда это в буфере.
@@ -359,6 +387,7 @@ fn build(app: &Application, start: Vec<String>) {
         dark: false,
         images: true,
         search: Search::default(),
+        shelf: Vec::new(),
     }));
     apply_theme(&ui, &state);
 
@@ -490,6 +519,29 @@ fn build(app: &Application, start: Vec<String>) {
         let pane = ui.contents_pane.clone();
         ui.show_contents.clone().connect_toggled(move |button| {
             pane.set_visible(button.is_active() && button.is_sensitive());
+        });
+    }
+    {
+        // Строка полки делает одно из двух: прокручивает открытый документ
+        // или уводит в другой файл проекта. Что именно — знает состояние,
+        // а обработчик один на всю жизнь окна.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.contents.clone().connect_row_activated(move |_, row| {
+            let act = state
+                .borrow()
+                .shelf
+                .get(row.index().max(0) as usize)
+                .cloned();
+            match act {
+                Some(Row::Jump(offset)) => {
+                    if let Some(view) = current(&ui, &state) {
+                        scroll_to(&view, offset, ANCHOR_ALIGN);
+                    }
+                }
+                Some(Row::Open(address)) => open_current(&ui, &state, address, true),
+                Some(Row::Header) | None => {}
+            }
         });
     }
     {
@@ -654,6 +706,8 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             marks: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
+            entries: Vec::new(),
+            entries_for: None,
             document: None,
             generation: 0,
         });
@@ -905,6 +959,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 }
                 drop(borrowed);
                 sync(&ui, &state, None);
+                seek_entries(&ui, &state, id, &document.address);
                 // Заглушки оживляем после того, как вкладка узнала про них:
                 // клик по заглушке ищет вкладку по номеру.
                 let eager = state.borrow().images;
@@ -959,7 +1014,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
     let Some(index) = index else { return };
 
-    let (address, can_back, can_forward, marks, title, view) = {
+    let (address, can_back, can_forward, marks, entries, title) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.get(index) else {
             return;
@@ -972,8 +1027,8 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             tab.history.can_go_back(),
             tab.history.can_go_forward(),
             tab.marks.clone(),
+            tab.entries.clone(),
             tab.label.text().to_string(),
-            tab.view.clone(),
         )
     };
 
@@ -986,10 +1041,12 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         format!("{title} — Brevier")
     }));
 
-    fill_contents(&ui.contents, &marks, &view);
-    ui.show_contents.set_sensitive(!marks.is_empty());
+    let shelf = fill_contents(&ui.contents, &marks, &entries);
+    let empty = shelf.is_empty();
+    state.borrow_mut().shelf = shelf;
+    ui.show_contents.set_sensitive(!empty);
     ui.contents_pane
-        .set_visible(ui.show_contents.is_active() && !marks.is_empty());
+        .set_visible(ui.show_contents.is_active() && !empty);
 
     // Поиск открыт — ищем в том, что теперь на экране: подсветка и счётчик
     // принадлежат странице, а не строке ввода.
@@ -1648,9 +1705,45 @@ fn contents_of(marks: Vec<Mark>, total: i32) -> Vec<Mark> {
 }
 
 /// Показать оглавление и связать строки с местами в тексте.
-fn fill_contents(list: &gtk::ListBox, marks: &[Mark], view: &gtk::TextView) {
+/// Заполнить полку и сказать, что делает каждая её строка.
+///
+/// Групп две: точки входа в документацию проекта и оглавление открытой
+/// страницы. Проект стоит выше — ради него режим репозитория и затевался,
+/// а оглавление длинное и увело бы эти две-три строки под сгиб.
+///
+/// Группа проекта подписана всегда: её строки уводят со страницы, и знать
+/// об этом читатель должен до нажатия. Оглавление подписывается только
+/// под ней — в одиночку полка и так оглавление, и лишняя строка над ним
+/// ничего не объясняет.
+fn fill_contents(list: &gtk::ListBox, marks: &[Mark], entries: &[Entry]) -> Vec<Row> {
     while let Some(child) = list.first_child() {
         list.remove(&child);
+    }
+
+    let mut shelf: Vec<Row> = Vec::new();
+
+    if !entries.is_empty() {
+        list.append(&group("In this repository"));
+        shelf.push(Row::Header);
+    }
+    for entry in entries {
+        let label = gtk::Label::builder()
+            .label(clip(&entry.title, 42))
+            .xalign(0.0)
+            .wrap(true)
+            .margin_top(4)
+            .margin_bottom(4)
+            .margin_start(10)
+            .margin_end(10)
+            .build();
+        // Куда уводит строка, читатель вправе знать до нажатия.
+        label.set_tooltip_text(Some(&entry.address.display()));
+        list.append(&gtk::ListBoxRow::builder().child(&label).build());
+        shelf.push(Row::Open(entry.address.clone()));
+    }
+    if !entries.is_empty() && !marks.is_empty() {
+        list.append(&group("On this page"));
+        shelf.push(Row::Header);
     }
 
     for mark in marks {
@@ -1670,17 +1763,105 @@ fn fill_contents(list: &gtk::ListBox, marks: &[Mark], view: &gtk::TextView) {
 
         let row = gtk::ListBoxRow::builder().child(&label).build();
         list.append(&row);
+        // Точное попадание: смещение в буфере, а не доля высоты.
+        shelf.push(Row::Jump(mark.offset));
     }
 
-    let offsets: Vec<i32> = marks.iter().map(|mark| mark.offset).collect();
-    let view = view.clone();
-    list.connect_row_activated(move |_, row| {
-        let Some(&offset) = offsets.get(row.index().max(0) as usize) else {
+    shelf
+}
+
+/// Подпись над группой полки. Не строка: нажимать её не на что.
+fn group(title: &str) -> gtk::ListBoxRow {
+    let label = gtk::Label::builder()
+        .label(title)
+        .xalign(0.0)
+        .margin_top(10)
+        .margin_bottom(2)
+        .margin_start(10)
+        .margin_end(10)
+        .build();
+    label.add_css_class("caption");
+    label.add_css_class("dim-label");
+    gtk::ListBoxRow::builder()
+        .child(&label)
+        .activatable(false)
+        .selectable(false)
+        .build()
+}
+
+/// Найти точки входа в документацию проекта — фоном.
+///
+/// Дюжина проб на CDN стоит около полусекунды, и платить их открытием
+/// страницы незачем: статья уже на экране, полка дополнится, когда ответ
+/// придёт. Ищем на проект, а не на файл: переход между файлами одного
+/// репозитория пробы не повторяет.
+fn seek_entries(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: &Address) {
+    let Address::Repo(repo) = address else {
+        // Ушли из репозитория — проекту на полке делать нечего.
+        let mut borrowed = state.borrow_mut();
+        if let Some(tab) = borrowed.find(id) {
+            tab.entries.clear();
+            tab.entries_for = None;
+        }
+        return;
+    };
+
+    {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else { return };
+        if tab
+            .entries_for
+            .as_ref()
+            .is_some_and(|known| same_project(known, repo))
+        {
+            return;
+        }
+        tab.entries.clear();
+        tab.entries_for = Some(repo.clone());
+    }
+
+    let ui = ui.clone();
+    let state = state.clone();
+    let asked = repo.clone();
+    glib::spawn_future_local(async move {
+        let repo = asked.clone();
+        let Ok(found) =
+            gio::spawn_blocking(move || brevier::repo::documentation(&repo, UserAgent::Honest))
+                .await
+        else {
             return;
         };
-        // Точное попадание: заголовок встаёт под верх окна.
-        scroll_to(&view, offset, ANCHOR_ALIGN);
+
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else { return };
+        // Пока искали, читатель мог уйти в другой проект или в веб.
+        if !tab
+            .entries_for
+            .as_ref()
+            .is_some_and(|now| same_project(now, &asked))
+        {
+            return;
+        }
+        tab.entries = found
+            .into_iter()
+            .map(|entry| Entry {
+                title: entry.title,
+                address: Address::Repo(Repo {
+                    path: Some(entry.path),
+                    source: None,
+                    ..asked.clone()
+                }),
+            })
+            .collect();
+        drop(borrowed);
+        sync(&ui, &state, None);
     });
+}
+
+/// Тот же проект? Путь внутри репозитория различать не должен: точки входа
+/// принадлежат проекту целиком.
+fn same_project(a: &Repo, b: &Repo) -> bool {
+    a.host == b.host && a.owner == b.owner && a.name == b.name
 }
 
 struct Writer<'a> {
@@ -2060,7 +2241,9 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
         return;
     }
 
-    let Some(frame) = shot.slot.frame() else { return };
+    let Some(frame) = shot.slot.frame() else {
+        return;
+    };
 
     let name = if shot.alt.is_empty() {
         "image".to_owned()
@@ -2072,7 +2255,10 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
         None => name,
     };
 
-    let button = gtk::Button::builder().label(&label).has_frame(false).build();
+    let button = gtk::Button::builder()
+        .label(&label)
+        .has_frame(false)
+        .build();
     button.add_css_class("shot");
     button.set_cursor_from_name(Some("pointer"));
     button.set_tooltip_text(Some(&shot.source.display()));
@@ -2207,7 +2393,9 @@ fn show_shot(shot: &Shot, raster: Raster) {
         canvas.set_texture(texture.upcast_ref());
         return;
     }
-    let Some(frame) = shot.slot.frame() else { return };
+    let Some(frame) = shot.slot.frame() else {
+        return;
+    };
 
     // Если картинка уже стоит в рамке — меняем холст, а не ребёнка:
     // перестройка дерева виджетов посреди кадра и есть та самая жалоба
