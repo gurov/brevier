@@ -225,7 +225,7 @@ fn listing(doc: &Document, base: &str) -> Option<Listing> {
 /// заголовков-карточек. Это и есть запись ленты — с миниатюрой, датой
 /// и подводкой.
 fn block_of<'a>(card: &NodeRef<'a>, cards: &[NodeRef<'a>]) -> NodeRef<'a> {
-    let mut block = card.clone();
+    let mut block = *card;
 
     for parent in card.ancestors_it(None) {
         let shared = cards
