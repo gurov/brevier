@@ -16,13 +16,12 @@
 Цена записана честно: это единственный питон в проекте, и он тянет
 `beautifulsoup4`. Разбирать чужой HTML регэкспом ради разметки — хуже.
 """
-import html, os, re, subprocess, sys, unicodedata
+import html, os, re, shutil, subprocess, sys, tempfile, unicodedata
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Прогоны живут в corpus/out/ и в git не попадают — эталоны chrome тоже.
 REF = os.path.join(ROOT, "corpus", "out", "reference")
-PROFILE = os.path.join(ROOT, "corpus", "out", "chrome-profile")
 os.makedirs(REF, exist_ok=True)
 
 from bs4 import BeautifulSoup
@@ -42,17 +41,23 @@ def dom_path(url):
 
 
 def fetch(url):
+    """Профиль каждому запуску свой: один каталог chrome между процессами
+    не делит, и на общем профиле параллельная качка молча отдаёт пустое —
+    на сорока страницах из девяноста это и вышло."""
     out = dom_path(url)
-    if os.path.exists(out) and os.path.getsize(out) > 1000:
+    if os.path.exists(out) and os.path.getsize(out) > 2000:
         return out
+    profile = tempfile.mkdtemp(prefix="brevier-chrome-")
     try:
         dom = subprocess.run(
             ["google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
-             f"--user-data-dir={PROFILE}-{os.getpid()}",
+             f"--user-data-dir={profile}",
              "--virtual-time-budget=9000", "--dump-dom", url],
             capture_output=True, timeout=90).stdout.decode("utf-8", "replace")
     except Exception as e:
         dom = f"<!-- chrome не смог: {e} -->"
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
     open(out, "w", encoding="utf-8").write(dom)
     return out
 
