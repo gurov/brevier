@@ -136,7 +136,7 @@ Background → [serialize] → Offscreen Document → [serialize] → Background
 2. The background sends the payload directly to the content script in the active tab using `chrome.scripting.executeScript()`.
 3. The content script (running on the main thread) receives the payload, draws it to a canvas, performs the crop using the correct DPR value, and copies the result to the clipboard.
 
-```
+```javascript
 // Background Script
 const screenshotUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "png" });
 
@@ -174,7 +174,7 @@ In my specific case, offloading the task to the background falls mostly into **n
 
 Perhaps we can think of it like this:
 
-```
+```markdown
 Total Time = Serialization Cost
   + Transit
   + Background Processing Time

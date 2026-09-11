@@ -24,7 +24,7 @@ Contributors to Wikimedia projects
 
 [Картер Бёруэлл](https://ru.wikipedia.org/wiki/Бёруэлл,_Картер "Бёруэлл, Картер")
 
-![](https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a4/Flag_of_the_United_States.svg/40px-Flag_of_the_United_States.svg.png?utm_source=ru.wikipedia.org&utm_campaign=parser&utm_content=thumbnail) [США](https://ru.wikipedia.org/wiki/Соединённые_Штаты_Америки "Соединённые Штаты Америки")
+[США](https://ru.wikipedia.org/wiki/Соединённые_Штаты_Америки "Соединённые Штаты Америки")
 
 [английский](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык")
 

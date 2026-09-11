@@ -40,7 +40,7 @@ We’d originally been using a library called [Queue Classic](https://github.com
 
 [Inspecting Que’s source code](https://github.com/chanks/que/blob/f95aec38a48a86d1b4c82297bc5ed9c88bb600d6/lib/que/sql.rb), we see that it uses this algorithm to lock a job:
 
-```
+```sql
 WITH RECURSIVE jobs AS (
   SELECT (j).*, pg_try_advisory_lock((j).job_id) AS locked
   FROM (
@@ -101,7 +101,7 @@ By continuing to examine test data, we quickly notice another strong correlation
 
 Automated Postgres VACUUM processes are supposed to clean these up, but by running a manual VACUUM, we can see that they can’t be removed:
 
-```
+```sql
 => vacuum verbose que_jobs;
 INFO:  vacuuming "public.que_jobs"
 INFO:  index "que_jobs_pkey" now contains 247793 row versions in 4724 pages
@@ -173,7 +173,7 @@ The one key piece of information here is that a Postgres index doesn’t general
 
 The Postgres codebase is large enough that pointing to a single place to outline this detail in the implementation is difficult, but `index_getnext` as shown below is a pretty important piece of it. Its job is to scan any type of index in a generic way and extract a tuple that matches the conditions of an incoming query. Most of the body is wrapped in a continuous loop that first calls into `index_getnext_tid` which will descend the B-tree to find an appropriate TID. After one is retrieved, it’s passed off to `index_fetch_heap`, which will fetch the full tuple from the heap, and among other things check its visibility against the current snapshot (a snapshot reference is stored as part of the `IndexScanDesc` type) [2](#footnote-2).
 
-```
+```c
 /* ----------------
  *		index_getnext - get the next heap tuple from a scan
  *
@@ -251,7 +251,7 @@ Stated plainly, our root problem is that the job table’s index has become less
 
 Referencing the locking SQL above, we can hypothesize that it may be the fairly minimal constraint on only queue name and `run_at` that’s making the index search so inefficient. In the degraded case, all dead rows that have already been worked will match both these conditions:
 
-```
+```sql
 WHERE queue = $1::text
 AND run_at <= now()
 ```
@@ -264,7 +264,7 @@ Illustrated visually, the locking function is able to skip the bulk of the dead 
 
 Because Que works jobs in the order that they came into the queue, having workers re-use the identifier of the last job they worked might be a simple and effective way to accomplish this. Here’s the basic pseudocode for a modified work loop:
 
-```
+```ruby
 last_job_id = nil
 
 loop do
@@ -294,7 +294,7 @@ To account for this problem our patch to Que introduces a time-based form of loc
 
 An amended form of the new work loop pseudocode that performs some jitter of this sort might look like this:
 
-```
+```ruby
 last_job_id = nil
 start = now()
 

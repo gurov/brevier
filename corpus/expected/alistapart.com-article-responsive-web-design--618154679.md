@@ -39,7 +39,7 @@ This is our way forward. Rather than tailoring disconnected designs to each of a
 
 Since the days of CSS 2.1, our style sheets have enjoyed some measure of device awareness through [media types](http://www.w3.org/TR/CSS21/media.html). If you’ve ever written [a print style sheet](http://www.alistapart.com/articles/goingtoprint/), you’re already familiar with the concept:
 
-```
+```markup
 <link rel="stylesheet" type="text/css" href="core.css"
   media="screen" />
 <link rel="stylesheet" type="text/css" href="print.css"
@@ -50,7 +50,7 @@ In the hopes that we’d be designing more than neatly formatted page printouts,
 
 Thankfully, the W3C created [media queries](http://www.w3.org/TR/css3-mediaqueries/) as part of the CSS3 specification, improving upon the promise of media types. A media query allows us to target not only certain device classes, but to actually inspect the physical characteristics of the device rendering our work. For example, following the recent rise of mobile WebKit, media queries became a popular client-side technique for delivering a tailored style sheet to the iPhone, Android phones, and their ilk. To do so, we could incorporate a query into a `link`ed style sheet’s `media` attribute:
 
-```
+```markup
 <link rel="stylesheet" type="text/css"
   media="screen and (max-device-width: 480px)"
   href="shetland.css" />
@@ -65,7 +65,7 @@ In plain English, we’re asking the device if its horizontal resolution (`max-d
 
 Designers have experimented with resolution-aware layouts in the past, mostly relying on JS-driven solutions like [Cameron Adams’ excellent script](http://www.themaninblue.com/experiment/ResolutionLayout/). But the media query specification provides [a host of media features](http://www.w3.org/TR/css3-mediaqueries/#media1) that extends far beyond screen resolution, vastly widening the scope of what we can test for with our queries. What’s more, you can test multiple property values in a single query by chaining them together with the `and` keyword:
 
-```
+```markup
 <link rel="stylesheet" type="text/css"
   media="screen and (max-device-width: 480px) and (resolution: 163dpi)"
   href="shetland.css" />
@@ -73,7 +73,7 @@ Designers have experimented with resolution-aware layouts in the past, mostly re
 
 Furthermore, we’re not limited to incorporating media queries in our `link`s. We can include them in our CSS either as part of a `@media` rule:
 
-```
+```css
 @media screen and (max-device-width: 480px) {
   .column {
     float: none;
@@ -93,7 +93,7 @@ But in each case, the effect is the same: If the device passes the test put fort
 
 Let’s turn our attention to the images at the base of our page. In their default layout, the relevant CSS currently looks like this:
 
-```
+```css
 .figure {
   float: left;
   margin: 0 3.317535545023696682% 1.5em 0;   /* 21px / 633px */
@@ -108,7 +108,7 @@ I’ve omitted a number of typographic properties to focus on the layout: Each `
 
 First of all, let’s linearize our page once the viewport falls below a certain resolution threshold—say, `600px`. So at the bottom of our style sheet, let’s create a new `@media` block, like so:
 
-```
+```css
 @media screen and (max-width: 600px) {
   .mast,
   .intro,
@@ -122,7 +122,7 @@ First of all, let’s linearize our page once the viewport falls below a certain
 
 If you view [our updated page](https://alistapart.github.io/code-samples/responsive-web-design/ex/ex-site-linearize.html) in a modern desktop browser and reduce the size of your window below `600px`, the media query will disable the floats on the design’s major elements, stacking each block atop each other in the document flow. So our miniaturized design is shaping up nicely, but the images still don’t scale down that intelligently. If we introduce another media query, we can alter their layout accordingly:
 
-```
+```css
 @media screen and (max-width: 400px) {
   .figure,
   li#f-mycroft {
@@ -143,7 +143,7 @@ Don’t mind the unsightly percentages; we’re simply recalculating the widths 
 
 We can actually take the same approach for widescreen displays, too. For larger resolutions, we could adopt a six-across treatment for our images, placing them [all in the same row](https://alistapart.github.io/code-samples/responsive-web-design/ex/ex-site-larger.html):
 
-```
+```css
 @media screen and (min-width: 1300px) {
   .figure,
   li#f-mycroft {

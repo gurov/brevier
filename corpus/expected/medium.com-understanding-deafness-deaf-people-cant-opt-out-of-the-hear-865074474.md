@@ -2,8 +2,6 @@
 
 Mark Drolsbaugh
 
-[![Mark Drolsbaugh](https://miro.medium.com/v2/resize:fill:64:64/1*t6b-4pNK6kvg4blM31tEgA.jpeg)](https://medium.com/@markdrolz?source=post_page---byline--93d964af9b11-----------------------------------------)
-
 Aug 18, 2026
 
 --

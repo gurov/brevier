@@ -77,7 +77,7 @@ Rust had always prohibited mutating state through a binding that was aliased wit
 
 Though the shift to lifetime analysis has been rightly recognized for its enormous impact in making Rust what it is today, its symbiotic interaction with external iterators, and the fundamental importance of that API to settling Rust into its current niche, has not received enough attention. Before the adoption of “external” iterators, Rust used a kind of callback based approach to define iterators, something that in modern Rust would look like this:
 
-```
+```rust
 enum ControlFlow {
     Break,
     Continue,
@@ -99,7 +99,7 @@ Instead, Daniel Micay proposed to shift Rust to use “external” iterators, wh
 
 (Very well-informed readers will be aware that Rust’s Iterator has an a provided method called `try_fold` which is functionally very similar to the internal iterator API and is used in the definition of some other iterator combinators because it can result in better code generation. But it isn’t the key underlying method by which all iterators are defined.)
 
-```
+```rust
 trait Iterator {
     type Item;
 
@@ -121,7 +121,7 @@ When they needed to replace green threads, Aaron Turon and Alex Crichton began b
 
 In Rust, that sort of API would have looked something like this:
 
-```
+```rust
 trait Future {
     type Output;
 
@@ -133,7 +133,7 @@ Aaron Turon and Alex Crichton tried this approach, but as Aaron Turon wrote in a
 
 Instead, they examined how C programmers tend to implement async programming: in C, programmers handle non blocking IO by building a state machine. What they wanted was a definition of Future that could be compiled into the sort of state machine that C programmers would write by hand. After some experimentation, they landed on what they called a “readiness-based” approach:
 
-```
+```rust
 enum Poll<T> {
     Ready(T),
     Pending,
@@ -162,7 +162,7 @@ foo.bar().and_then(|result| foo.baz(result))
 
 The problem was that `foo` was borrowed both in the `bar` method and then in the closure passed to `and_then`. Essentially, what users wanted to do was store state “across an await point,” the await point being formed by the chaining of future combinators; this usually resulted in confounding and perplexing borrow-checker errors. The most accessible solution to this was to store that state in an `Arc` and `Mutex`, which is not zero-cost and more importantly was very unwieldy and awkward as your system grew in complexity. For example:
 
-```
+```rust
 let foo = Arc::new(Mutex::new(foo));
 foo.clone().lock().bar()
    .and_then(move |result| foo.lock().baz(result))

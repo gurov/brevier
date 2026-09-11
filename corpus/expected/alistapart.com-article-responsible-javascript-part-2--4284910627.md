@@ -93,7 +93,7 @@ A webpack-bundle-analyzer analysis of a project’s legacy bundle (left) versus 
 
 The [simplest pattern](https://developers.google.com/web/fundamentals/primers/modules#browser) for serving these bundles to their respective platforms is brief. It also works a treat in modern browsers:
 
-```
+```html
 <!-- Modern browsers load this file: -->
 [/js/app.mjs](https://alistapart.com/js/app.mjs)
 <!-- Legacy browsers load this file: -->
@@ -104,7 +104,7 @@ Unfortunately, there’s a caveat with this pattern: legacy browsers like IE 11�
 
 On the other hand, you’ll need a workaround if you’re concerned about [the performance implications of older browsers downloading both sets of bundles](https://gist.github.com/jakub-g/5fc11af85a061ca29cc84892f1059fec). Here’s one potential solution that uses script injection (instead of the `script` tags above) to avoid double downloads on affected browsers:
 
-```
+```javascript
 var scriptEl = document.createElement("script");
 
 if ("noModule" in scriptEl) {
@@ -133,7 +133,7 @@ I’m not here to trash Babel. It’s indispensable, but lordy, it adds a *lot* 
 
 To wit: [default parameters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Default_parameters) are a *very* handy ES6 feature you probably already use:
 
-```
+```javascript
 function logger(message, level = "log") {
   console[level](message);
 }
@@ -141,7 +141,7 @@ function logger(message, level = "log") {
 
 The thing to pay attention to here is the `level` parameter, which has a default of “log.” This means if we want to invoke `console.log` with this wrapper function, we don’t need to specify `level`. Great, right? Except when Babel transforms this function, the output looks like this:
 
-```
+```javascript
 function logger(message) {
   var level = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "log";
 
@@ -151,7 +151,7 @@ function logger(message) {
 
 This is an example of how, despite our best intentions, developer conveniences can backfire. What was a handful of bytes in our source has now been transformed into *much* larger in our production code. Uglification can’t do much about it either, as arguments can’t be reduced. Oh, and if you think [rest parameters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/rest_parameters) might be a worthy antidote, Babel’s transforms for them are even bulkier:
 
-```
+```javascript
 // Source
 function logger(...args) {
   const [level, message] = args;
@@ -175,8 +175,8 @@ Worse yet, Babel transforms this code even for projects with a [@babel/preset-en
 
 Regardless of whether you decide to enable loose transforms, here’s one way to cut the cruft of transpiled default parameters:
 
-````
-```
+````javascript
+```javascript
 // Babel won't touch this
 function logger(message, level) {
   console[level || "log"](message);

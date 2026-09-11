@@ -12,7 +12,7 @@ The Rust Team
 
 January 20, 2012; 14 years ago[\[1\]](#cite_note-Rust0.1a-1)
 
-1.98.1[\[2\]](#cite_note-wikidata-bd73cf842f55376c8fbfab41f0506280b6ac68f1-v20-2) [![Edit this on Wikidata](https://thumb.wikimedia.org/wikipedia/en/thumb/8/8a/OOjs_UI_icon_edit-ltr-progressive.svg/20px-OOjs_UI_icon_edit-ltr-progressive.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://www.wikidata.org/wiki/Q575650?uselang=en#P348 "Edit this on Wikidata") / September 3, 2026; 8 days ago
+1.98.1[\[2\]](#cite_note-wikidata-bd73cf842f55376c8fbfab41f0506280b6ac68f1-v20-2)  / September 3, 2026; 8 days ago
 
 - [Affine](https://en.wikipedia.org/wiki/Affine_type_system "Affine type system") - [inferred](https://en.wikipedia.org/wiki/Type_inference "Type inference") - [nominal](https://en.wikipedia.org/wiki/Nominal_type_system "Nominal type system") - [static](https://en.wikipedia.org/wiki/Static_typing "Static typing") - [strong](https://en.wikipedia.org/wiki/Strong_and_weak_typing "Strong and weak typing")
 
@@ -870,6 +870,6 @@ The Rust project is maintained by 8 top-level *teams* as of November 2025: the l
 - Youens-Clark, Ken (2024). *Command-Line Rust*. O'Reilly Media. [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [9-781-0981-0942-4](https://en.wikipedia.org/wiki/Special:BookSources/9-781-0981-0942-4 "Special:BookSources/9-781-0981-0942-4").
 - Drysdale, David (2024). *Effective Rust*. O'Reilly Media. [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [9-781-0981-5139-3](https://en.wikipedia.org/wiki/Special:BookSources/9-781-0981-5139-3 "Special:BookSources/9-781-0981-5139-3").
 
-- [Official website](https://rust-lang.org/) [![Edit this at Wikidata](https://thumb.wikimedia.org/wikipedia/en/thumb/8/8a/OOjs_UI_icon_edit-ltr-progressive.svg/20px-OOjs_UI_icon_edit-ltr-progressive.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://www.wikidata.org/wiki/Q575650#P856 "Edit this at Wikidata")
+- [Official website](https://rust-lang.org/)
 - [Source code](https://github.com/rust-lang/rust) on [GitHub](https://en.wikipedia.org/wiki/GitHub "GitHub")
 - [Documentation](https://doc.rust-lang.org/stable/)

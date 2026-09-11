@@ -104,7 +104,7 @@ This book makes no assumptions about what tools you use to author Rust code. Jus
 
 In several examples, we will use Rust packages beyond the standard library. To work through those examples, you will either need to have an internet connection or to have downloaded those dependencies ahead of time. To download the dependencies ahead of time, you can run the following commands. (We’ll explain what `cargo` is and what each of these commands does in detail later.)
 
-```
+```console
 $ cargo new get-dependencies
 $ cd get-dependencies
 $ cargo add rand@0.8.5 trpl@0.2.0

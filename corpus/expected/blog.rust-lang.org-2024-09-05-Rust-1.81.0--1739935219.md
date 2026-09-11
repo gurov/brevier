@@ -41,7 +41,7 @@ Clippy also has two lints to enforce the usage of this feature and help with mig
 
 Changing the lint level is often done for some particular reason. For example, if code runs in an environment without floating point support, you could use Clippy to lint on such usage with `#![deny(clippy::float_arithmetic)]`. However, if a new developer to the project sees this lint fire, they need to look for (hopefully) a comment on the deny explaining why it was added. With Rust 1.81, they can be informed directly in the compiler message:
 
-```
+```plain
 error: floating-point arithmetic detected
  --> src/lib.rs:4:5
   |

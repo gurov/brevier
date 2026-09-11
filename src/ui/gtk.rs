@@ -1720,6 +1720,17 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         ],
     );
     buffer.create_tag(Some("dim"), &[("foreground", &dim)]);
+    // Подпись оповещения: заводится после цитаты, чтобы её курсив перебить —
+    // у наложенного позже тега приоритет выше.
+    buffer.create_tag(
+        Some("alert"),
+        &[
+            ("weight", &700),
+            ("style", &pango::Style::Normal),
+            ("size-points", &(body * 0.85)),
+            ("letter-spacing", &(pango::SCALE * 3 / 4)),
+        ],
+    );
 
     // Подсветка поиска. Заводится последней: у тегов, наложенных позже,
     // приоритет выше, и жёлтое ложится поверх цвета ссылки.
@@ -1744,18 +1755,13 @@ struct Page {
 }
 
 fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Page {
-    use comrak::{Arena, Options, parse_document};
+    use comrak::{Arena, parse_document};
 
     let buffer = view.buffer();
     buffer.set_text("");
 
-    let mut options = Options::default();
-    options.extension.table = true;
-    options.extension.strikethrough = true;
-    options.extension.autolink = true;
-
     let arena = Arena::new();
-    let root = parse_document(&arena, &document.markdown, &options);
+    let root = parse_document(&arena, &document.markdown, &brevier::markdown::options());
 
     let mut links = Vec::new();
     let mut marks = Vec::new();
@@ -2339,6 +2345,29 @@ impl Writer<'_> {
                 let level = format!("quote{}", self.quotes.min(QUOTE_LEVELS));
                 let mut tags = outer.to_vec();
                 tags.push(&level);
+                for child in node.children() {
+                    self.block(child, &tags);
+                }
+                self.quotes -= 1;
+            }
+            // Оповещение (`> [!NOTE]`) — та же цитата, но с подписью,
+            // чем она является. Github рисует её коробкой в цвет; цвет
+            // тут был бы чужой типографикой, а подпись — смыслом.
+            NodeValue::Alert(alert) => {
+                self.quotes += 1;
+                let level = format!("quote{}", self.quotes.min(QUOTE_LEVELS));
+                let mut tags = outer.to_vec();
+                tags.push(&level);
+
+                let title = alert
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| alert.alert_type.default_title().to_owned());
+                let mut titled = tags.clone();
+                titled.push("alert");
+                self.put(&title, &titled);
+                self.put("\n", &titled);
+
                 for child in node.children() {
                     self.block(child, &tags);
                 }

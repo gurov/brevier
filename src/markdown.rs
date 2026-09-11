@@ -23,7 +23,7 @@ use htmd::options::{
 use htmd::{Element, HtmlToMarkdown};
 
 use crate::error::Error;
-use crate::extract::Article;
+use crate::extract::{self, Article};
 
 /// Теги, из которых нечего читать. Readability большую часть уже вырезал,
 /// но `--raw` идёт мимо него.
@@ -33,7 +33,11 @@ const SKIP: &[&str] = &[
 
 /// Выше этого картинка уже не распорка, а изображение. Два пикселя,
 /// а не один: рамки и линейки верстают и в два.
-const SPACER_PX: u32 = 2;
+///
+/// Знает о нём и `extract::deicon`: распорка подходит под значок по всем
+/// признакам, а выбрасывать её до конвертации нельзя — в её ширине
+/// записана вложенность треда.
+pub(crate) const SPACER_PX: u32 = 2;
 
 /// Уже этого распорка отступом не является: пиксель-счётчик объявляет
 /// себя единицей на единицу, и принимать его за уровень вложенности
@@ -1047,25 +1051,49 @@ fn longest_backtick_run(content: &str) -> usize {
     longest
 }
 
+/// Язык блока кода: из атрибута или из класса.
+///
+/// Атрибут кладёт `extract::keep_lang` — он снимает язык до извлечения
+/// и проносит мимо чистки классов, которую Readability делает всему
+/// дереву. Класс остаётся ради разметки, до Readability не доезжавшей:
+/// куски вёрстки внутри README.
 fn language_from_attrs(element: &Element) -> Option<String> {
-    let class = element
-        .attrs
-        .iter()
-        .find(|attr| &attr.name.local == "class")?;
-    class
-        .value
-        .split(' ')
-        .find_map(|cls| cls.strip_prefix("language-"))
-        .map(str::to_owned)
+    let attr = |name: &str| {
+        element
+            .attrs
+            .iter()
+            .find(|attr| &attr.name.local == name)
+            .map(|attr| attr.value.to_string())
+    };
+
+    let named = extract::LANG_ATTRS.iter().find_map(|name| attr(name));
+    if let Some(language) = named.as_deref().and_then(extract::language_token) {
+        return Some(language);
+    }
+
+    attr("class")?.split_whitespace().find_map(|class| {
+        extract::LANG_PREFIXES
+            .iter()
+            .find_map(|prefix| class.strip_prefix(prefix))
+            .and_then(extract::language_token)
+    })
 }
 
 /// CommonMark + GFM. Таблицы — обязательная часть, из-за них GFM и выбран.
-pub(crate) fn options() -> Options<'static> {
+///
+/// Диалект у продукта один, поэтому и настройки одни: этими же разбирает
+/// документ окно. Свой набор рядом расходится молча — так в окне уже жили
+/// списки задач, которые отрисовщик умеет рисовать, а разбор не включал.
+pub fn options() -> Options<'static> {
     let mut options = Options::default();
     options.extension.table = true;
     options.extension.strikethrough = true;
     options.extension.autolink = true;
     options.extension.tasklist = true;
+    // Оповещения github (`> [!NOTE]`): без этого читателю достаётся цитата,
+    // первой строкой которой написано «[!NOTE]». В README они сплошь,
+    // и рисует их хостинг коробкой, а не текстом.
+    options.extension.alerts = true;
     // Ширина колонки — дело рендерера и читателя, не файла: строка = абзац,
     // так диффы корпуса показывают правку, а не переливание переносов.
     options.render.width = 0;
@@ -1120,6 +1148,25 @@ mod tests {
             from_html("<pre><code class=\"language-rust\">let x = 1;\nlet y = 2;</code></pre>")
                 .unwrap();
         assert_eq!(md, "```rust\nlet x = 1;\nlet y = 2;\n```\n");
+    }
+
+    /// Язык в атрибуте: так он приезжает от `extract::keep_lang` после
+    /// чистки классов, и так его пишет блог Rust (`data-lang="plain"`).
+    #[test]
+    fn a_language_in_an_attribute_reaches_the_fence() {
+        let md = from_html("<pre><code data-lang=\"shell\">cd /tmp\nls</code></pre>").unwrap();
+        assert_eq!(md, "```shell\ncd /tmp\nls\n```\n");
+    }
+
+    /// Подпись к блоку языком не является: сайты кладут в это место
+    /// что угодно, а попадает оно прямо в текст статьи.
+    #[test]
+    fn a_caption_is_not_a_language() {
+        let md = from_html("<pre><code data-lang=\"Shell session\">ls\ncd</code></pre>").unwrap();
+        assert_eq!(md, "```shell\nls\ncd\n```\n");
+
+        let md = from_html("<pre><code data-lang=\"<b>ужас</b>\">ls\ncd</code></pre>").unwrap();
+        assert_eq!(md, "```\nls\ncd\n```\n");
     }
 
     /// Строка обсуждения, свёрстанная как на hacker news: распорка нужной

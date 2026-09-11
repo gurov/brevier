@@ -42,8 +42,13 @@ const MIN_CARDS: usize = 8;
 /// у stratechery — 75%, у alistapart — 400%. Порог посередине пустоты.
 const CARD_SHARE: f32 = 0.4;
 
-/// До этого размера картинка внутри ссылки — значок, а не изображение.
+/// До этого размера картинка — значок, а не изображение. Где именно
+/// это значит «выбросить», решает место: см. [`deicon`].
 const ICON_PX: u32 = 48;
+
+/// Сколько шагов наверх искать язык блока кода: `<code>` внутри `<pre>`
+/// внутри обёртки.
+const LANG_DEPTH: usize = 3;
 
 /// Лента, снятая с исходного дерева: её html и её же текст — по тексту
 /// потом решают, лента это или статья с витриной в хвосте.
@@ -64,6 +69,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let doc = Document::from(html);
     unlazy(&doc);
     deicon(&doc);
+    keep_lang(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
@@ -133,14 +139,23 @@ impl Listing {
     }
 }
 
-/// Выбросить значки: картинку, которая одна заполняет собой ссылку.
+/// Выбросить значки: картинки, которые изображением не являются.
 ///
-/// Аватар автора, флажок языка, иконка «поделиться» — в ленте таких
-/// по одной на карточку, и каждая занимает в тексте отдельную строку.
-/// Признак по форме: объявлена мелкой с обеих сторон, без подписи,
-/// и кроме неё в ссылке ничего нет. Картинку в прозе это не трогает
-/// (tonsky ставит логотип apple прямо в строку — он не в ссылке),
-/// формулу тоже: у неё в `alt` исходник.
+/// Аватар автора, флажок языка, иконка «поделиться», карандашик
+/// «исправить в викиданных» — читателю каждая достаётся отдельной строкой
+/// `![](…)`, а в окне ещё и рамкой на якоре. Признак по форме: объявлена
+/// мелкой с обеих сторон — и стоит там, где картинке быть нечем.
+///
+/// Мест таких два, и подпись в них значит разное. **Одна в ссылке** — тогда
+/// подпись роли не играет: это имя ссылки, а не подпись к картинке
+/// (у википедии «Edit this at Wikidata», у medium — имя автора). **Одна
+/// в блоке** — тогда только без подписи: подписанная мелкая картинка ещё
+/// бывает иллюстрацией, и аватары собеседников у fasterthanli.me остаются.
+///
+/// Картинку посреди прозы не трогаем вовсе: там мелкая картинка — знак,
+/// а не значок. На этом уже ловились: первая версия правила съела логотип
+/// apple прямо посреди строки у tonsky.me. Формула цела по той же причине —
+/// она стоит в строке, и в `alt` у неё исходник.
 fn deicon(doc: &Document) {
     for link in doc.select("a").nodes() {
         if !link.text().trim().is_empty() {
@@ -158,18 +173,122 @@ fn deicon(doc: &Document) {
             image.remove_from_parent();
         }
     }
+
+    for image in doc.select("img").nodes() {
+        if !is_icon(image) || captioned(image) {
+            continue;
+        }
+        // Одна в блоке: кроме неё в родителе ни слова. Текст рядом
+        // означает прозу, а в прозе мелкая картинка — знак.
+        if image
+            .parent()
+            .is_some_and(|parent| parent.text().trim().is_empty())
+        {
+            image.remove_from_parent();
+        }
+    }
 }
 
 fn is_icon(image: &NodeRef) -> bool {
-    let small = |name: &str| {
+    let px = |name: &str| {
         image
             .attr(name)
             .and_then(|value| value.trim().parse::<u32>().ok())
-            .is_some_and(|size| size <= ICON_PX)
     };
-    let captioned = image.attr("alt").is_some_and(|alt| !alt.trim().is_empty());
+    let small = |name: &str| px(name).is_some_and(|size| size <= ICON_PX);
 
-    small("width") && small("height") && !captioned
+    // Распорка старой вёрстки подходит под значок по всем признакам, но
+    // в её ширине записана вложенность треда, и разбирает её конвертер
+    // (`markdown::image_handler`). Выбросить её здесь — сплющить тред.
+    let spacer = px("height").is_some_and(|height| height <= crate::markdown::SPACER_PX);
+
+    small("width") && small("height") && !spacer
+}
+
+fn captioned(image: &NodeRef) -> bool {
+    image.attr("alt").is_some_and(|alt| !alt.trim().is_empty())
+}
+
+/// Язык блока кода — в атрибут, который переживёт извлечение.
+///
+/// Подсветка (`code::spans`) берёт язык из ограждения, ограждение пишет
+/// конвертер по классу `language-*` — а Readability классы вычищает целиком
+/// (`keep_classes: false`, и `classes_to_preserve` понимает точные имена,
+/// не префиксы). До конвертера язык не доезжает, и подсветка на любой
+/// веб-странице выходит общая. Поэтому снимаем язык сами, до извлечения,
+/// и кладём в `data-lang`: атрибуты Readability не трогает.
+///
+/// Лежит он в трёх местах, и все три встречаются в корпусе: на самом
+/// `<code>` (brandur, rust book), на нём же атрибутом (`data-lang="plain"`
+/// у блога Rust), на обёртке — у fasterthanli.me язык объявлен
+/// на `<figure class="code-block" data-lang="shell">`, а у `<code>`
+/// внутри только класс вёрстки.
+fn keep_lang(doc: &Document) {
+    for code in doc.select("code").nodes() {
+        // Блок, а не код-спан: признак тот же, по которому их различает
+        // конвертер, — перевод строки внутри либо `<pre>` снаружи.
+        let in_pre = code
+            .parent()
+            .and_then(|parent| parent.node_name())
+            .as_deref()
+            == Some("pre");
+        if !in_pre && !code.text().contains('\n') {
+            continue;
+        }
+        let Some(language) = nearest_language(code) else {
+            continue;
+        };
+        code.set_attr("data-lang", &language);
+    }
+}
+
+/// Язык у самого блока или у ближайшей обёртки.
+fn nearest_language(code: &NodeRef) -> Option<String> {
+    std::iter::successors(Some(*code), NodeRef::parent)
+        .take(LANG_DEPTH)
+        .find_map(|node| language_of(&node))
+}
+
+/// Где язык объявлен атрибутом.
+pub(crate) const LANG_ATTRS: [&str; 3] = ["data-lang", "data-language", "data-code-language"];
+
+/// Чем размечают язык в классе.
+pub(crate) const LANG_PREFIXES: [&str; 3] = ["language-", "lang-", "highlight-source-"];
+
+/// Что на узле объявлено языком.
+///
+/// Атрибут вперёд класса: у chroma рядом стоят `class="language-rust"`
+/// и `data-lang="rust"`, и второй уже очищен от префикса.
+fn language_of(node: &NodeRef) -> Option<String> {
+    let named = LANG_ATTRS.iter().find_map(|attr| node.attr(attr));
+    if let Some(language) = named.as_deref().and_then(language_token) {
+        return Some(language);
+    }
+
+    let class = node.attr("class")?;
+    class.split_whitespace().find_map(|class| {
+        LANG_PREFIXES
+            .iter()
+            .find_map(|prefix| class.strip_prefix(prefix))
+            .and_then(language_token)
+    })
+}
+
+/// Имя языка, пригодное для ограждения: одно слово из букв, цифр и знаков,
+/// которые встречаются в именах языков (`c++`, `c#`, `objective-c`).
+///
+/// Сайты кладут в это место что угодно — «Shell session», пустую строку,
+/// подпись к блоку, — а попадает оно прямо в текст статьи и в сохранённый
+/// файл.
+pub(crate) fn language_token(raw: &str) -> Option<String> {
+    const LIMIT: usize = 20;
+
+    let token = raw.split_whitespace().next()?.to_ascii_lowercase();
+    let ok = |ch: char| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '#' | '-' | '_' | '.');
+    if token.is_empty() || token.len() > LIMIT || !token.chars().all(ok) {
+        return None;
+    }
+    Some(token)
 }
 
 /// Лента страницы: узел, в котором лежат все карточки.
@@ -436,6 +555,72 @@ mod tests {
                 .content_html
                 .contains(r#"src="https://example.org/wiki/File:Portrait.jpg""#)
         );
+    }
+
+    /// Значок против картинки: правило проверяется на всех местах сразу,
+    /// потому что различает их именно место, а не сама картинка.
+    #[test]
+    fn an_icon_goes_and_a_picture_stays() {
+        let doc = Document::from(
+            "<body>\
+             <p><a href=\"/edit\"><img src=\"pencil.png\" alt=\"Edit this at Wikidata\" \
+               width=\"10\" height=\"10\"></a></p>\
+             <div><img src=\"share.png\" width=\"16\" height=\"16\"></div>\
+             <p>Логотип <img src=\"apple.png\" width=\"24\" height=\"24\"> в строке.</p>\
+             <div><img src=\"avatar.png\" alt=\"Cool bear\" width=\"42\" height=\"42\"></div>\
+             <div><img src=\"s.gif\" width=\"40\" height=\"1\"></div>\
+             <p><img src=\"photo.jpg\" width=\"600\" height=\"400\"></p>\
+             </body>"
+                .to_string(),
+        );
+        deicon(&doc);
+        let html = doc.html();
+
+        // Значок в ссылке: подпись у него — имя ссылки, а не подпись.
+        assert!(!html.contains("pencil.png"), "карандашик цел");
+        // Значок один в блоке — кнопка, а не изображение.
+        assert!(!html.contains("share.png"), "кнопка цела");
+        // Знак посреди прозы, подписанная картинка, распорка треда
+        // и обычная иллюстрация остаются.
+        assert!(html.contains("apple.png"), "логотип в строке съеден");
+        assert!(html.contains("avatar.png"), "подписанная картинка съедена");
+        assert!(html.contains("s.gif"), "распорка треда съедена");
+        assert!(html.contains("photo.jpg"), "иллюстрация съедена");
+    }
+
+    /// Класс с языком Readability вычищает вместе со всеми классами,
+    /// и подсветка на веб-странице выходила общая. Язык должен доехать
+    /// до конвертера — хоть со своего `<code>`, хоть с обёртки:
+    /// у fasterthanli.me он объявлен на `<figure>`.
+    #[test]
+    fn a_code_language_survives_extraction() {
+        let code = "<pre><code class=\"language-rust\">fn main() {\n}</code></pre>\
+            <figure class=\"code-block\" data-lang=\"shell\">\
+            <code class=\"scroll-wrapper\">cargo test\ncargo run</code></figure>";
+        let html = page(code);
+
+        let article = extract(&html, "https://example.org/post").unwrap();
+        assert!(
+            !article.content_html.contains("language-rust"),
+            "класс цел?"
+        );
+        assert!(article.content_html.contains(r#"data-lang="rust""#));
+        assert!(article.content_html.contains(r#"data-lang="shell""#));
+
+        let markdown = crate::markdown::from_article(&article).unwrap().markdown;
+        assert!(markdown.contains("```rust\n"), "{markdown}");
+        assert!(markdown.contains("```shell\n"), "{markdown}");
+    }
+
+    /// Код-спан посреди абзаца языком обёртки не красится: у него
+    /// ограждения нет вовсе, а `data-lang` в тексте — мусор.
+    #[test]
+    fn an_inline_span_keeps_no_language() {
+        let doc = Document::from(
+            "<div data-lang=\"rust\"><p>Тут <code>Vec</code> и всё.</p></div>".to_string(),
+        );
+        keep_lang(&doc);
+        assert!(!doc.select("code[data-lang]").exists());
     }
 
     /// Лента: десяток карточек, и Readability приносит из них одну.

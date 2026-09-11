@@ -175,6 +175,10 @@ same representation serves both modes, which is what makes saving nearly free; t
 is what it cannot carry: tables nested in lists, definition lists, footnotes, sub/sup,
 ruby. That loss is also the noise removal this program is for.
 
+GitHub alerts (`> [!NOTE]`) are read as alerts: a quote that says what it is, not a quote
+whose first line reads "[!NOTE]". No coloured box — the colour would be the site's
+typography, the label is the meaning.
+
 ## On the network
 
 - **One page per request from a human.** Brevier does not crawl, does not prefetch and
