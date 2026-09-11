@@ -6,7 +6,7 @@ Dexter
 
 ![Изображение сгенерировано Gemini](https://media.ixbt.com/fit-in/500x/ixbt-data/1306397/media-lfgjzsw82xhdowivkscohkrz.jpg)
 
-Источник изображения: [Gemini](https://api.ixbt.com/to/ZXlKcGRpSTZJbUpOYUhka2VHWm5VRVIxZVVsUmF6bDFVVE5wUkdjOVBTSXNJblpoYkhWbElqb2lhbk5SU3pRME1HZ3lkMWx2TjJFeGQycGFSRFZRYlZkR2JEQndXVGxNZVRoUmNpOHZZbmhNUm1OUVdUMGlMQ0p0WVdNaU9pSTFabU14WXpZeE1tRTFaR0l3TWpJelpUUm1OR1ptWkRRNU1tTTBNemxrTURReVlUQTRNRFU0WkdRMVpUQTNOelF3TXpVd1pqVXdNRFkyTUdZMVptRTRJaXdpZEdGbklqb2lJbjA9)
+Источник изображения: [Gemini](https://api.ixbt.com/to/ZXlKcGRpSTZJblJWT1RVelRHNXZWMk5ETUZsVVprdEpRbGxNTVhjOVBTSXNJblpoYkhWbElqb2lURzV1WmxCNU5YTnlPSE13TmtsTlRXa3JURUZWTmxwUFZtTTVXbkpSY205SFNXTjZhVmRYY0RCT1ZUMGlMQ0p0WVdNaU9pSTNZV1prWlRZMllqSmlOV1JoWmpabU9XVm1NMkZpWWpabE5UTXhPR0UwTnpBeU1UVTJaVFJtWWpOa05XWXdZVEl5TXpObFkyVXpOMkpoTURNNFpEZ3lJaXdpZEdGbklqb2lJbjA9)
 
 О своем случае на форуме Reddit рассказал пользователь с ником SharpLoquat579. По его словам, почти через три года эксплуатации RTX 4090 начала перегреваться под высокой нагрузкой. Особенно часто проблема возникала в тяжелых играх с трассировкой лучей: изображение на мониторе пропадало, а через несколько секунд компьютер перезагружался.
 

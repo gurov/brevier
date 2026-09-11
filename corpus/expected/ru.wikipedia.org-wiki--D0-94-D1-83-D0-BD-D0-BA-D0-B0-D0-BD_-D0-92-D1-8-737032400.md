@@ -2,8 +2,6 @@
 
 Contributors to Wikimedia projects
 
-Материал из Википедии — свободной энциклопедии
-
 Дункан Высокий
 
 [англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Duncan the Tall
@@ -20,13 +18,13 @@ Contributors to Wikimedia projects
 
 мужской
 
-- Королевская Гавань[\[вд\]](https://www.wikidata.org/wiki/Q18746111#sitelinks-wikipedia "d:Q18746111")
+- Королевская Гавань
 
-- [Штормовые земли](https://ru.wikipedia.org/w/index.php?title=%D0%A8%D1%82%D0%BE%D1%80%D0%BC%D0%BE%D0%B2%D1%8B%D0%B5_%D0%B7%D0%B5%D0%BC%D0%BB%D0%B8&action=edit&editintro=T:Нет_статьи/editintro&preload=T:Нет_статьи/preload&preloadparams%5B%5D=Q53559573&preloadparams%5B%5D=%D0%A8%D1%82%D0%BE%D1%80%D0%BC%D0%BE%D0%B2%D1%8B%D0%B5+%D0%B7%D0%B5%D0%BC%D0%BB%D0%B8&preloadparams%5B%5D=%D0%A3%D0%BD%D0%B8%D0%B2%D0%B5%D1%80%D1%81%D0%B0%D0%BB%D1%8C%D0%BD%D0%B0%D1%8F+%D0%BA%D0%B0%D1%80%D1%82%D0%BE%D1%87%D0%BA%D0%B0)[\[вд\]](https://www.wikidata.org/wiki/Q53559573#sitelinks-wikipedia "d:Q53559573")
+- [Штормовые земли](https://ru.wikipedia.org/w/index.php?title=%D0%A8%D1%82%D0%BE%D1%80%D0%BC%D0%BE%D0%B2%D1%8B%D0%B5_%D0%B7%D0%B5%D0%BC%D0%BB%D0%B8&action=edit&editintro=T:Нет_статьи/editintro&preload=T:Нет_статьи/preload&preloadparams%5B%5D=Q53559573&preloadparams%5B%5D=%D0%A8%D1%82%D0%BE%D1%80%D0%BC%D0%BE%D0%B2%D1%8B%D0%B5+%D0%B7%D0%B5%D0%BC%D0%BB%D0%B8&preloadparams%5B%5D=%D0%A3%D0%BD%D0%B8%D0%B2%D0%B5%D1%80%D1%81%D0%B0%D0%BB%D1%8C%D0%BD%D0%B0%D1%8F+%D0%BA%D0%B0%D1%80%D1%82%D0%BE%D1%87%D0%BA%D0%B0)
 
 [оруженосец](https://ru.wikipedia.org/wiki/Оруженосец "Оруженосец"), [советник](https://ru.wikipedia.org/wiki/Консультирование "Консультирование"), [телохранитель](https://ru.wikipedia.org/wiki/Телохранитель "Телохранитель")
 
-Королевская гвардия[\[вд\]](https://www.wikidata.org/wiki/Q13634866#sitelinks-wikipedia "d:Q13634866")
+Королевская гвардия
 
 **Дункан Высокий** ([англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Duncan the Tall) или **Дунк** ([англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Dunc) — персонаж вымышленного мира, изображённого в серии книг «[Песнь Льда и Огня](https://ru.wikipedia.org/wiki/Песнь_Льда_и_Огня "Песнь Льда и Огня")» [Джорджа Мартина](https://ru.wikipedia.org/wiki/Мартин,_Джордж_Реймонд_Ричард "Мартин, Джордж Реймонд Ричард"), [вестеросский](https://ru.wikipedia.org/wiki/Вестерос_\(континент\) "Вестерос (континент)") рыцарь эпохи [Таргариенов](https://ru.wikipedia.org/wiki/Таргариены "Таргариены"), лорд-командующий Королевской гвардии. Главный герой «[Повестей о Дунке и Эгге](https://ru.wikipedia.org/wiki/Рыцарь_Семи_Королевств_\(серия_повестей\) "Рыцарь Семи Королевств (серия повестей)")», где его оруженосцем является будущий король [Эйегон](https://ru.wikipedia.org/wiki/Эйегон_V_Таргариен "Эйегон V Таргариен"), и телесериала [HBO](https://ru.wikipedia.org/wiki/HBO "HBO") «[Рыцарь Семи Королевств](https://ru.wikipedia.org/wiki/Рыцарь_Семи_Королевств_\(сериал\) "Рыцарь Семи Королевств (сериал)")», где его играет [Питер Клэффи](https://ru.wikipedia.org/wiki/Клэффи,_Питер "Клэффи, Питер").
 

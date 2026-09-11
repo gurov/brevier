@@ -1,6 +1,6 @@
 # Пять историй провалов в сервисе: от аромакино до неуправляемого чат-бота
 
-kuper_tech9 июн 2022 в 14:00
+kuper_tech 9 июн 2022 в 14:00
 
 ![](https://habrastorage.org/r/w1560/getpro/habr/upload_files/2fb/05a/940/2fb05a9407b77ac963c93d8418643f46.png)
 

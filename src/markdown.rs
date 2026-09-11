@@ -84,12 +84,13 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
     }
 
     let body = convert(&article.content_html, &article.notes.numbers)?;
+    // Заголовок приезжает дважды: `<title>` страницы и `<h1>` в самом тексте.
+    let (title, body) = dedup_title(article.title.trim(), body.trim());
 
     let mut doc = String::with_capacity(body.len() + 128);
-    let title = article.title.trim();
     if !title.is_empty() {
         doc.push_str("# ");
-        doc.push_str(title);
+        doc.push_str(&title);
         doc.push_str("\n\n");
     }
     if let Some(byline) = &article.byline {
@@ -189,6 +190,89 @@ fn unbracket(markdown: &str) -> Cow<'_, str> {
 /// Многострочное тело сноски — в одну строку.
 fn squeeze_lines(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Чем сайт дописывает к заголовку своё имя: «Заголовок | Сайт».
+const TITLE_TAILS: [&str; 5] = [" | ", " — ", " – ", " · ", " :: "];
+
+/// Короче этого заголовок под правило про хвост не идёт: у коротких
+/// совпадений слишком велика вероятность, что они случайны.
+const TITLE_MIN: usize = 12;
+
+/// Заголовок, приехавший дважды: `<title>` страницы и `<h1>` в тексте.
+///
+/// Читателю это две почти одинаковые строки подряд. Правило узкое нарочно:
+/// сверяется **первая строка тела** и только если она **заголовок**. Повтор
+/// абзацем бывает содержанием — карточка инфобокса на википедии начинается
+/// с имени статьи, и это не дубль вёрстки, а подпись карточки.
+///
+/// Если `<title>` длиннее ровно на имя сайта («… | Derek Sivers»), берём
+/// короткий вид: имя сайта читатель видит в адресной строке, а заголовок
+/// уезжает и в корешок вкладки, и в имя сохранённого файла.
+fn dedup_title(title: &str, body: &str) -> (String, String) {
+    let mut lines: Vec<&str> = body.lines().collect();
+    let Some(first) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return (title.to_owned(), body.to_owned());
+    };
+
+    let line = lines[first].trim();
+    if !line.starts_with('#') {
+        return (title.to_owned(), body.to_owned());
+    }
+    let head = plain(line.trim_start_matches('#').trim());
+    if head.is_empty() {
+        return (title.to_owned(), body.to_owned());
+    }
+
+    let title_plain = plain(title);
+    let same = title_plain.eq_ignore_ascii_case(&head);
+    // Хвост сайта отрезаем только у настоящего заголовка: «FAQ | Сайт»
+    // и раздел «FAQ» — совпадение случайное.
+    let tailed = head.chars().count() >= TITLE_MIN
+        && TITLE_TAILS.iter().any(|tail| {
+            title_plain
+                .to_lowercase()
+                .starts_with(&format!("{}{tail}", head.to_lowercase()))
+        });
+
+    if !same && !tailed {
+        return (title.to_owned(), body.to_owned());
+    }
+
+    lines.remove(first);
+    let title = if tailed { head } else { title.to_owned() };
+    (title, lines.join("\n"))
+}
+
+/// Текст строки без разметки: ссылки — своим текстом, выделение снято,
+/// пробелы сведены. Для сверки двух написаний одного и того же.
+fn plain(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find('[') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after
+            .split_once("](")
+            .and_then(|(text, tail)| tail.split_once(')').map(|(_, tail)| (text, tail)))
+        {
+            Some((text, tail)) => {
+                out.push_str(text);
+                rest = tail;
+            }
+            None => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+
+    let out: String = out
+        .chars()
+        .filter(|c| !matches!(c, '*' | '_' | '`'))
+        .collect();
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Поставить документу заголовок страницы, если своего у него нет.
@@ -1221,6 +1305,50 @@ pub fn options() -> Options<'static> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_title_that_arrived_twice_is_printed_once() {
+        // Дословный повтор: заголовок страницы и `<h1>` в тексте.
+        let (title, body) = dedup_title(
+            "Relax for the same result",
+            "## Relax for the same result\n\nТекст.",
+        );
+        assert_eq!(title, "Relax for the same result");
+        assert_eq!(body.trim(), "Текст.");
+
+        // Тот же заголовок плюс имя сайта: короткий вид честнее.
+        let (title, body) = dedup_title(
+            "Relax for the same result | Derek Sivers",
+            "## Relax for the same result\n\nТекст.",
+        );
+        assert_eq!(title, "Relax for the same result");
+        assert_eq!(body.trim(), "Текст.");
+
+        // Разметку в заголовке снимаем только для сверки, из текста
+        // выбрасывается вся строка целиком.
+        let (title, body) = dedup_title("Дункан Высокий", "## [Дункан **Высокий**](/a)\n\nТекст.");
+        assert_eq!(title, "Дункан Высокий");
+        assert_eq!(body.trim(), "Текст.");
+    }
+
+    #[test]
+    fn a_heading_of_its_own_stays() {
+        // Раздел, который не повторяет заголовок, — структура автора.
+        let (title, body) = dedup_title("Статья про меру", "## Как мы считали\n\nТекст.");
+        assert_eq!(title, "Статья про меру");
+        assert!(body.starts_with("## Как мы считали"));
+
+        // Короткое совпадение с хвостом — случайность, а не имя сайта.
+        let (title, body) = dedup_title("FAQ | Сайт", "## FAQ\n\nТекст.");
+        assert_eq!(title, "FAQ | Сайт");
+        assert!(body.starts_with("## FAQ"));
+
+        // Первым идёт абзац, а не заголовок: карточка инфобокса повторяет
+        // имя статьи законно.
+        let (title, body) = dedup_title("Дункан Высокий", "Дункан Высокий\n\nТекст.");
+        assert_eq!(title, "Дункан Высокий");
+        assert!(body.starts_with("Дункан Высокий"));
+    }
     use super::*;
 
     #[test]

@@ -1,8 +1,6 @@
-# No “yes.” Either “HELL YEAH!” or “no.” | Derek Sivers
+# No “yes.” Either “HELL YEAH!” or “no.”
 
 Derek Sivers
-
-## No “yes.” Either “HELL YEAH!” or “no.”
 
 2009-08-26
 

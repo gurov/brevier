@@ -117,6 +117,8 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     unlazy(&doc);
     deicon(&doc);
     keep_lang(&doc);
+    unglue(&doc);
+    unprint(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
@@ -249,6 +251,73 @@ fn deicon(doc: &Document) {
             .is_some_and(|parent| parent.text().trim().is_empty())
         {
             image.remove_from_parent();
+        }
+    }
+}
+
+/// Что страница сама исключила из печати. Имена из соглашений, а не
+/// из вёрстки одного сайта: `noprint` у MediaWiki и вообще в вебе,
+/// `hidden-print` и `d-print-none` у bootstrap.
+const PRINT_HIDDEN: &str = ".noprint,.no-print,.hidden-print,.d-print-none";
+
+/// Выбросить то, чего нет на печати.
+///
+/// Признак по форме и от самой страницы: она объявила, что этот кусок
+/// в печатный документ не идёт, — значит это обвязка, а не текст.
+/// Так со статьи уходит «Материал из Википедии — свободной энциклопедии»,
+/// карандашики правки и навигационные коробки.
+///
+/// Соседняя мысль у defuddle — скрытое мобильными стилями почти наверняка
+/// не текст; там признак тот же по духу, но читать чужой CSS мы не станем
+/// принципиально, а класс лежит в самой разметке.
+fn unprint(doc: &Document) {
+    for node in doc.select(PRINT_HIDDEN).nodes() {
+        node.remove_from_parent();
+    }
+}
+
+/// Признаки подписи автора — те же, по которым её ищет Readability
+/// (`[rel=author]`, `[itemprop*=author]`, класс или id со словом из списка
+/// `byline`/`author`/`dateline`). Правим ровно то, что она потом возьмёт.
+const BYLINE: &str = "[rel=\"author\"],[itemprop*=\"author\" i],[class*=\"author\" i],\
+[class*=\"byline\" i],[class*=\"dateline\" i],[class*=\"writtenby\" i],\
+[id*=\"author\" i],[id*=\"byline\" i],[id*=\"dateline\" i]";
+
+/// Развести подпись автора и дату, слипшиеся на границе элементов.
+///
+/// `<a>RationalAnswer</a><span>8 сен в 13:42</span>` браузер разводит
+/// стилями, а текстом это одна строка «RationalAnswer8 сен в 13:42»:
+/// пробела в разметке нет вовсе. CSS мы не читаем принципиально, поэтому
+/// пробел ставим сами — но только в подписи.
+///
+/// В прозе так делать нельзя: там граница элементов сплошь и рядом
+/// настоящая — `<b>по</b><i>лу</i>слово`, ссылка внутри слова, дробь
+/// из `<sup>` и `<sub>`. Подпись же тем и отличается, что склеены в ней
+/// разные сведения: имя, дата, время чтения.
+fn unglue(doc: &Document) {
+    for byline in doc.select(BYLINE).nodes() {
+        for node in byline.descendants() {
+            if !node.is_element() {
+                continue;
+            }
+            // Комментарии между элементами не разделитель: в тексте
+            // их нет. У habr между именем и датой их три подряд.
+            let mut left = node.prev_sibling();
+            while left.as_ref().is_some_and(NodeRef::is_comment) {
+                left = left.and_then(|node| node.prev_sibling());
+            }
+            let Some(left) = left.filter(NodeRef::is_element) else {
+                continue;
+            };
+
+            let ends = left.text().chars().last();
+            let starts = node.text().chars().next();
+            if let (Some(ends), Some(starts)) = (ends, starts)
+                && ends.is_alphanumeric()
+                && starts.is_alphanumeric()
+            {
+                node.before_html(" ");
+            }
         }
     }
 }
@@ -790,7 +859,9 @@ fn notes(doc: &Document) -> Notes {
     let mut numbers: HashMap<String, usize> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for link in doc.select("a[href]").nodes() {
-        let Some(href) = link.attr("href") else { continue };
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
         let Some(id) = href.strip_prefix('#') else {
             continue;
         };
@@ -942,6 +1013,39 @@ mod tests {
         format!(
             "<html><body><article><h1>Эрроу</h1><p>{img}</p><p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
         )
+    }
+
+    #[test]
+    fn a_byline_keeps_the_name_apart_from_the_date() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article>\
+             <span class=\"tm-user-info author\">\
+             <a href=\"/users/RationalAnswer/\">RationalAnswer</a><!----><!--[-->\
+             <span class=\"datetime-published\"><time>8 сен в 13:42</time></span>\
+             </span>\
+             <h1>Эрроу</h1><p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/a").unwrap();
+        assert_eq!(
+            article.byline.as_deref(),
+            Some("RationalAnswer 8 сен в 13:42")
+        );
+    }
+
+    #[test]
+    fn what_the_page_hides_from_print_is_not_text() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article>\
+             <div id=\"siteSub\" class=\"noprint\">Материал из Википедии — свободной энциклопедии</div>\
+             <p>{text}</p><p>{text} <a class=\"noprint\" href=\"/wikidata\">[вд]</a></p><p>{text}</p>\
+             </article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/a").unwrap();
+        assert!(!article.content_html.contains("Материал из Википедии"));
+        assert!(!article.content_html.contains("[вд]"));
+        assert!(article.content_html.contains("Кеннет Эрроу"));
     }
 
     #[test]

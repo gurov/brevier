@@ -1,8 +1,6 @@
-# Relax for the same result | Derek Sivers
+# Relax for the same result
 
 Derek Sivers
-
-## Relax for the same result
 
 2015-10-02
 

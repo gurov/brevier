@@ -1,6 +1,6 @@
 # Nintendo 2DS, мини-ПК HP EliteDesk 800 G4 и немецкая Библия 1848 года: что удалось откопать на испанской барахолке
 
-DRoman0v20 мар 2023 в 01:50
+DRoman0v 20 мар 2023 в 01:50
 
 ![](https://habrastorage.org/r/w1560/webt/xa/12/p3/xa12p3hpmim-o0ozh38qfrh1rxa.jpeg)
 

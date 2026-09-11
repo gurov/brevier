@@ -10,9 +10,9 @@ Rust
 
 The Rust Team
 
-January 20, 2012; 14 years ago[^1]
+January 20, 2012[^1]
 
-1.98.1[^2]  / September 3, 2026; 8 days ago
+1.98.1[^2]  / September 3, 2026
 
 - [Affine](https://en.wikipedia.org/wiki/Affine_type_system "Affine type system") - [inferred](https://en.wikipedia.org/wiki/Type_inference "Type inference") - [nominal](https://en.wikipedia.org/wiki/Nominal_type_system "Nominal type system") - [static](https://en.wikipedia.org/wiki/Static_typing "Static typing") - [strong](https://en.wikipedia.org/wiki/Strong_and_weak_typing "Strong and weak typing")
 
