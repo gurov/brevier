@@ -78,22 +78,28 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             kind: Kind::Article,
             address,
         }),
-        ContentKind::Html => {
-            let article = extract::extract(&page.body, &page.url)?;
-            let title = article.title.clone();
-            let reading = markdown::from_article(&article)?;
-            Ok(Document {
-                markdown: reading.markdown,
-                kind: reading.kind,
-                title: if title.trim().is_empty() {
-                    page.url.clone()
-                } else {
-                    title
-                },
-                address,
-            })
-        }
+        ContentKind::Html => from_html(&page.body, &page.url),
     }
+}
+
+/// Страница, которая уже на руках: HTML пришёл не из сети, а из stdin
+/// или из файла. Адрес обязателен и здесь — по нему разворачиваются
+/// относительные ссылки и решается, что это за документ.
+pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
+    let article = extract::extract(html, url)?;
+    let title = article.title.clone();
+    let reading = markdown::from_article(&article)?;
+
+    Ok(Document {
+        markdown: reading.markdown,
+        kind: reading.kind,
+        title: if title.trim().is_empty() {
+            url.to_owned()
+        } else {
+            title
+        },
+        address: Address::Web(url.to_owned()),
+    })
 }
 
 /// Файл из репозитория. Конвертации здесь нет — формат родной; вся работа

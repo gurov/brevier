@@ -24,6 +24,11 @@ Options:
       --links                print the article's outgoing links, one per line
       --docs                 for a repository: entry points into its
                              documentation, one per line
+      --save                 write the article to a file instead of stdout;
+                             `.md` is the text, `.zip` the text plus its
+                             images (needs the `save` feature)
+  -o, --output <path>        where --save puts it; without it the name comes
+                             from the article's title
   -h, --help                 this text
   -V, --version              version
 
@@ -41,6 +46,14 @@ struct Args {
     html: bool,
     links: bool,
     docs: bool,
+    /// Статья ложится на диск, а не в stdout.
+    save: bool,
+    /// Куда именно. Выбор читателя старше нашего предложения — и здесь,
+    /// и в диалоге окна. В сборке без `save` поле не читает никто, но разбор
+    /// аргументов один на обе: флаг должен внятно отвечать и там, где
+    /// сохранения нет.
+    #[cfg_attr(not(feature = "save"), allow(dead_code))]
+    output: Option<String>,
 }
 
 enum Parsed {
@@ -62,6 +75,10 @@ fn main() -> ExitCode {
 
     brevier::init_crypto();
 
+    if args.save {
+        return save_page(&args);
+    }
+
     match run(&args) {
         Ok(text) => out(&text),
         Err(e) => {
@@ -69,6 +86,76 @@ fn main() -> ExitCode {
             ExitCode::from(e.exit_code())
         }
     }
+}
+
+/// `--save`: статья ложится на диск, а не в stdout. Всю работу делает ядро
+/// (`save::write`), сюда достаётся только выбор имени.
+#[cfg(feature = "save")]
+fn save_page(args: &Args) -> ExitCode {
+    use std::path::PathBuf;
+
+    let document = match document(args) {
+        Ok(document) => document,
+        Err(e) => {
+            eprintln!("brevier: {e}");
+            return ExitCode::from(e.exit_code());
+        }
+    };
+
+    let path = match args.output.as_deref() {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let name = PathBuf::from(brevier::save::suggested_name(&document));
+            // Имя придумали мы, а на диске уже что-то лежит: затирать чужой
+            // файл молча нельзя. С `-o` такого вопроса нет — там выбрал читатель.
+            if name.exists() {
+                eprintln!(
+                    "brevier: {} is already here; pass -o <path> to choose another name",
+                    name.display()
+                );
+                return ExitCode::from(1);
+            }
+            name
+        }
+    };
+
+    match brevier::save::write(&path, &document, args.ua) {
+        Ok(saved) => {
+            if saved.missed > 0 {
+                let images = if saved.missed == 1 { "image" } else { "images" };
+                eprintln!("brevier: {} {images} did not come", saved.missed);
+            }
+            // В stdout — только путь: по нему сохранённое подхватывает
+            // следующая команда в конвейере.
+            out(&format!("{}\n", saved.path.display()))
+        }
+        Err(e) => {
+            eprintln!("brevier: {e}");
+            ExitCode::from(e.exit_code())
+        }
+    }
+}
+
+/// Сборка без `save` — в ней и zip нет. Молчать об этом нельзя: читатель
+/// просил файл, а файла не будет.
+#[cfg(not(feature = "save"))]
+fn save_page(_args: &Args) -> ExitCode {
+    eprintln!("brevier: this build cannot save; rebuild with `--features save`");
+    ExitCode::from(1)
+}
+
+/// Документ целиком — то же, что показывает окно. Тракт тот же, что у печати:
+/// страница из сети, репозиторий или уже готовый HTML из stdin.
+#[cfg(feature = "save")]
+fn document(args: &Args) -> Result<brevier::Document, Error> {
+    if args.stdin {
+        let mut html = String::new();
+        io::stdin()
+            .read_to_string(&mut html)
+            .map_err(Error::Convert)?;
+        return brevier::from_html(&html, &args.url);
+    }
+    brevier::open(&address::parse(&args.url)?, args.ua)
 }
 
 fn run(args: &Args) -> Result<String, Error> {
@@ -179,6 +266,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut html = false;
     let mut links = false;
     let mut docs = false;
+    let mut save = false;
+    let mut output: Option<String> = None;
 
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -192,6 +281,14 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             "--html" => html = true,
             "--links" => links = true,
             "--docs" => docs = true,
+            "--save" => save = true,
+            "-o" | "--output" => match args.next() {
+                Some(path) => output = Some(path),
+                None => return Parsed::Usage("-o needs a path".to_owned()),
+            },
+            _ if arg.starts_with("--output=") => {
+                output = Some(arg["--output=".len()..].to_owned());
+            }
             "--ua" => match args.next() {
                 Some(value) => match UserAgent::parse(&value) {
                     Some(parsed) => ua = parsed,
@@ -216,6 +313,20 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     if stdin && docs {
         return Parsed::Usage("--docs asks a repository, not stdin".to_owned());
     }
+    // Сохранение отдаёт статью, а эти флаги спрашивают про другое — что
+    // внутри страницы до конвертации, куда она ведёт, что в репозитории.
+    // Молча предпочесть одно другому нельзя.
+    if save && (raw || html || links || docs) {
+        return Parsed::Usage(
+            "--save writes the article; --raw, --html, --links and --docs ask other questions"
+                .to_owned(),
+        );
+    }
+    if output.is_some() && !save {
+        return Parsed::Usage(
+            "-o says where to write, but nothing is being written: add --save".to_owned(),
+        );
+    }
 
     match url {
         // Адрес обязателен и при `--stdin`: сеть он не трогает, но без него
@@ -228,6 +339,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             html,
             links,
             docs,
+            save,
+            output,
         })),
         None => Parsed::Usage("no url given".to_owned()),
     }
@@ -274,6 +387,44 @@ mod tests {
             parse(&["--stdin", "--docs", "gh:o/n"]),
             Parsed::Usage(_)
         ));
+    }
+
+    #[test]
+    fn saving_takes_a_place_to_write() {
+        let Parsed::Run(args) = parse(&["--save", "-o", "/tmp/a.zip", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert!(args.save);
+        assert_eq!(args.output.as_deref(), Some("/tmp/a.zip"));
+
+        let Parsed::Run(args) = parse(&["--save", "--output=a.md", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert_eq!(args.output.as_deref(), Some("a.md"));
+
+        // Без `-o` имя берётся из заголовка статьи — это не ошибка.
+        let Parsed::Run(args) = parse(&["--save", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert!(args.save && args.output.is_none());
+    }
+
+    #[test]
+    fn saving_answers_a_different_question_than_the_printing_flags() {
+        assert!(matches!(
+            parse(&["--save", "--html", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+        assert!(matches!(
+            parse(&["--save", "--docs", "gh:o/n"]),
+            Parsed::Usage(_)
+        ));
+        // Место для записи без самой записи — тоже недоразумение.
+        assert!(matches!(
+            parse(&["-o", "a.md", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+        assert!(matches!(parse(&["--save", "-o"]), Parsed::Usage(_)));
     }
 
     #[test]

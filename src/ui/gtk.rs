@@ -103,7 +103,44 @@ const FOUND: &str = "#f2d47e";
 const FOUND_HERE: &str = "#f6a13c";
 const FOUND_INK: &str = "#1c1a17";
 
+/// Что окно отвечает в терминале. Оно запускается строкой, значит обязано
+/// уметь объяснить себя там же: `--help` у окна — такая же часть продукта,
+/// как и у cli.
+const HELP: &str = "\
+brevier-ui — the Brevier window: reading without JavaScript, in the typography
+you chose rather than the one the site shipped.
+
+Usage: brevier-ui [options] [<url|gh:owner/repo|path.md>…]
+
+Every address opens in its own tab; without one the window starts on its intro
+page. Brevier is a single application: a second launch adds a window to the one
+already running.
+
+Options:
+  -h, --help     this text
+  -V, --version  version
+
+Keys: Ctrl+L the address bar, Ctrl+T new tab, Ctrl+W close it, Ctrl+F find on
+      page, Ctrl+S save the article, Ctrl+O hand the page to your system
+      browser, Ctrl+plus/minus/0 zoom the page.
+";
+
 fn main() -> glib::ExitCode {
+    // Про саму программу отвечаем до того, как поднято приложение: у GTK
+    // второй запуск отдаёт строку уже работающему экземпляру, и ответ вышел бы
+    // в чужой терминал — в тот, из которого запустили первое окно.
+    match answer(&std::env::args().skip(1).collect::<Vec<String>>()) {
+        Some(Ok(text)) => {
+            print!("{text}");
+            return glib::ExitCode::SUCCESS;
+        }
+        Some(Err(text)) => {
+            eprint!("{text}");
+            return glib::ExitCode::FAILURE;
+        }
+        None => {}
+    }
+
     brevier::init_crypto();
     use_bundled_fonts();
 
@@ -120,11 +157,35 @@ fn main() -> glib::ExitCode {
             .skip(1)
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
+
         build(app, start);
         glib::ExitCode::SUCCESS
     });
 
     app.run()
+}
+
+/// Ответ терминалу вместо окна — или `None`, если в строке одни адреса.
+///
+/// Читается до GTK, поэтому отвечает всегда тот процесс, которого спросили.
+///
+/// Всё, начинающееся с дефиса, считается ключом: адреса с него не начинаются,
+/// и открывать вкладку на опечатке в ключе — худший из ответов, потому что
+/// выглядит он как сломанная страница.
+fn answer(args: &[String]) -> Option<Result<String, String>> {
+    for arg in args {
+        match arg.as_str() {
+            "-h" | "--help" => return Some(Ok(HELP.to_owned())),
+            "-V" | "--version" => {
+                return Some(Ok(format!("brevier-ui {}\n", env!("CARGO_PKG_VERSION"))));
+            }
+            _ if arg.starts_with('-') && arg != "-" => {
+                return Some(Err(format!("brevier-ui: unknown option `{arg}`\n\n{HELP}")));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Виджеты окна. Живут отдельно от данных: GTK-виджеты сами по себе
@@ -723,10 +784,7 @@ fn build_settings(ui: &Ui) {
     page.set_margin_start(18);
     page.set_margin_end(18);
 
-    let title = gtk::Label::builder()
-        .label("Reading")
-        .xalign(0.0)
-        .build();
+    let title = gtk::Label::builder().label("Reading").xalign(0.0).build();
     title.add_css_class("shelf-title");
     page.append(&title);
 
@@ -3542,4 +3600,25 @@ fn plain_text<'n>(node: &'n comrak::nodes::AstNode<'n>) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_window_answers_about_itself_in_the_terminal() {
+        assert!(matches!(answer(&args(&["--help"])), Some(Ok(_))));
+        assert!(matches!(answer(&args(&["-V"])), Some(Ok(_))));
+        // Адреса — не вопрос к программе, на них открывают вкладки.
+        assert!(answer(&args(&["https://e.com/a", "gh:o/n"])).is_none());
+        assert!(answer(&args(&[])).is_none());
+        // А опечатка в ключе — не адрес: вкладка с «not a URL» врала бы
+        // читателю про причину.
+        assert!(matches!(answer(&args(&["--dark"])), Some(Err(_))));
+    }
 }

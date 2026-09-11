@@ -27,8 +27,9 @@ ui = ["dep:gtk", "images", "save"]
 # Декодеры картинок. Отдельной фичей, потому что корпус M0 гоняется
 # бинарником `brevier` и лишние крейты ему ни к чему.
 images = ["dep:image", "dep:resvg"]
-# Сохранение статьи на диск: markdown, а с картинками — zip.
-save = ["dep:zip"]
+# Сохранение статьи на диск: markdown, а с картинками — zip. Картинки тянет
+# за собой: в архив они ложатся байтами, а искать их адреса умеет `media`.
+save = ["dep:zip", "images"]
 
 [dependencies]
 comrak = { version = "0.55", default-features = false }

@@ -75,12 +75,23 @@ brevier --raw <url>                     # no extraction, the whole page
 brevier --html <url>                    # the extracted HTML, before conversion
 brevier --stdin <url> < page.html       # HTML you already have; the url is
                                         # where it came from, for its links
+brevier --save <url>                    # write it to a file instead of stdout
+brevier --save -o notes.zip <url>       # …under a name you chose
 brevier <url> | less
 
 brevier-ui <url> [<url>…]               # read in a window, one tab per address
 ```
 
 A pasted GitHub or GitLab file URL is understood too, and so is a path to a local `.md`.
+
+`--save` needs the `save` feature (the `ui` build has it): `.md` is the text alone,
+`.zip` is the text plus an `images/` folder with the links rewritten into the archive.
+Without `-o` the name comes from the article's title, and an existing file of that name
+stops the run rather than being overwritten — with `-o` your choice is older than ours.
+
+`brevier-ui` takes as many addresses as you like, a tab each, and answers `--help` and
+`--version` in the terminal. It is a single application: launching it again adds a window
+to the one already running.
 
 Below is `gh:gurov/brevier` — this very README, read out of the repository in the same
 type as any article, with its sections on the shelf:
