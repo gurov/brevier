@@ -15,11 +15,15 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
-/// Тег, у строк которого рисуется линейка.
-const QUOTE: &str = "quote";
-/// Толщина линейки и её место в левом поле цитаты.
+/// Теги, у строк которых рисуется линейка: по одному на уровень цитаты.
+/// Вложенная цитата получает свою, правее, — иначе ответ на ответ в треде
+/// обсуждения не отличить от новой реплики.
+const QUOTES: [&str; 3] = ["quote1", "quote2", "quote3"];
+/// Толщина линейки и её место в левом поле цитаты. Шаг уровня тот же,
+/// что у отступа самого тега.
 const RULE_WIDTH: f32 = 3.0;
 const RULE_X: i32 = 8;
+const RULE_STEP: i32 = 26;
 /// Насколько линейка короче строки сверху и снизу: вплотную к соседям
 /// она выглядит сплошной колонкой, а не отметкой цитаты.
 const RULE_INSET: f32 = 2.0;
@@ -91,9 +95,11 @@ impl Article {
 /// тысячи строк, а на экране их сорок.
 fn draw_quote_rules(view: &gtk::TextView, snapshot: &gtk::Snapshot, color: gtk::gdk::RGBA) {
     let buffer = view.buffer();
-    let Some(quote) = buffer.tag_table().lookup(QUOTE) else {
+    let table = buffer.tag_table();
+    let quotes: Vec<Option<gtk::TextTag>> = QUOTES.iter().map(|name| table.lookup(name)).collect();
+    if quotes.iter().all(Option::is_none) {
         return;
-    };
+    }
 
     let seen = view.visible_rect();
     let bottom = seen.y() + seen.height();
@@ -104,13 +110,17 @@ fn draw_quote_rules(view: &gtk::TextView, snapshot: &gtk::Snapshot, color: gtk::
         if top > bottom {
             break;
         }
-        if line.has_tag(&quote) {
+        for (level, quote) in quotes.iter().enumerate() {
+            let Some(quote) = quote else { continue };
+            if !line.has_tag(quote) {
+                continue;
+            }
             // Слой рисуется в координатах буфера: GTK сдвигает снимок
             // на прокрутку сам, и переводить ничего не надо.
             snapshot.append_color(
                 &color,
                 &gtk::graphene::Rect::new(
-                    RULE_X as f32,
+                    (RULE_X + RULE_STEP * level as i32) as f32,
                     top as f32 + RULE_INSET,
                     RULE_WIDTH,
                     (height as f32 - RULE_INSET * 2.0).max(1.0),

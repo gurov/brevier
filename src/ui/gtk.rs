@@ -54,6 +54,10 @@ const JUMP: &str = "brevier-jump";
 const SETTLE_FRAMES: u8 = 45;
 /// Глубже этого вложенные списки не отступают: место кончается.
 const LIST_LEVELS: i32 = 3;
+/// Столько уровней цитаты различимы линейкой. Дальше отступ съедает
+/// саму реплику — ровно поэтому и конвертер не отступает глубже
+/// (`markdown::MAX_NEST`).
+const QUOTE_LEVELS: i32 = 3;
 /// Куда по высоте окна ставить заголовок, к которому прыгнули: вплотную
 /// к кромке он выглядит обрезанным.
 const ANCHOR_ALIGN: f64 = 0.1;
@@ -1450,11 +1454,17 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool) {
         ],
     );
     // Поле слева пошире обычного: в нём стоит линейка, которую рисует
-    // виджет статьи.
-    buffer.create_tag(
-        Some("quote"),
-        &[("style", &pango::Style::Italic), ("left-margin", &26)],
-    );
+    // виджет статьи. Уровень вложенности — свой отступ и своя линейка:
+    // на треде обсуждения ответ на ответ иначе неотличим от новой реплики.
+    for level in 1..=QUOTE_LEVELS {
+        buffer.create_tag(
+            Some(&format!("quote{level}")),
+            &[
+                ("style", &pango::Style::Italic),
+                ("left-margin", &(26 * level)),
+            ],
+        );
+    }
 
     // Список: маркер выступает влево, перенос строки встаёт под текст,
     // а не под маркер. Уровни вложенности — свой отступ каждому.
@@ -1531,6 +1541,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
         shots: &mut shots,
         cells: &mut cells,
         depth: 0,
+        quotes: 0,
     };
 
     for node in root.children() {
@@ -1879,6 +1890,8 @@ struct Writer<'a> {
     cells: &'a mut Vec<gtk::Label>,
     /// Глубина вложенности списка: от неё отступ пункта.
     depth: i32,
+    /// Глубина вложенности цитаты: от неё отступ и место линейки.
+    quotes: i32,
 }
 
 impl Writer<'_> {
@@ -2079,11 +2092,14 @@ impl Writer<'_> {
                 self.put("\n", &["pad"]);
             }
             NodeValue::BlockQuote => {
+                self.quotes += 1;
+                let level = format!("quote{}", self.quotes.min(QUOTE_LEVELS));
                 let mut tags = outer.to_vec();
-                tags.push("quote");
+                tags.push(&level);
                 for child in node.children() {
                     self.block(child, &tags);
                 }
+                self.quotes -= 1;
             }
             NodeValue::List(list) => {
                 let ordered = matches!(list.list_type, ListType::Ordered);

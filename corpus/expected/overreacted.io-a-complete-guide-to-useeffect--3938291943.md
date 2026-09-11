@@ -71,7 +71,7 @@ Here’s a counter. Look at the highlighted line closely:
 ```
 function Counter() {
   const [count, setCount] = useState(0);
- 
+
   return (
     <div>
       <p>You clicked {count} times</p>
@@ -104,7 +104,7 @@ function Counter() {
   <p>You clicked {count} times</p>
   // ...
 }
- 
+
 // After a click, our function is called again
 function Counter() {
   const count = 1; // Returned by useState()
@@ -112,7 +112,7 @@ function Counter() {
   <p>You clicked {count} times</p>
   // ...
 }
- 
+
 // After another click, our function is called again
 function Counter() {
   const count = 2; // Returned by useState()
@@ -145,13 +145,13 @@ Look at this example. It shows an alert with the `count` after three seconds:
 ```
 function Counter() {
   const [count, setCount] = useState(0);
- 
+
   function handleAlertClick() {
     setTimeout(() => {
       alert('You clicked on: ' + count);
     }, 3000);
   }
- 
+
   return (
     <div>
       <p>You clicked {count} times</p>
@@ -205,13 +205,13 @@ function sayHi(person) {
     alert('Hello, ' + name);
   }, 3000);
 }
- 
+
 let someone = {name: 'Dan'};
 sayHi(someone);
- 
+
 someone = {name: 'Yuzhi'};
 sayHi(someone);
- 
+
 someone = {name: 'Dominic'};
 sayHi(someone);
 ```
@@ -232,7 +232,7 @@ function Counter() {
   }
   // ...
 }
- 
+
 // After a click, our function is called again
 function Counter() {
   const count = 1; // Returned by useState()
@@ -244,7 +244,7 @@ function Counter() {
   }
   // ...
 }
- 
+
 // After another click, our function is called again
 function Counter() {
   const count = 2; // Returned by useState()
@@ -273,7 +273,7 @@ function Counter() {
   <button onClick={handleAlertClick} /> // The one with 0 inside
   // ...
 }
- 
+
 // After a click, our function is called again
 function Counter() {
   // ...
@@ -286,7 +286,7 @@ function Counter() {
   <button onClick={handleAlertClick} /> // The one with 1 inside
   // ...
 }
- 
+
 // After another click, our function is called again
 function Counter() {
   // ...
@@ -316,11 +316,11 @@ Let’s go back to an example from [the docs](https://reactjs.org/docs/hooks-eff
 ```
 function Counter() {
   const [count, setCount] = useState(0);
- 
+
   useEffect(() => {
     document.title = `You clicked ${count} times`;
   });
- 
+
   return (
     <div>
       <p>You clicked {count} times</p>
@@ -356,7 +356,7 @@ function Counter() {
   );
   // ...
 }
- 
+
 // After a click, our function is called again
 function Counter() {
   // ...
@@ -368,7 +368,7 @@ function Counter() {
   );
   // ...
 }
- 
+
 // After another click, our function is called again
 function Counter() {
   // ...
@@ -428,13 +428,13 @@ Let’s try a thought experiment. Consider this code:
 ```
 function Counter() {
   const [count, setCount] = useState(0);
- 
+
   useEffect(() => {
     setTimeout(() => {
       console.log(`You clicked ${count} times`);
     }, 3000);
   });
- 
+
   return (
     <div>
       <p>You clicked {count} times</p>
@@ -519,7 +519,7 @@ Here’s a [version of our counter example](https://codesandbox.io/s/rm7z22qnlp)
 function Example() {
   const [count, setCount] = useState(0);
   const latestCount = useRef(count);
- 
+
   useEffect(() => {
     // Set the mutable latest value
     latestCount.current = count;
@@ -595,7 +595,7 @@ function Example() {
   );
   // ...
 }
- 
+
 // Next render, props are {id: 20}
 function Example() {
   // ...
@@ -703,11 +703,11 @@ For example, maybe our component re-renders because of a state change:
 ```
 function Greeting({ name }) {
   const [counter, setCounter] = useState(0);
- 
+
   useEffect(() => {
     document.title = 'Hello, ' + name;
   });
- 
+
   return (
     <h1 className="Greeting">
       Hello, {name}
@@ -746,10 +746,10 @@ If each of these values is the same between the current and the previous time th
 ```
 const oldEffect = () => { document.title = 'Hello, Dan'; };
 const oldDeps = ['Dan'];
- 
+
 const newEffect = () => { document.title = 'Hello, Dan'; };
 const newDeps = ['Dan'];
- 
+
 // React can't peek inside of functions, but it can compare deps.
 // Since all deps are the same, it doesn’t need to run the new effect.
 ```
@@ -765,11 +765,11 @@ function SearchResults() {
   async function fetchData() {
     // ...
   }
- 
+
   useEffect(() => {
     fetchData();
   }, []); // Is this okay? Not always -- and there's a better way to write it.
- 
+
   // ...
 }
 ```
@@ -815,14 +815,14 @@ For example, let’s say we’re writing a counter that increments every second.
 ```
 function Counter() {
   const [count, setCount] = useState(0);
- 
+
   useEffect(() => {
     const id = setInterval(() => {
       setCount(count + 1);
     }, 1000);
     return () => clearInterval(id);
   }, []);
- 
+
   return <h1>{count}</h1>;
 }
 ```
@@ -851,7 +851,7 @@ function Counter() {
   );
   // ...
 }
- 
+
 // Every next render, state is 1
 function Counter() {
   // ...
@@ -876,7 +876,7 @@ Our effect uses `count` — a value inside the component (but outside the effect
 
 ```
   const count = // ...
- 
+
   useEffect(() => {
     const id = setInterval(() => {
       setCount(count + 1);
@@ -926,7 +926,7 @@ function Counter() {
   );
   // ...
 }
- 
+
 // Second render, state is 1
 function Counter() {
   // ...
@@ -1014,14 +1014,14 @@ Let’s modify the previous example to have two state variables: `count` and `st
 function Counter() {
   const [count, setCount] = useState(0);
   const [step, setStep] = useState(1);
- 
+
   useEffect(() => {
     const id = setInterval(() => {
       setCount(c => c + step);
     }, 1000);
     return () => clearInterval(id);
   }, [step]);
- 
+
   return (
     <>
       <h1>{count}</h1>
@@ -1048,7 +1048,7 @@ Let’s trade the `step` dependency for a `dispatch` dependency in our effect:
 ```
 const [state, dispatch] = useReducer(reducer, initialState);
 const { count, step } = state;
- 
+
 useEffect(() => {
   const id = setInterval(() => {
     dispatch({ type: 'tick' }); // Instead of setCount(c => c + step);
@@ -1072,7 +1072,7 @@ const initialState = {
   count: 0,
   step: 1,
 };
- 
+
 function reducer(state, action) {
   const { count, step } = state;
   if (action.type === 'tick') {
@@ -1096,7 +1096,7 @@ In fact, we can! We can put *the reducer itself* inside our component to read pr
 ```
 function Counter({ step }) {
   const [count, dispatch] = useReducer(reducer, 0);
- 
+
   function reducer(state, action) {
     if (action.type === 'tick') {
       return state + step;
@@ -1104,14 +1104,14 @@ function Counter({ step }) {
       throw new Error();
     }
   }
- 
+
   useEffect(() => {
     const id = setInterval(() => {
       dispatch({ type: 'tick' });
     }, 1000);
     return () => clearInterval(id);
   }, [dispatch]);
- 
+
   return <h1>{count}</h1>;
 }
 ```
@@ -1131,18 +1131,18 @@ A common mistake is to think functions shouldn’t be dependencies. For example,
 ```
 function SearchResults() {
   const [data, setData] = useState({ hits: [] });
- 
+
   async function fetchData() {
     const result = await axios(
       'https://hn.algolia.com/api/v1/search?query=react',
     );
     setData(result.data);
   }
- 
+
   useEffect(() => {
     fetchData();
   }, []); // Is this okay?
- 
+
   // ...
 ```
 
@@ -1158,17 +1158,17 @@ function SearchResults() {
   function getFetchUrl() {
     return 'https://hn.algolia.com/api/v1/search?query=react';
   }
- 
+
   // Imagine this function is also long
   async function fetchData() {
     const result = await axios(getFetchUrl());
     setData(result.data);
   }
- 
+
   useEffect(() => {
     fetchData();
   }, []);
- 
+
   // ...
 }
 ```
@@ -1178,22 +1178,22 @@ Now let’s say we later use some state or prop in one of these functions:
 ```
 function SearchResults() {
   const [query, setQuery] = useState('react');
- 
+
   // Imagine this function is also long
   function getFetchUrl() {
     return 'https://hn.algolia.com/api/v1/search?query=' + query;
   }
- 
+
   // Imagine this function is also long
   async function fetchData() {
     const result = await axios(getFetchUrl());
     setData(result.data);
   }
- 
+
   useEffect(() => {
     fetchData();
   }, []);
- 
+
   // ...
 }
 ```
@@ -1210,12 +1210,12 @@ function SearchResults() {
     function getFetchUrl() {
       return 'https://hn.algolia.com/api/v1/search?query=react';
     }
- 
+
     async function fetchData() {
       const result = await axios(getFetchUrl());
       setData(result.data);
     }
- 
+
     fetchData();
   }, []); // ✅ Deps are OK
   // ...
@@ -1231,20 +1231,20 @@ If we later edit `getFetchUrl` to use the `query` state, we’re much more likel
 ```
 function SearchResults() {
   const [query, setQuery] = useState('react');
- 
+
   useEffect(() => {
     function getFetchUrl() {
       return 'https://hn.algolia.com/api/v1/search?query=' + query;
     }
- 
+
     async function fetchData() {
       const result = await axios(getFetchUrl());
       setData(result.data);
     }
- 
+
     fetchData();
   }, [query]); // ✅ Deps are OK
- 
+
   // ...
 }
 ```
@@ -1272,17 +1272,17 @@ function SearchResults() {
   function getFetchUrl(query) {
     return 'https://hn.algolia.com/api/v1/search?query=' + query;
   }
- 
+
   useEffect(() => {
     const url = getFetchUrl('react');
     // ... Fetch data and do something ...
   }, []); // 🔴 Missing dep: getFetchUrl
- 
+
   useEffect(() => {
     const url = getFetchUrl('redux');
     // ... Fetch data and do something ...
   }, []); // 🔴 Missing dep: getFetchUrl
- 
+
   // ...
 }
 ```
@@ -1297,17 +1297,17 @@ function SearchResults() {
   function getFetchUrl(query) {
     return 'https://hn.algolia.com/api/v1/search?query=' + query;
   }
- 
+
   useEffect(() => {
     const url = getFetchUrl('react');
     // ... Fetch data and do something ...
   }, [getFetchUrl]); // 🚧 Deps are correct but they change too often
- 
+
   useEffect(() => {
     const url = getFetchUrl('redux');
     // ... Fetch data and do something ...
   }, [getFetchUrl]); // 🚧 Deps are correct but they change too often
- 
+
   // ...
 }
 ```
@@ -1323,18 +1323,18 @@ Instead, there are two other solutions that are simpler.
 function getFetchUrl(query) {
   return 'https://hn.algolia.com/api/v1/search?query=' + query;
 }
- 
+
 function SearchResults() {
   useEffect(() => {
     const url = getFetchUrl('react');
     // ... Fetch data and do something ...
   }, []); // ✅ Deps are OK
- 
+
   useEffect(() => {
     const url = getFetchUrl('redux');
     // ... Fetch data and do something ...
   }, []); // ✅ Deps are OK
- 
+
   // ...
 }
 ```
@@ -1349,17 +1349,17 @@ function SearchResults() {
   const getFetchUrl = useCallback((query) => {
     return 'https://hn.algolia.com/api/v1/search?query=' + query;
   }, []);  // ✅ Callback deps are OK
- 
+
   useEffect(() => {
     const url = getFetchUrl('react');
     // ... Fetch data and do something ...
   }, [getFetchUrl]); // ✅ Effect deps are OK
- 
+
   useEffect(() => {
     const url = getFetchUrl('redux');
     // ... Fetch data and do something ...
   }, [getFetchUrl]); // ✅ Effect deps are OK
- 
+
   // ...
 }
 ```
@@ -1385,17 +1385,17 @@ If I fix my `useCallback` deps to include `query`, any effect with `getFetchUrl`
 ```
 function SearchResults() {
   const [query, setQuery] = useState('react');
- 
+
   // ✅ Preserves identity until query changes
   const getFetchUrl = useCallback(() => {
     return 'https://hn.algolia.com/api/v1/search?query=' + query;
   }, [query]);  // ✅ Callback deps are OK
- 
+
   useEffect(() => {
     const url = getFetchUrl();
     // ... Fetch data and do something ...
   }, [getFetchUrl]); // ✅ Effect deps are OK
- 
+
   // ...
 }
 ```
@@ -1407,23 +1407,23 @@ This is just a consequence of embracing the data flow and the synchronization mi
 ```
 function Parent() {
   const [query, setQuery] = useState('react');
- 
+
   // ✅ Preserves identity until query changes
   const fetchData = useCallback(() => {
     const url = 'https://hn.algolia.com/api/v1/search?query=' + query;
     // ... Fetch data and return it ...
   }, [query]);  // ✅ Callback deps are OK
- 
+
   return <Child fetchData={fetchData} />
 }
- 
+
 function Child({ fetchData }) {
   let [data, setData] = useState(null);
- 
+
   useEffect(() => {
     fetchData().then(setData);
   }, [fetchData]); // ✅ Effect deps are OK
- 
+
   // ...
 }
 ```
@@ -1447,7 +1447,7 @@ class Parent extends Component {
     return <Child fetchData={this.fetchData} />;
   }
 }
- 
+
 class Child extends Component {
   state = {
     data: null
@@ -1516,7 +1516,7 @@ class Parent extends Component {
     return <Child fetchData={this.fetchData} query={this.state.query} />;
   }
 }
- 
+
 class Child extends Component {
   state = {
     data: null
@@ -1613,24 +1613,24 @@ Alternatively, the easiest stopgap approach is to track it with a boolean:
 ```
 function Article({ id }) {
   const [article, setArticle] = useState(null);
- 
+
   useEffect(() => {
     let didCancel = false;
- 
+
     async function fetchData() {
       const article = await API.fetchArticle(id);
       if (!didCancel) {
         setArticle(article);
       }
     }
- 
+
     fetchData();
- 
+
     return () => {
       didCancel = true;
     };
   }, [id]);
- 
+
   // ...
 }
 ```

@@ -31,6 +31,24 @@ const SKIP: &[&str] = &[
     "script", "style", "noscript", "iframe", "svg", "form", "button", "object", "embed", "canvas",
 ];
 
+/// Выше этого картинка уже не распорка, а изображение. Два пикселя,
+/// а не один: рамки и линейки верстают и в два.
+const SPACER_PX: u32 = 2;
+
+/// Уже этого распорка отступом не является: пиксель-счётчик объявляет
+/// себя единицей на единицу, и принимать его за уровень вложенности
+/// значит загнать в цитату всю страницу.
+const MIN_INDENT_PX: u32 = 8;
+
+/// Глубже отступ ничего не добавляет: на HN бывает и десятый уровень,
+/// а в колонке шириной в 65 знаков он съел бы саму реплику.
+const MAX_NEST: usize = 3;
+
+/// Метка отступа между конвертацией и `tidy`. Управляющий знак, которого
+/// в тексте не бывает; в выводе её быть не может — `tidy` снимает все
+/// до единой, нашлась вложенность или нет.
+const INDENT_MARK: char = '\u{1}';
+
 /// Статья: заголовок, автор, текст.
 pub fn from_article(article: &Article) -> Result<String, Error> {
     let body = to_markdown(&article.content_html)?;
@@ -99,12 +117,95 @@ fn tidy(md: &str) -> String {
     }
 
     let out = unwrap_single_column_tables(&out);
+    let out = nest_indents(&out);
     let trimmed = out.trim_end().to_owned();
     if trimmed.is_empty() {
         trimmed
     } else {
         trimmed + "\n"
     }
+}
+
+/// Отступ, свёрстанный распоркой, — это вложенность.
+///
+/// Дерево ответов на форумах старой школы записано не разметкой, а шириной
+/// пустой картинки в начале строки: hacker news ставит `width="40"` на
+/// уровень. Конвертер про отступ ничего не знает и сплющивает тред в один
+/// поток, где ответ на ответ неотличим от новой реплики.
+///
+/// Шаг отступа не выдумываем и не берём из сайта: он считается по самому
+/// документу как наибольший общий делитель объявленных ширин. Тогда
+/// правило не знает ни одной константы, привязанной к вёрстке, и уровень
+/// не съедет, если какой-то из них в треде не встретилось.
+///
+/// Лестницу требуем доказать: меньше трёх меток или меньше двух разных
+/// ширин — это не дерево, а разделительная полоска из того же пикселя,
+/// и тогда метки просто снимаются.
+fn nest_indents(md: &str) -> String {
+    let widths: Vec<u32> = md.lines().filter_map(marker_width).collect();
+    let mut ladder: Vec<u32> = widths.iter().copied().filter(|w| *w > 0).collect();
+    ladder.sort_unstable();
+    ladder.dedup();
+
+    let step = if widths.len() >= 3 && ladder.len() >= 2 {
+        ladder.iter().copied().reduce(gcd).unwrap_or(0)
+    } else {
+        0
+    };
+
+    let mut out: Vec<String> = Vec::with_capacity(md.lines().count());
+    let mut depth = 0;
+
+    for line in md.lines() {
+        let Some(width) = marker_width(line) else {
+            let mark = "> ".repeat(depth);
+            if line.trim().is_empty() {
+                // Пустой строкой реплика не начинается: цитата открылась бы
+                // пустым знаком, а под ним — сам текст.
+                if out
+                    .last()
+                    .is_none_or(|last| last.trim_matches(['>', ' ']).is_empty())
+                {
+                    continue;
+                }
+                out.push(mark.trim_end().to_owned());
+            } else {
+                out.push(mark + line);
+            }
+            continue;
+        };
+
+        // Между репликами — пустая строка без знака цитаты: со знаком
+        // соседние ответы одного уровня склеились бы в одну цитату.
+        while out
+            .last()
+            .is_some_and(|last| last.trim_matches(['>', ' ']).is_empty())
+        {
+            out.pop();
+        }
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        depth = if step == 0 {
+            0
+        } else {
+            (width as usize / step as usize).min(MAX_NEST)
+        };
+    }
+
+    let mut joined = out.join("\n");
+    joined.push('\n');
+    joined
+}
+
+/// Ширина из метки отступа. Метка занимает строку целиком — её так
+/// и ставил обработчик картинки.
+fn marker_width(line: &str) -> Option<u32> {
+    line.trim().strip_prefix(INDENT_MARK)?.parse().ok()
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 /// Таблица в один столбец — не данные, а рамка вёрстки: так сделан инфобокс
@@ -715,6 +816,7 @@ fn to_markdown(html: &str) -> Result<String, Error> {
         .add_handler(vec!["code"], code_handler)
         .add_handler(vec!["span"], span_handler)
         .add_handler(vec!["a"], anchor_handler)
+        .add_handler(vec!["img"], image_handler)
         .options(HtmdOptions {
             heading_style: HeadingStyle::Atx,
             bullet_list_marker: BulletListMarker::Dash,
@@ -783,6 +885,44 @@ fn anchor_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerRe
         return None;
     }
     handlers.fallback(element)
+}
+
+/// Распорка — не картинка.
+///
+/// Старая вёрстка отступает текст пустой картинкой: `<img src="s.gif"
+/// height="1" width="120">`. Иллюстрацией такое не бывает нигде — один
+/// пиксель высоты это либо отступ, либо счётчик посещений, — а читателю
+/// достаётся строкой `![](…)`, в окне ещё и рамкой на якоре: на треде
+/// hacker news таких сто одна.
+///
+/// Ширину, прежде чем выбросить, записываем меткой: в ней записана
+/// глубина ответа, и разбирает её `nest_indents`. Ширину меньше
+/// `MIN_INDENT_PX` отступом не считаем и пишем ноль — им объявляет себя
+/// пиксель-счётчик, а не уровень.
+fn image_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
+    let Some(height) = px(&element, "height") else {
+        return handlers.fallback(element);
+    };
+    if height > SPACER_PX {
+        return handlers.fallback(element);
+    }
+
+    let width = px(&element, "width").unwrap_or(0);
+    let width = if width >= MIN_INDENT_PX { width } else { 0 };
+    Some(format!("\n\n{INDENT_MARK}{width}\n\n").into())
+}
+
+/// Размер, объявленный атрибутом. Пиксели в атрибуте пишут числом;
+/// проценты и `px` внутри `style` — не наше дело, там не распорки.
+fn px(element: &Element, name: &str) -> Option<u32> {
+    element
+        .attrs
+        .iter()
+        .find(|attr| &attr.name.local == name)?
+        .value
+        .trim()
+        .parse()
+        .ok()
 }
 
 fn longest_backtick_run(content: &str) -> usize {
@@ -872,6 +1012,88 @@ mod tests {
             from_html("<pre><code class=\"language-rust\">let x = 1;\nlet y = 2;</code></pre>")
                 .unwrap();
         assert_eq!(md, "```rust\nlet x = 1;\nlet y = 2;\n```\n");
+    }
+
+    /// Строка обсуждения, свёрстанная как на hacker news: распорка нужной
+    /// ширины, ячейка голосования и сам текст.
+    fn comment(width: u32, text: &str) -> String {
+        format!(
+            "<tr><td><table><tbody><tr>\
+             <td><img src=\"s.gif\" height=\"1\" width=\"{width}\"></td>\
+             <td><center><a href=\"/vote\"></a></center></td>\
+             <td><div><p>{text}</p></div></td>\
+             </tr></tbody></table></td></tr>"
+        )
+    }
+
+    fn thread(rows: &[(u32, &str)]) -> String {
+        let body: String = rows.iter().map(|(w, t)| comment(*w, t)).collect();
+        from_html(&format!("<table><tbody>{body}</tbody></table>")).unwrap()
+    }
+
+    #[test]
+    fn a_spacer_is_not_a_picture() {
+        // Пустая картинка в пиксель высотой — отступ или счётчик, но
+        // не иллюстрация. На треде hacker news таких сто одна.
+        let md = from_html("<p><img src=\"s.gif\" height=\"1\" width=\"0\">текст</p>").unwrap();
+        assert!(!md.contains("!["), "{md}");
+        assert!(md.contains("текст"), "{md}");
+    }
+
+    #[test]
+    fn a_picture_with_a_size_survives() {
+        let md = from_html("<p><img src=\"a.png\" width=\"600\" height=\"400\"></p>").unwrap();
+        assert!(md.contains("![](a.png)"), "{md}");
+    }
+
+    #[test]
+    fn a_ladder_of_spacers_becomes_nesting() {
+        let md = thread(&[
+            (0, "Корень треда."),
+            (40, "Ответ."),
+            (80, "Ответ на ответ."),
+            (0, "Новая ветка."),
+        ]);
+        assert_eq!(
+            md,
+            "Корень треда.\n\n> Ответ.\n\n> > Ответ на ответ.\n\nНовая ветка.\n"
+        );
+    }
+
+    #[test]
+    fn the_step_comes_from_the_document() {
+        // Уровня в сорок пикселей в треде не встретилось — шаг всё равно
+        // сорок: он наибольший общий делитель, а не первая попавшаяся ширина.
+        let md = thread(&[(0, "Корень."), (80, "Второй уровень."), (120, "Третий.")]);
+        assert!(md.contains("\n> > Второй уровень."), "{md}");
+        assert!(md.contains("\n> > > Третий."), "{md}");
+    }
+
+    #[test]
+    fn deeper_than_three_levels_does_not_indent_further() {
+        // В колонке шириной в 65 знаков десятый уровень съел бы реплику.
+        let md = thread(&[(0, "Корень."), (40, "Раз."), (360, "Девятый уровень.")]);
+        assert!(md.contains("\n> > > Девятый уровень."), "{md}");
+        assert!(!md.contains("> > > > "), "{md}");
+    }
+
+    #[test]
+    fn a_lone_spacer_does_not_quote_the_page() {
+        // Полоска-разделитель из того же пикселя — не лестница отступов,
+        // и загонять за ней полстраницы в цитату нельзя.
+        let md = from_html(
+            "<p>До полоски.</p><p><img src=\"line.gif\" height=\"1\" width=\"500\"></p><p>После.</p>",
+        )
+        .unwrap();
+        assert_eq!(md, "До полоски.\n\nПосле.\n");
+    }
+
+    #[test]
+    fn a_counting_pixel_is_not_an_indent() {
+        // Счётчик объявляет себя единицей на единицу. Уровнем вложенности
+        // такая ширина не бывает — иначе в цитату уехала бы вся страница.
+        let md = thread(&[(1, "Первый абзац."), (1, "Второй."), (1, "Третий.")]);
+        assert_eq!(md, "Первый абзац.\n\nВторой.\n\nТретий.\n");
     }
 
     #[test]
