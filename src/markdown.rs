@@ -68,6 +68,17 @@ pub struct Reading {
 }
 
 pub fn from_article(article: &Article) -> Result<Reading, Error> {
+    // Извлечение принесло одну карточку из ленты — показываем ленту целиком.
+    // Решение принято там, где есть исходное дерево (`extract::listing`):
+    // здесь остаётся перевести её в markdown. Миниатюры подставлять не надо,
+    // картинки в ней свои.
+    if let Some(html) = &article.listing_html {
+        return Ok(Reading {
+            markdown: strip_chrome(&heading(article.title.trim(), &tidy(&to_markdown(html)?))),
+            kind: Kind::Listing,
+        });
+    }
+
     let body = to_markdown(&article.content_html)?;
 
     let mut doc = String::with_capacity(body.len() + 128);
@@ -101,6 +112,14 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
     };
 
     Ok(Reading { markdown, kind })
+}
+
+/// Поставить документу заголовок страницы, если своего у него нет.
+fn heading(title: &str, body: &str) -> String {
+    if title.is_empty() || body.trim_start().starts_with("# ") {
+        return body.to_owned();
+    }
+    format!("# {title}\n\n{}", body.trim_start())
 }
 
 /// Вернуть ленте миниатюры записей.
@@ -171,6 +190,10 @@ fn tidy(md: &str) -> String {
             continue;
         }
 
+        if is_empty_item(line) {
+            continue;
+        }
+
         let line = line.trim_end();
         if line.is_empty() {
             blanks += 1;
@@ -193,6 +216,21 @@ fn tidy(md: &str) -> String {
     } else {
         trimmed + "\n"
     }
+}
+
+/// Пункт списка без содержания — маркер и больше ничего.
+///
+/// Так приезжает виджет, который на живой странице дорисовывает JS:
+/// разметка списка в html есть, а пунктов в ней нет. На ленте habr это
+/// пять пустых строк под заголовком «Новости». Горизонтальную линейку
+/// (`---`) не трогаем: маркер там не один.
+fn is_empty_item(line: &str) -> bool {
+    let text = line.trim();
+    if matches!(text, "-" | "*" | "+") {
+        return true;
+    }
+    text.strip_suffix('.')
+        .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Отступ, свёрстанный распоркой, — это вложенность.
@@ -1281,12 +1319,25 @@ mod tests {
                 <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
                 .to_owned(),
             thumbs: HashMap::new(),
+            listing_html: None,
         };
 
         let reading = from_article(&article).unwrap();
         assert_eq!(reading.kind, Kind::Listing);
         assert_eq!(links(&reading.markdown).len(), 3);
         assert!(reading.markdown.contains("Третья"));
+    }
+
+    #[test]
+    fn an_empty_list_item_is_dropped() {
+        let md = "# Статья\n\n## Новости\n\n-\n-\n-\n\nТекст.\n";
+        assert_eq!(tidy(md), "# Статья\n\n## Новости\n\nТекст.\n");
+    }
+
+    #[test]
+    fn a_rule_is_not_an_empty_item() {
+        let md = "# Статья\n\nТекст.\n\n---\n\nЕщё текст.\n";
+        assert_eq!(tidy(md), md);
     }
 
     /// Карточку ленты сайт помечает `aria-hidden`, и картинка до нас
@@ -1306,6 +1357,7 @@ mod tests {
                 <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
                 .to_owned(),
             thumbs,
+            listing_html: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -1338,6 +1390,7 @@ mod tests {
                 <h2>Раздел</h2><p>Второй абзац.</p>"
                 .to_owned(),
             thumbs,
+            listing_html: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -1356,6 +1409,7 @@ mod tests {
                 <h2>Раздел</h2><p>Второй абзац.</p>"
                 .to_owned(),
             thumbs: HashMap::new(),
+            listing_html: None,
         };
 
         let reading = from_article(&article).unwrap();

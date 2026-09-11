@@ -17,7 +17,3 @@ Slackforce Surfaces is available to all customers — including those who use it
 **Follow topics and authors** from this story to see more like this in your personalized homepage feed and to receive email updates.
 
 - Emma Roth
--
--
--
--
