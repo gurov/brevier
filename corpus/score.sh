@@ -57,11 +57,29 @@ fi
 
 if [[ $approve -eq 1 ]]; then
     mkdir -p "$root/corpus/expected"
+
+    # Эталон — это признанный читаемым вывод. Упавшая страница читаемой быть
+    # не может, и класть её пустой вывод в эталоны значит молча стереть
+    # регрессионную базу: вердикт-то остался с прошлого прогона, когда
+    # страница открывалась. Поэтому сверяемся с кодом возврата.
+    declare -A code
+    while IFS=$'\t' read -r c _ _ file _; do code["$file"]=$c; done < <(tail -n +2 "$report")
+
     n=0
+    skipped=0
     while IFS=$'\t' read -r v _ file; do
         [[ "$v" == "y" ]] || continue
-        cp "$root/corpus/out/$ua/$file" "$root/corpus/expected/$file"
+        out="$root/corpus/out/$ua/$file"
+        if [[ "${code[$file]:-1}" != 0 || ! -s "$out" ]]; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+        cp "$out" "$root/corpus/expected/$file"
         n=$((n + 1))
     done < <(tail -n +2 "$verdict")
+
     echo "в corpus/expected/ положено эталонов: $n"
+    if [[ $skipped -gt 0 ]]; then
+        echo "  пропущено, страница в этот раз не открылась: $skipped"
+    fi
 fi

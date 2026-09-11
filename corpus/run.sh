@@ -63,15 +63,27 @@ rm -f "$report.body"
 # Вердикты — ручная работа, и потерять её нельзя: файл не перезаписываем,
 # а дополняем. Уже проставленные `y` и `n` остаются, новые страницы приходят
 # с `?`. (Однажды перезаписали — разметку спасли только эталоны в git.)
-previous=$(mktemp); trap 'rm -f "$previous"' EXIT
+#
+# Второй источник — сами эталоны: страница лежит в `corpus/expected/` ⇒ её
+# уже признали читаемой. Нужен он вот зачем: в файл вердиктов попадают
+# только страницы, которые в этот раз открылись, и транзиентный отказ
+# (medium отвечает 403, если гнать корпус в восемь потоков) выбрасывал
+# строку вместе с ручной меткой — а вернувшись, страница приходила с `?`,
+# и её перечитывали заново.
+previous=$(mktemp); etalons=$(mktemp); trap 'rm -f "$previous" "$etalons"' EXIT
 [[ -f "$verdict" ]] && tr -d '\r' < "$verdict" > "$previous"
+ls -1 "$root/corpus/expected" 2>/dev/null > "$etalons" || true
 
 {
     printf 'verdict\turl\tfile\n'
-    awk -F'\t' -v prev="$previous" '
-        BEGIN { while ((getline line < prev) > 0) { split(line, f, "\t"); mark[f[2]] = f[1] } }
+    awk -F'\t' -v prev="$previous" -v etalons="$etalons" '
+        BEGIN {
+            while ((getline line < prev) > 0) { split(line, f, "\t"); mark[f[2]] = f[1] }
+            while ((getline line < etalons) > 0) { known[line] = 1 }
+        }
         NR > 1 && $1 == 0 {
-            v = ($3 in mark && mark[$3] != "?" && mark[$3] != "verdict") ? mark[$3] : "?"
+            v = ($3 in mark && mark[$3] != "?" && mark[$3] != "verdict") ? mark[$3] : \
+                ($4 in known ? "y" : "?")
             printf "%s\t%s\t%s\n", v, $3, $4
         }' "$report"
 } > "$verdict"
