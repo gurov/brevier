@@ -142,8 +142,17 @@ anti-bot 2).
 
 The honest caveat: the rubric (`corpus/RUBRIC.md`) is ours, the scoring is done by hand,
 and it was relaxed once — knowing the numbers. A strict reading of the same markings
-gave 56%. So these are the project's own regression figures, not a benchmark against
-other extractors. Scripts and expected outputs live in `corpus/`.
+gave 56%. So those are the project's own regression figures. Scripts and expected outputs
+live in `corpus/`.
+
+Measured against someone else's ruler — `scrapinghub/article-extraction-benchmark`, 181
+saved pages, article body scored on word 4-grams — the whole reading pipeline gets
+**F1 0.918** (precision 0.875, recall 0.967); the extraction alone gets 0.951, against
+0.947 for Readability.js and 0.958 for trafilatura in the same table. Two thirds of the
+gap between those two numbers is the headline and the byline, which we print on purpose
+and that benchmark's ground truth excludes by definition. `corpus/bench.py` reproduces
+it. That benchmark is news, though, and this program is for long-form, documentation and
+threads — it is a second opinion, not the gate.
 
 Extraction breaks constantly: sites change their markup and heuristics rot. That is the
 permanent background of this kind of program, not a task that finishes.
@@ -199,9 +208,10 @@ Patches and bug reports are welcome. `cargo test` and
 or conversion needs a corpus run diffed against `corpus/expected/` before it is
 committed: those files exist to catch regressions, and they have already caught two.
 
-`corpus/reference.py` is the one Python script in the project — a marker's aid that
-compares our output with the page as a headless browser sees it. It needs
-`beautifulsoup4` and Chrome, and neither ever ships with the product.
+Two Python scripts live in `corpus/`, both workshop tools that never ship with the
+product: `reference.py`, a marker's aid that compares our output with the page as a
+headless browser sees it (needs `beautifulsoup4` and Chrome), and `bench.py`, which
+runs the external `scrapinghub/article-extraction-benchmark` (no dependencies).
 
 ## License
 
