@@ -14,6 +14,10 @@ There is no JavaScript engine and no site CSS. What survives is the text.
 packaged builds yet, and screen readers are supported on Linux only — see
 [What it does not do](#what-it-does-not-do).
 
+![An article in Brevier: text set on ivory paper in the reader's own measure, with the
+page's table of contents on the shelf at the right and the section being read marked in
+it](assets/screenshot-article.png)
+
 ## Not a converter
 
 "Web page → Markdown" is a shelf product, and Brevier does not pretend otherwise: the
@@ -75,6 +79,12 @@ brevier-ui <url> [<url>…]               # read in a window, one tab per addres
 ```
 
 A pasted GitHub or GitLab file URL is understood too, and so is a path to a local `.md`.
+
+Below is `gh:gurov/brevier` — this very README, read out of the repository in the same
+type as any article, with its sections on the shelf:
+
+![The repository mode: this README rendered in Brevier, its headings listed on the shelf
+at the right](assets/screenshot-repository.png)
 
 Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extracted,
 6 conversion. They exist so that a batch run can tell "the site refused" from
