@@ -22,6 +22,10 @@ pub enum Error {
     TooLarge(u64),
     /// Readability не нашёл на странице статьи.
     EmptyExtraction,
+    /// Хостинг отказал по лимиту: у github без токена шестьдесят запросов
+    /// к API в час, и листинг каталога их тратит. Отдельно от 403,
+    /// потому что лечится не логином, а ожиданием.
+    HostingLimit,
     /// HTML → Markdown.
     Convert(std::io::Error),
     /// Картинку не удалось разобрать: битые байты, неизвестный формат,
@@ -40,6 +44,9 @@ impl Error {
             Error::HttpStatus(_) => 3,
             Error::UnsupportedContentType(_) | Error::TooLarge(_) => 4,
             Error::EmptyExtraction => 5,
+            // Тот же код, что у http-статуса: для прогонов это отказ
+            // сервера, а не наша поломка.
+            Error::HostingLimit => 3,
             Error::Convert(_) => 6,
             Error::Media(_) => 7,
         }
@@ -58,6 +65,7 @@ impl fmt::Display for Error {
             Error::UnsupportedContentType(t) => write!(f, "unsupported content type `{t}`"),
             Error::TooLarge(n) => write!(f, "response body over the {n} byte limit"),
             Error::EmptyExtraction => write!(f, "no article found on the page"),
+            Error::HostingLimit => write!(f, "the hosting API is rate limited"),
             Error::Convert(e) => write!(f, "html to markdown: {e}"),
             Error::Media(e) => write!(f, "image: {e}"),
         }

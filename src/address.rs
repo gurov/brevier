@@ -28,6 +28,10 @@ pub struct Repo {
     pub name: String,
     /// Путь внутри репозитория, если он был в адресе.
     pub path: Option<String>,
+    /// Просят сам каталог, а не README в нём: ссылка вида `tree/HEAD/путь`
+    /// или короткая форма с косой чертой на конце (`gh:o/n/crates/`).
+    /// Так хостинг и отличает каталог от файла, и мы не изобретаем своего.
+    pub listing: bool,
     /// Исходный URL, если адрес пришёл ссылкой, а не короткой формой.
     pub source: Option<String>,
 }
@@ -64,6 +68,7 @@ impl Repo {
     pub fn web_url(&self) -> String {
         match (&self.source, &self.path) {
             (Some(url), _) => url.clone(),
+            (None, path) if self.listing => self.tree_url(path.as_deref().unwrap_or("")),
             (None, Some(path)) => self.blob_url(path),
             (None, None) => format!(
                 "https://{}/{}/{}",
@@ -117,6 +122,73 @@ impl Repo {
             RepoHost::GitLab => format!("https://gitlab.com/{owner}/{name}/-/blob/HEAD/{path}"),
         }
     }
+
+    /// Адрес каталога страницей хостинга. Ссылки на подкаталоги в листинге
+    /// ведут сюда — и [`parse`] узнаёт их обратно, как и ссылки на файлы.
+    pub fn tree_url(&self, path: &str) -> String {
+        let (owner, name) = (&self.owner, &self.name);
+        match self.host {
+            RepoHost::GitHub => format!("https://github.com/{owner}/{name}/tree/HEAD/{path}"),
+            RepoHost::GitLab => format!("https://gitlab.com/{owner}/{name}/-/tree/HEAD/{path}"),
+        }
+    }
+
+    /// Где спросить, что лежит в каталоге.
+    ///
+    /// Единственное место, где режим репозитория трогает API: каталогов
+    /// CDN не отдаёт вовсе. Спрашиваем один каталог и только по требованию
+    /// читателя — не дерево целиком: у gitlab оно постранично, у github
+    /// усекается на больших репозиториях, и стоит это того же лимита.
+    pub fn listing_api(&self, path: &str) -> String {
+        let (owner, name) = (&self.owner, &self.name);
+        match self.host {
+            RepoHost::GitHub => format!(
+                "https://api.github.com/repos/{owner}/{name}/contents/{}?ref=HEAD",
+                encode_path(path)
+            ),
+            // Проект у gitlab адресуется одним полем, поэтому косая черта
+            // внутри имени группы тоже уезжает в процентный код.
+            RepoHost::GitLab => format!(
+                "https://gitlab.com/api/v4/projects/{}%2F{}/repository/tree?path={}&ref=HEAD&per_page=100",
+                encode_segment(owner),
+                encode_segment(name),
+                encode_segment(path)
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Repo {
+    /// Короткая форма этого адреса — то, что увидит читатель в строке.
+    /// Печатает её [`Address::display`]; тестам нужен тот же путь,
+    /// а не его копия.
+    fn display_for_test(&self) -> String {
+        Address::Repo(self.clone()).display()
+    }
+}
+
+/// Процентное кодирование пути: разделители каталогов остаются собой,
+/// остальное неразрешённое уезжает в коды. Своё, потому что нужно
+/// ровно здесь и ровно на это.
+fn encode_path(path: &str) -> String {
+    path.split('/')
+        .map(encode_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn encode_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
 }
 
 impl Address {
@@ -143,7 +215,14 @@ impl Address {
                     RepoHost::GitLab => "gl",
                 };
                 match &repo.path {
+                    // Каталог показываем с косой чертой на конце: по ней
+                    // напечатанное разбирается обратно в тот же каталог,
+                    // а не в README внутри него.
+                    Some(path) if repo.listing => {
+                        format!("{prefix}:{}/{}/{path}/", repo.owner, repo.name)
+                    }
                     Some(path) => format!("{prefix}:{}/{}/{path}", repo.owner, repo.name),
+                    None if repo.listing => format!("{prefix}:{}/{}/", repo.owner, repo.name),
                     None => format!("{prefix}:{}/{}", repo.owner, repo.name),
                 }
             }
@@ -190,17 +269,24 @@ pub fn parse(input: &str) -> Result<Address, Error> {
 }
 
 fn shorthand(host: RepoHost, rest: &str) -> Result<Address, Error> {
+    // Косая черта на конце — это «сам каталог», как на хостинге.
+    let listing = rest.trim_end().ends_with('/');
     let mut parts = rest.trim_matches('/').splitn(3, '/');
     let owner = parts.next().unwrap_or_default();
     let name = parts.next().unwrap_or_default();
     if owner.is_empty() || name.is_empty() {
         return Err(Error::BadUrl(rest.to_owned()));
     }
+    let path = parts.next().filter(|p| !p.is_empty()).map(str::to_owned);
     Ok(Address::Repo(Repo {
         host,
         owner: owner.to_owned(),
         name: name.to_owned(),
-        path: parts.next().filter(|p| !p.is_empty()).map(str::to_owned),
+        // Правило одно на любую глубину, включая корень: черта на конце —
+        // это каталог. Иначе адрес листинга не разбирался бы обратно
+        // в листинг, а на этом свойстве держится весь режим.
+        listing,
+        path,
         source: None,
     }))
 }
@@ -257,6 +343,9 @@ fn repo_from_path(host: RepoHost, path: &str) -> Option<Repo> {
     };
 
     let rest: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+    // `blob` — файл, `tree` — каталог. Хостинг различает их сам, и в этом
+    // месте у нас единственный способ узнать, чего просят.
+    let listing = matches!(rest.first().copied(), Some("tree"));
     let inner = match rest.first().copied() {
         None => None,
         // Ветку из адреса выбрасываем: имя ветки — деталь хостинга,
@@ -273,6 +362,7 @@ fn repo_from_path(host: RepoHost, path: &str) -> Option<Repo> {
         host,
         owner,
         name,
+        listing,
         path: inner,
         source: None,
     })
@@ -297,6 +387,56 @@ fn looks_like_path(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_trailing_slash_asks_for_the_directory_itself() {
+        // Правило одно на любую глубину: черта на конце — каталог.
+        let Address::Repo(repo) = parse("gh:o/n/docs/").unwrap() else {
+            panic!("не репозиторий");
+        };
+        assert!(repo.listing);
+        assert_eq!(repo.path.as_deref(), Some("docs"));
+        assert_eq!(repo.display_for_test(), "gh:o/n/docs/");
+
+        let Address::Repo(root) = parse("gh:o/n/").unwrap() else {
+            panic!("не репозиторий");
+        };
+        assert!(root.listing && root.path.is_none());
+
+        // А без черты ждут README — и каталога, и репозитория.
+        let Address::Repo(readme) = parse("gh:o/n/docs").unwrap() else {
+            panic!("не репозиторий");
+        };
+        assert!(!readme.listing);
+    }
+
+    #[test]
+    fn a_directory_address_survives_the_round_trip() {
+        // Адрес каталога, напечатанный нами, обязан разобраться обратно
+        // в тот же каталог: на этом свойстве держится хождение по листингу.
+        for host in [RepoHost::GitHub, RepoHost::GitLab] {
+            let source = Repo {
+                host,
+                owner: "o".to_owned(),
+                name: "n".to_owned(),
+                path: Some("crates/cli".to_owned()),
+                listing: true,
+                source: None,
+            };
+            let Address::Repo(back) = parse(&source.web_url()).unwrap() else {
+                panic!("не репозиторий");
+            };
+            assert!(back.listing, "{:?}", source.web_url());
+            assert_eq!(back.path.as_deref(), Some("crates/cli"));
+
+            // И короткая форма тоже.
+            let Address::Repo(short) = parse(&source.display_for_test()).unwrap() else {
+                panic!("не репозиторий");
+            };
+            assert!(short.listing);
+            assert_eq!(short.path.as_deref(), Some("crates/cli"));
+        }
+    }
     use super::*;
 
     fn repo(input: &str) -> Repo {
@@ -367,6 +507,7 @@ mod tests {
                 owner: "o".to_owned(),
                 name: "n".to_owned(),
                 path: None,
+                listing: false,
                 source: None,
             };
             let back = repo(&source.blob_url("docs/guide.md"));

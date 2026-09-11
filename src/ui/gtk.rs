@@ -1349,7 +1349,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
     let Some(index) = index else { return };
 
-    let (address, can_back, can_forward, marks, entries, title) = {
+    let (address, here, can_back, can_forward, marks, entries, title) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.get(index) else {
             return;
@@ -1359,6 +1359,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
                 .current()
                 .map(Address::display)
                 .unwrap_or_default(),
+            tab.history.current().and_then(directory_row),
             tab.history.can_go_back(),
             tab.history.can_go_forward(),
             tab.marks.clone(),
@@ -1389,7 +1390,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         format!("{title} — Brevier")
     }));
 
-    let shelf = fill_contents(&ui.contents, &marks, &entries);
+    let shelf = fill_contents(&ui.contents, &marks, &entries, here.as_ref());
     let empty = shelf.is_empty();
     state.borrow_mut().shelf = shelf;
     ui.show_contents.set_sensitive(!empty);
@@ -2453,25 +2454,31 @@ fn contents_of(marks: Vec<Mark>, total: i32) -> Vec<Mark> {
 /// об этом читатель должен до нажатия. Оглавление подписывается только
 /// под ней — в одиночку полка и так оглавление, и лишняя строка над ним
 /// ничего не объясняет.
-fn fill_contents(list: &gtk::ListBox, marks: &[Mark], entries: &[Entry]) -> Vec<Row> {
+fn fill_contents(
+    list: &gtk::ListBox,
+    marks: &[Mark],
+    entries: &[Entry],
+    here: Option<&Entry>,
+) -> Vec<Row> {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
 
     let mut shelf: Vec<Row> = Vec::new();
+    let project: Vec<&Entry> = entries.iter().chain(here).collect();
 
-    if !entries.is_empty() {
+    if !project.is_empty() {
         list.append(&group("In this repository"));
         shelf.push(Row::Header);
     }
-    for entry in entries {
+    for entry in &project {
         let (row, label) = shelf_row(&entry.title, 0);
         // Куда уводит строка, читатель вправе знать до нажатия.
         label.set_tooltip_text(Some(&entry.address.display()));
         list.append(&row);
         shelf.push(Row::Open(entry.address.clone()));
     }
-    if !entries.is_empty() && !marks.is_empty() {
+    if !project.is_empty() && !marks.is_empty() {
         list.append(&group("On this page"));
         shelf.push(Row::Header);
     }
@@ -2488,6 +2495,38 @@ fn fill_contents(list: &gtk::ListBox, marks: &[Mark], entries: &[Entry]) -> Vec<
     }
 
     shelf
+}
+
+/// Строка «а что ещё лежит рядом» — дверь к файлам каталога.
+///
+/// Без неё листинг доступен только тому, кто сам напечатает адрес каталога,
+/// а знать раскладку чужого репозитория читатель не обязан: именно этим
+/// хостинг и помогает — списком файлов над README. Стоит строка в группе
+/// проекта, потому что уводит со страницы, и ничего не стоит, пока
+/// на неё не нажали: запрос к API уходит по нажатию.
+///
+/// На самом листинге строки нет: шаг наверх у него в тексте, а показывать
+/// ссылку на себя же незачем.
+fn directory_row(address: &Address) -> Option<Entry> {
+    let Address::Repo(repo) = address else {
+        return None;
+    };
+    if repo.listing {
+        return None;
+    }
+
+    let inside = repo.path.as_deref().unwrap_or("");
+    let directory = inside.rsplit_once('/').map(|(dir, _)| dir.to_owned());
+
+    Some(Entry {
+        title: "Files in this directory".to_owned(),
+        address: Address::Repo(Repo {
+            path: directory,
+            listing: true,
+            source: None,
+            ..repo.clone()
+        }),
+    })
 }
 
 /// Строка полки: подпись, за которой стоит работа.
@@ -2594,6 +2633,9 @@ fn seek_entries(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: &Address)
                 title: entry.title,
                 address: Address::Repo(Repo {
                     path: Some(entry.path),
+                    // Точка входа — файл, даже если пришли мы на неё
+                    // с листинга: флаг каталога наследовать нельзя.
+                    listing: false,
                     source: None,
                     ..asked.clone()
                 }),

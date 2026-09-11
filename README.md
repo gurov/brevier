@@ -68,6 +68,7 @@ and can be chosen as the browser for a link. It does not make itself the default
 brevier https://example.com/article     # Markdown on stdout
 brevier gh:rust-lang/book               # a repository's README
 brevier gh:rust-lang/book/src           # the README of a directory inside it
+brevier gh:rust-lang/book/src/          # …or what the directory holds, listed
 brevier gl:owner/repo                   # the same for GitLab
 brevier --docs gh:rust-lang/book        # entry points into its documentation
 brevier --links <url>                   # the article's outgoing links, one per line
@@ -138,6 +139,11 @@ menu come from GTK.
 - **A shelf on the right:** entry points into a repository's documentation on top, the
   open page's table of contents under them, with the section under your eyes marked as
   you scroll. Its width is yours, by dragging the divider.
+- **Directories are browsable** — a trailing slash in the address (`gh:owner/repo/docs/`)
+  or the shelf's "Files in this directory" lists what is there, so a README that links to
+  nothing is no longer a dead end. This is the one place the repository mode asks the
+  hosting's API, and only when you ask for it: GitHub allows sixty such requests an hour
+  without a token, everything else comes from the CDN, which has no limit.
 - **Images load right away, and a switch in Settings turns them off** — the decoder is
   the one serious attack surface once JavaScript is gone, and closing it should be
   possible.

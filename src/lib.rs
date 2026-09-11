@@ -116,6 +116,9 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
     let loaded = repo::open(repo, ua)?;
     let address = Address::Repo(Repo {
         path: Some(loaded.path.clone()),
+        // Каталог остаётся каталогом и в адресной строке, и в истории:
+        // иначе «назад» вернуло бы README вместо списка, из которого ушли.
+        listing: loaded.kind == Kind::Listing,
         source: None,
         ..repo.clone()
     });
@@ -124,7 +127,9 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         title: heading_of(&loaded.markdown)
             .unwrap_or_else(|| format!("{}/{}/{}", repo.owner, repo.name, loaded.path)),
         markdown: loaded.markdown,
-        kind: Kind::Article,
+        // Каталог без README приезжает списком ссылок, а не статьёй:
+        // читатель открыл его, чтобы выбрать, куда идти дальше.
+        kind: loaded.kind,
         address,
     })
 }

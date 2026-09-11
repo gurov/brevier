@@ -22,6 +22,7 @@ use comrak::nodes::NodeValue;
 use crate::address::{Repo, RepoHost};
 use crate::error::Error;
 use crate::fetch::{self, UserAgent};
+use crate::markdown::Kind;
 
 /// Под какими именами в репозитории лежит входная страница. Порядок —
 /// порядок проверки; каждая попытка это запрос к CDN, а не к API,
@@ -37,7 +38,27 @@ pub struct Loaded {
     /// Путь внутри репозитория — тот, что попадёт в адресную строку.
     pub path: String,
     pub markdown: String,
+    /// Документ или листинг каталога. Список ссылок читатель открывает
+    /// не читать, а выбирать, и окно говорит об этом словами.
+    pub kind: Kind,
 }
+
+/// Сколько записей отдаёт хостинг за один запрос. Дальше начинается
+/// постраничность, за которой мы не пойдём: страница вторая — запрос
+/// второй, а лимит у github шестьдесят в час. Читателю про обрыв говорим
+/// словами и ссылкой на хостинг, а не молчанием.
+fn page_limit(host: RepoHost) -> usize {
+    match host {
+        // Столько отдаёт `contents` без постраничности; дальше нужен API
+        // дерева, от которого мы отказались замером.
+        RepoHost::GitHub => 1000,
+        // Потолок `per_page` у gitlab — ровно сотня.
+        RepoHost::GitLab => 100,
+    }
+}
+
+/// Потолок на ответ API: листинг — это имена, а не байты файлов.
+const MAX_LISTING: u64 = 8 * 1024 * 1024;
 
 /// Точка входа в документацию репозитория.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,6 +309,19 @@ pub fn target(path: &str) -> Target {
 /// Открыть файл репозитория. Путь не указан — ищем README; указан каталог —
 /// ищем README в нём.
 pub fn open(repo: &Repo, ua: UserAgent) -> Result<Loaded, Error> {
+    let inside = repo
+        .path
+        .as_deref()
+        .map(|path| path.trim_matches('/'))
+        .unwrap_or("");
+
+    // Просят сам каталог — README в нём не ищем вовсе: читатель пришёл
+    // смотреть, что лежит, а не читать. Так же поступает и хостинг,
+    // когда ему дают адрес вида `tree/HEAD/путь`.
+    if repo.listing {
+        return listing(repo, inside, ua);
+    }
+
     let mut last = None;
 
     for path in candidates(repo.path.as_deref()) {
@@ -295,6 +329,7 @@ pub fn open(repo: &Repo, ua: UserAgent) -> Result<Loaded, Error> {
             Ok(page) => {
                 return Ok(Loaded {
                     markdown: expand(&page.body, repo, &path),
+                    kind: Kind::Article,
                     path,
                 });
             }
@@ -304,7 +339,229 @@ pub fn open(repo: &Repo, ua: UserAgent) -> Result<Loaded, Error> {
         }
     }
 
+    // README в каталоге нет — покажем сам каталог. Это последнее средство
+    // и единственный запрос к API во всём режиме: до него доходят только
+    // те каталоги, которые читатель открыл сам и в которых читать нечего.
+    if matches!(target(inside), Target::Directory) || inside.is_empty() {
+        match listing(repo, inside, ua) {
+            Ok(loaded) => return Ok(loaded),
+            // Каталога и правда нет — отвечаем тем же, чем ответили бы
+            // до листинга. Всё остальное (лимит API, сеть) читателю нужно
+            // сказать: молчать об этом значит соврать про причину.
+            Err(Error::HttpStatus(404)) => {}
+            Err(other) => return Err(other),
+        }
+    }
+
     Err(last.unwrap_or(Error::HttpStatus(404)))
+}
+
+/// Что лежит в каталоге — списком ссылок.
+///
+/// Гейт M2 меряет, доходит ли читатель до всей документации, не открывая
+/// github. Замер показал, где обрывается путь: README подкаталога
+/// монорепозитория (`crates/*/README.md` у ripgrep, `cli/lsp/README.md`
+/// у deno) ссылкой из корневого README не назван нигде, и добраться
+/// до него нечем. Каталог — единственная дверь, а CDN каталогов не отдаёт.
+///
+/// Поэтому здесь API, и поэтому один каталог, а не дерево: у github
+/// без токена шестьдесят запросов в час, дерево большого репозитория
+/// вдобавок приезжает усечённым, а у gitlab — постранично. Один запрос
+/// на каталог, который читатель открыл, — цена, которую он сам и заказал.
+fn listing(repo: &Repo, path: &str, ua: UserAgent) -> Result<Loaded, Error> {
+    let blob = fetch::binary(&repo.listing_api(path), ua, "application/json", MAX_LISTING)
+        // Отказ по лимиту приходит тем же 403, что и «не пустили», но
+        // читателю это разные новости: одно не лечится ничем, другое —
+        // ожиданием. Здесь мы знаем, что спрашивали API, и говорим прямо.
+        .map_err(|e| match e {
+            Error::HttpStatus(403 | 429) => Error::HostingLimit,
+            other => other,
+        })?;
+    let json = String::from_utf8(blob.bytes).map_err(|_| Error::EmptyExtraction)?;
+    let entries = entries(&json);
+    if entries.is_empty() {
+        return Err(Error::EmptyExtraction);
+    }
+
+    Ok(Loaded {
+        markdown: render(repo, path, &entries),
+        path: path.to_owned(),
+        kind: Kind::Listing,
+    })
+}
+
+/// Запись каталога: имя и то, каталог это или файл.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Entry {
+    name: String,
+    directory: bool,
+}
+
+/// Листинг markdown-ом.
+///
+/// Ссылки — обычные адреса хостинга, те же, в какие разворачиваются ссылки
+/// внутри документа: наш разбор узнаёт их обратно, а у того, кто откроет
+/// сохранённое без Brevier, они просто работают. Порядок отдаёт хостинг:
+/// сортировать за него значит решать за читателя, что в каталоге главное.
+fn render(repo: &Repo, path: &str, entries: &[Entry]) -> String {
+    let here = if path.is_empty() {
+        format!("{}/{}", repo.owner, repo.name)
+    } else {
+        format!("{}/{}/{path}", repo.owner, repo.name)
+    };
+
+    // Почему читатель здесь оказался — две разные истории, и говорить
+    // о них надо разное: либо он нажал на каталог, либо README в нём нет.
+    let why = if repo.listing {
+        "What this directory holds."
+    } else {
+        "No README here — this is what the directory holds."
+    };
+    let mut out = format!("# {here}\n\n{why}\n\n");
+
+    // Шаг наверх. В самом каталоге его нет, он есть в навигации хостинга —
+    // и без него читатель, спустившийся на три уровня, выбирается только
+    // правкой адреса.
+    if let Some((up, _)) = path.rsplit_once('/') {
+        out.push_str(&format!("- [../]({})\n", repo.tree_url(up)));
+    } else if !path.is_empty() {
+        out.push_str(&format!("- [../]({})\n", repo.tree_url("")));
+    }
+
+    for entry in entries {
+        let inside = if path.is_empty() {
+            entry.name.clone()
+        } else {
+            format!("{path}/{}", entry.name)
+        };
+        if entry.directory {
+            out.push_str(&format!(
+                "- [{}/]({})\n",
+                entry.name,
+                repo.tree_url(&inside)
+            ));
+        } else {
+            out.push_str(&format!("- [{}]({})\n", entry.name, repo.blob_url(&inside)));
+        }
+    }
+
+    // Хостинг отдал ровно столько, сколько отдаёт за раз: остальное
+    // осталось за страницей, и молчать об этом нельзя — читатель решит,
+    // что каталог кончился.
+    if entries.len() >= page_limit(repo.host) {
+        out.push_str(&format!(
+            "\nThe hosting returned the first {} entries; there may be more. \
+             [Open the directory on the hosting]({}).\n",
+            entries.len(),
+            repo.tree_url(path)
+        ));
+    }
+    out
+}
+
+/// Разобрать ответ API: из каждой записи нужны два поля, `name` и `type`.
+///
+/// Свой разбор, а не крейт: серьёзный json в продукте больше нигде
+/// не нужен, а здесь читаются две строки из плоского списка объектов.
+/// Что до форм ответа — они разные ровно в словах: у github запись файла
+/// это `"type":"file"`, у gitlab — `"type":"blob"`.
+fn entries(json: &str) -> Vec<Entry> {
+    let mut out = Vec::new();
+    let mut chars = json.char_indices().peekable();
+    let mut depth = 0usize;
+    let (mut name, mut kind): (Option<String>, Option<String>) = (None, None);
+    let mut key: Option<String> = None;
+
+    while let Some((at, ch)) = chars.next() {
+        match ch {
+            '{' | '[' => {
+                depth += 1;
+                key = None;
+                if ch == '{' && depth == 2 {
+                    (name, kind) = (None, None);
+                }
+            }
+            '}' | ']' => {
+                key = None;
+                if ch == '}'
+                    && depth == 2
+                    && let (Some(name), Some(kind)) = (name.take(), kind.take())
+                {
+                    out.push(Entry {
+                        name,
+                        directory: matches!(kind.as_str(), "dir" | "tree"),
+                    });
+                }
+                depth = depth.saturating_sub(1);
+            }
+            '"' => {
+                let Some((text, end)) = string_at(json, at) else {
+                    break;
+                };
+                // Строка после двоеточия — значение прочитанного ключа,
+                // иначе это сам ключ.
+                match key.take() {
+                    Some(field) if depth == 2 => match field.as_str() {
+                        "name" => name = Some(text),
+                        "type" => kind = Some(text),
+                        _ => {}
+                    },
+                    Some(_) => {}
+                    None => {
+                        // Ключ узнаём по двоеточию следом за строкой.
+                        let tail = json[end..].trim_start();
+                        if tail.starts_with(':') {
+                            key = Some(text);
+                        }
+                    }
+                }
+                while chars.peek().is_some_and(|(i, _)| *i < end) {
+                    chars.next();
+                }
+            }
+            // Запятая закрывает пару «ключ — значение». Без этого
+            // незаконченный ключ доживал бы до следующей строки и съедал
+            // её: у github `"download_url":null` стоит ровно перед
+            // `"type"`, и тип записи терялся весь.
+            ',' => key = None,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Строка json целиком, начиная с открывающей кавычки: сам текст
+/// и место сразу за закрывающей кавычкой.
+fn string_at(json: &str, at: usize) -> Option<(String, usize)> {
+    let mut out = String::new();
+    let mut chars = json[at + 1..].char_indices();
+
+    while let Some((offset, ch)) = chars.next() {
+        match ch {
+            '"' => return Some((out, at + 1 + offset + 1)),
+            '\\' => {
+                let (_, escaped) = chars.next()?;
+                match escaped {
+                    'n' => out.push('\n'),
+                    't' => out.push('\t'),
+                    'r' => out.push('\r'),
+                    'b' => out.push('\u{8}'),
+                    'f' => out.push('\u{c}'),
+                    'u' => {
+                        let mut code = String::new();
+                        for _ in 0..4 {
+                            code.push(chars.next()?.1);
+                        }
+                        let value = u32::from_str_radix(&code, 16).ok()?;
+                        out.push(char::from_u32(value)?);
+                    }
+                    other => out.push(other),
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    None
 }
 
 /// Что пробуем скачать по такому пути, по порядку.
@@ -657,8 +914,100 @@ mod tests {
             owner: "tokio-rs".to_owned(),
             name: "tokio".to_owned(),
             path: None,
+            listing: false,
             source: None,
         }
+    }
+
+    /// Ответ github: `"download_url":null` стоит ровно перед `"type"`,
+    /// и на этом первая версия разбора теряла тип у всех записей разом.
+    const GITHUB: &str = r#"[
+        {"name":"cli","path":"crates/cli","size":0,"download_url":null,"type":"dir",
+         "_links":{"self":"https://api.github.com/x","git":null}},
+        {"name":"Cargo.toml","path":"crates/Cargo.toml","size":42,
+         "download_url":"https://raw.githubusercontent.com/x","type":"file"}
+    ]"#;
+
+    /// У gitlab те же два поля, но другими словами: `tree` вместо `dir`.
+    const GITLAB: &str = r#"[
+        {"id":"a1","name":"configuration","type":"tree","path":"docs/configuration","mode":"040000"},
+        {"id":"b2","name":"\u0413\u043b\u0430\u0432\u0430.md","type":"blob","path":"docs/Глава.md","mode":"100644"}
+    ]"#;
+
+    #[test]
+    fn a_directory_listing_reads_both_hostings() {
+        let github = entries(GITHUB);
+        assert_eq!(github.len(), 2);
+        assert!(github[0].directory && github[0].name == "cli");
+        assert!(!github[1].directory && github[1].name == "Cargo.toml");
+
+        let gitlab = entries(GITLAB);
+        assert_eq!(gitlab.len(), 2);
+        assert!(gitlab[0].directory && gitlab[0].name == "configuration");
+        // Имя приезжает экранированным — и должно доехать до читателя целым.
+        assert_eq!(gitlab[1].name, "Глава.md");
+        assert!(!gitlab[1].directory);
+    }
+
+    #[test]
+    fn the_listing_links_where_the_hosting_would() {
+        let mut repo = repo();
+        repo.listing = true;
+        let md = render(
+            &repo,
+            "docs/guide",
+            &[
+                Entry {
+                    name: "inner".to_owned(),
+                    directory: true,
+                },
+                Entry {
+                    name: "page.md".to_owned(),
+                    directory: false,
+                },
+            ],
+        );
+
+        // Шаг наверх — первым, каталог каталогом, файл файлом.
+        assert!(
+            md.contains("- [../](https://github.com/tokio-rs/tokio/tree/HEAD/docs)"),
+            "{md}"
+        );
+        assert!(
+            md.contains("- [inner/](https://github.com/tokio-rs/tokio/tree/HEAD/docs/guide/inner)"),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "- [page.md](https://github.com/tokio-rs/tokio/blob/HEAD/docs/guide/page.md)"
+            ),
+            "{md}"
+        );
+
+        // Ссылки листинга наш же разбор обязан узнать обратно — то же
+        // свойство, на котором держится разворот ссылок внутри документа.
+        let Address::Repo(back) =
+            address::parse("https://github.com/tokio-rs/tokio/tree/HEAD/docs/guide/inner").unwrap()
+        else {
+            panic!("не репозиторий");
+        };
+        assert_eq!(back.path.as_deref(), Some("docs/guide/inner"));
+        assert!(back.listing, "каталог обязан остаться каталогом");
+    }
+
+    #[test]
+    fn a_full_page_says_so() {
+        let entries: Vec<Entry> = (0..1000)
+            .map(|i| Entry {
+                name: format!("file{i}.md"),
+                directory: false,
+            })
+            .collect();
+        let md = render(&repo(), "docs", &entries);
+        assert!(
+            md.contains("first 1000 entries"),
+            "обрыв должен быть назван"
+        );
     }
 
     #[test]

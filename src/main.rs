@@ -183,7 +183,16 @@ fn run(args: &Args) -> Result<String, Error> {
             // Репозиторий читается своим трактом: конвертировать нечего,
             // формат родной. Работа там в другом — развернуть ссылки внутри
             // документа, которых в сыром `.md` нет.
-            Some(address) => brevier::open(&address, args.ua)?.markdown,
+            Some(address) => {
+                let document = brevier::open(&address, args.ua)?;
+                // Каталог без README приезжает списком ссылок. Говорим
+                // об этом той же строкой и туда же, что и на вебе:
+                // в stdout идёт только документ.
+                if document.kind == markdown::Kind::Listing {
+                    eprintln!("brevier: a list of links, not an article");
+                }
+                document.markdown
+            }
             None => {
                 let page = fetch::fetch(&args.url, args.ua)?;
 

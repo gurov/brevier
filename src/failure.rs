@@ -67,6 +67,12 @@ pub fn describe(error: &Error) -> Failure {
                 .to_owned(),
             true,
         ),
+        Error::HostingLimit => failure(
+            "The hosting is counting our requests",
+            "Listing a directory asks the hosting's API, and GitHub allows sixty such requests an hour without a token. Everything else in a repository is read from the CDN, which has no limit — so files and READMEs still open. Wait a while for listings."
+                .to_owned(),
+            true,
+        ),
         Error::HttpStatus(404 | 410) => failure(
             "The page is not there",
             "The server says nothing lives at this address.".to_owned(),
