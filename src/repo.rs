@@ -19,7 +19,7 @@
 use comrak::Arena;
 use comrak::nodes::NodeValue;
 
-use crate::address::Repo;
+use crate::address::{Repo, RepoHost};
 use crate::error::Error;
 use crate::fetch::{self, UserAgent};
 
@@ -71,6 +71,37 @@ const PLAIN: [&str; 5] = [
     "doc/index.md",
     "documentation/README.md",
 ];
+
+/// Имена, которые хостинг показывает своей обвязкой, а не ссылкой из README:
+/// вкладка «Contributing», плашка «Security policy», кодекс сообщества.
+/// В README ссылки на них может не быть вовсе — гитхаб рисует их сам,
+/// вокруг страницы. У нас этой обвязки нет, и без пробы читатель таких
+/// файлов не увидит никаким способом: замер гейта M2 нашёл двенадцать
+/// из них на десяти проектах.
+///
+/// Третий элемент — искать ли файл ещё и в служебном каталоге хостинга.
+/// Туда обвязку убирают, чтобы не засорять корень, и хостинг про это
+/// место знает; у CHANGELOG и LICENSE такого места нет, они всегда в корне.
+///
+/// CHANGELOG обвязкой не показывается — там у хостинга релизы, — но
+/// из README на него ссылаются не всегда, а читателю незнакомого проекта
+/// он нужен сразу после README.
+const BOILERPLATE: [(&str, &str, bool); 6] = [
+    ("Changelog", "CHANGELOG.md", false),
+    ("Contributing", "CONTRIBUTING.md", true),
+    ("Code of conduct", "CODE_OF_CONDUCT.md", true),
+    ("Security", "SECURITY.md", true),
+    ("Support", "SUPPORT.md", true),
+    ("License", "LICENSE.md", false),
+];
+
+/// Куда хостинг убирает обвязку, когда её не держат в корне.
+fn hidden_dir(host: RepoHost) -> &'static str {
+    match host {
+        RepoHost::GitHub => ".github",
+        RepoHost::GitLab => ".gitlab",
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Generator {
@@ -134,6 +165,10 @@ fn value(config: &str, key: &str) -> Option<String> {
 /// 72% документации — 777 файлов из 1085. Генераторы кладут её
 /// по соглашению, и соглашение проверяется пробой. Запросы идут на CDN,
 /// где лимита нет, и параллельно — иначе дюжина проб стоила бы секунд.
+///
+/// Второй источник — известные имена обвязки (`BOILERPLATE`): их хостинг
+/// рисует вокруг страницы сам, ссылки из README на них может не быть,
+/// и без пробы они недостижимы вовсе.
 pub fn documentation(repo: &Repo, ua: UserAgent) -> Vec<Documentation> {
     let configs: Vec<(&str, Generator, Option<String>)> = probe(
         CONFIGS.iter().map(|(path, _)| *path).collect(),
@@ -162,13 +197,35 @@ pub fn documentation(repo: &Repo, ua: UserAgent) -> Vec<Documentation> {
     for path in PLAIN {
         wanted.push(("Documentation".to_owned(), path.to_owned()));
     }
+    // Обвязка идёт после документации: читатель пришёл читать проект,
+    // а не правила участия в нём.
+    for (title, name, hidden) in BOILERPLATE {
+        wanted.push((title.to_owned(), name.to_owned()));
+        if hidden {
+            wanted.push((
+                title.to_owned(),
+                format!("{}/{name}", hidden_dir(repo.host)),
+            ));
+        }
+    }
 
     let paths: Vec<&str> = wanted.iter().map(|(_, path)| path.as_str()).collect();
     let found = probe(paths, repo, ua, false);
+    select(&wanted, found)
+}
 
+/// Оставить по строке на смысл. Один и тот же файл приходит под разными
+/// путями — `CONTRIBUTING.md` в корне и в служебном каталоге, `docs/index.md`
+/// из конфига mkdocs и из списка известных путей, — а две одинаково
+/// подписанные строки выбирать читателю не помогают. Порядок списка — это
+/// порядок предпочтения, поэтому остаётся первая из них.
+///
+/// Цена записана честно: репозиторий с двумя книгами одного генератора
+/// покажет одну.
+fn select(wanted: &[(String, String)], found: Vec<Option<String>>) -> Vec<Documentation> {
     let mut out: Vec<Documentation> = Vec::new();
     for ((title, path), body) in wanted.iter().zip(found) {
-        if body.is_none() || out.iter().any(|d| d.path == *path) {
+        if body.is_none() || out.iter().any(|d| d.path == *path || d.title == *title) {
             continue;
         }
         out.push(Documentation {
@@ -670,6 +727,70 @@ mod tests {
         let md = expand("[![сборка](badge.svg)](docs/ci.md)", &repo(), "README.md");
         assert!(md.contains("(https://raw.githubusercontent.com/tokio-rs/tokio/HEAD/badge.svg)"));
         assert!(md.contains("(https://github.com/tokio-rs/tokio/blob/HEAD/docs/ci.md)"));
+    }
+
+    /// Что вернула проба: `Some` — файл есть.
+    fn probed(wanted: &[(&str, &str)], present: &[&str]) -> Vec<Documentation> {
+        let wanted: Vec<(String, String)> = wanted
+            .iter()
+            .map(|(title, path)| ((*title).to_owned(), (*path).to_owned()))
+            .collect();
+        let found = wanted
+            .iter()
+            .map(|(_, path)| present.contains(&path.as_str()).then(String::new))
+            .collect();
+        select(&wanted, found)
+    }
+
+    #[test]
+    fn the_same_file_in_two_places_is_one_row() {
+        // `CONTRIBUTING.md` лежит и в корне, и в служебном каталоге —
+        // для читателя это одна и та же вкладка хостинга.
+        let found = probed(
+            &[
+                ("Contributing", "CONTRIBUTING.md"),
+                ("Contributing", ".github/CONTRIBUTING.md"),
+            ],
+            &["CONTRIBUTING.md", ".github/CONTRIBUTING.md"],
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].path, "CONTRIBUTING.md");
+    }
+
+    #[test]
+    fn the_hidden_directory_answers_when_the_root_is_empty() {
+        let found = probed(
+            &[
+                ("Security", "SECURITY.md"),
+                ("Security", ".github/SECURITY.md"),
+            ],
+            &[".github/SECURITY.md"],
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].path, ".github/SECURITY.md");
+    }
+
+    #[test]
+    fn documentation_comes_before_the_boilerplate() {
+        // И один и тот же путь, пришедший из конфига и из списка известных,
+        // не удваивается.
+        let found = probed(
+            &[
+                ("Documentation (MkDocs)", "docs/index.md"),
+                ("Documentation", "docs/index.md"),
+                ("Contributing", "CONTRIBUTING.md"),
+            ],
+            &["docs/index.md", "CONTRIBUTING.md"],
+        );
+        let rows: Vec<&str> = found.iter().map(|d| d.path.as_str()).collect();
+        assert_eq!(rows, ["docs/index.md", "CONTRIBUTING.md"]);
+        assert_eq!(found[0].title, "Documentation (MkDocs)");
+    }
+
+    #[test]
+    fn the_hidden_directory_belongs_to_the_host() {
+        assert_eq!(hidden_dir(RepoHost::GitHub), ".github");
+        assert_eq!(hidden_dir(RepoHost::GitLab), ".gitlab");
     }
 
     #[test]

@@ -3,6 +3,14 @@
 # ни разу не открыв github.com.
 #
 #   corpus/m2.sh [--repos corpus/repos.txt] [--visits 60] [--refresh]
+#                [--listing]
+#
+# `--listing` — не замер продукта, а оценка: что дал бы третий пункт плана,
+# листинг каталога по требованию. Ссылка на каталог без README сейчас
+# упирается в 404; с листингом читатель увидел бы, что в нём лежит,
+# и спустился бы дальше. Каталоги берутся из того же кэшированного дерева,
+# поэтому оценка не стоит ни одного запроса к API. По умолчанию выключено:
+# число на гейте меряет то, что есть, а не то, что будет.
 #
 # Что считается — записано до прогона, как велит M0.
 #
@@ -39,12 +47,14 @@ outdir="$root/corpus/out"
 visits=60
 ua=honest
 refresh=нет
+listing=нет
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --repos) list=$2; shift 2 ;;
         --visits) visits=$2; shift 2 ;;
         --refresh) refresh=да; shift ;;
+        --listing) listing=да; shift ;;
         --ua) ua=$2; shift 2 ;;
         -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "m2.sh: неизвестный аргумент $1" >&2; exit 1 ;;
@@ -55,6 +65,10 @@ done
 mkdir -p "$outdir"
 report="$outdir/m2.tsv"
 missed="$outdir/m2-missed.tsv"
+if [[ "$listing" == да ]]; then
+    report="$outdir/m2-listing.tsv"
+    missed="$outdir/m2-listing-missed.tsv"
+fi
 printf 'repo\tdocs\treached\tshare\tbroken\tcapped\n' >"$report"
 printf 'repo\tpath\tчто это\n' >"$missed"
 
@@ -115,8 +129,14 @@ while read -r entry; do
     # на собранный сайт, а не на исходники, и обход из него никуда
     # не приводит. Brevier ищет их пробой известных путей — замер обязан
     # начинать оттуда же, откуда начнёт читатель.
+    #
+    # Точка входа ставится в очередь, даже если её самой в знаменателе нет:
+    # `.github/CONTRIBUTING.md` у deno отсеян фильтром служебных каталогов,
+    # но читатель через него проходит, и всё, на что он ссылается, читателю
+    # доступно. Знаменатель при этом не трогаем — числитель считается только
+    # по нему, поэтому лишний узел в обходе число не надувает.
     while read -r entry_path _; do
-        if [[ -n "$entry_path" && -n "${known[$entry_path]:-}" ]]; then
+        if [[ -n "$entry_path" ]]; then
             queue+=("$entry_path")
         fi
     done < <("$bin" --ua "$ua" --docs "$repo_addr" 2>/dev/null || true)
@@ -151,6 +171,16 @@ while read -r entry; do
             # Ссылка на каталог означает README внутри него.
             if [[ -z "${known[$next]:-}" && -n "${known[$next/README.md]:-}" ]]; then
                 next="$next/README.md"
+            elif [[ -z "${known[$next]:-}" && "$listing" == да ]]; then
+                # Каталога без README сейчас не видно вовсе. Листинг показал бы
+                # и файлы в нём, и подкаталоги — а подкаталог это ещё один
+                # листинг, поэтому спуск бесплатный и берётся весь поддерев.
+                for inside in "${docs[@]}"; do
+                    if [[ "$inside" == "$next/"* && -z "${seen[$inside]:-}" ]]; then
+                        queue+=("$inside")
+                    fi
+                done
+                continue
             fi
             if [[ -n "${known[$next]:-}" && -z "${seen[$next]:-}" ]]; then
                 queue+=("$next")
