@@ -4,6 +4,7 @@
 //! Поэтому вывод отсюда фиксируется в корпусе эталонов и служит базой
 //! регрессионных тестов на всю жизнь проекта.
 
+use dom_query::Document;
 use dom_smoothie::{Config, Readability, ReadabilityError};
 
 use crate::error::Error;
@@ -18,10 +19,14 @@ pub struct Article {
 pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let cfg = Config::default();
 
-    let mut readability = Readability::new(html, Some(url), Some(cfg)).map_err(|e| match e {
-        ReadabilityError::BadDocumentURL => Error::BadUrl(url.to_owned()),
-        _ => Error::EmptyExtraction,
-    })?;
+    let doc = Document::from(html);
+    unlazy(&doc);
+
+    let mut readability =
+        Readability::with_document(doc, Some(url), Some(cfg)).map_err(|e| match e {
+            ReadabilityError::BadDocumentURL => Error::BadUrl(url.to_owned()),
+            _ => Error::EmptyExtraction,
+        })?;
 
     let article = readability.parse().map_err(|_| Error::EmptyExtraction)?;
 
@@ -34,4 +39,78 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         byline: article.byline.filter(|b| !b.trim().is_empty()),
         content_html: article.content.to_string(),
     })
+}
+
+/// Снять подсказку `loading="lazy"` с картинок, у которых адрес и так на месте.
+///
+/// `loading` — подсказка браузеру, когда качать, а не признак подменённого
+/// адреса. dom_smoothie считает иначе: у него в «ленивые» попадает любая
+/// `<img loading="lazy">`, и тогда он ищет настоящий адрес по остальным
+/// атрибутам — берёт первый, в значении которого мерещится имя файла
+/// картинки. У википедии рядом со `src` стоит `resource` с адресом
+/// *страницы описания* файла (`…/wiki/Файл:Портрет.jpg`), и он затирает
+/// настоящий адрес на upload.wikimedia.org — вместо фотографии читателю
+/// приезжает html. Иконки на той же странице уцелели случайно: их `resource`
+/// оканчивается на `.svg`, а этого расширения в списке у dom_smoothie нет.
+///
+/// В самом readability.js ленивой считается картинка без `src` либо
+/// с классом `lazy`; возвращаем это правило, снимая подсказку с тех,
+/// у кого адрес уже есть. Заглушку в `src` (`data:`-пиксель) не трогаем:
+/// вот там подстановка по атрибутам и есть единственный способ найти
+/// картинку.
+fn unlazy(doc: &Document) {
+    for node in doc.select("img[loading]").nodes() {
+        let Some(src) = node.attr("src") else {
+            continue;
+        };
+        let src = src.trim();
+        if src.is_empty() || src.starts_with("data:") {
+            continue;
+        }
+        node.remove_attr("loading");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Статья с картинкой, у которой рядом со `src` лежит посторонний
+    /// атрибут с похожим на картинку значением.
+    fn page(img: &str) -> String {
+        let text = "Кеннет Эрроу доказал теорему о невозможности коллективного \
+            выбора, и это перевернуло теорию общественного благосостояния. \
+            Ниже разбирается, что именно утверждает теорема и почему её \
+            следствия так неудобны для любой процедуры голосования.";
+        format!(
+            "<html><body><article><h1>Эрроу</h1><p>{img}</p><p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
+        )
+    }
+
+    #[test]
+    fn a_lazy_hint_does_not_replace_a_working_address() {
+        let img = r#"<img loading="lazy" src="https://upload.example.org/commons/portrait.jpg" resource="https://example.org/wiki/File:Portrait.jpg">"#;
+        let article = extract(&page(img), "https://example.org/wiki/Arrow").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains(r#"src="https://upload.example.org/commons/portrait.jpg""#)
+        );
+        assert!(
+            !article
+                .content_html
+                .contains(r#"src="https://example.org/wiki/File:Portrait.jpg""#)
+        );
+    }
+
+    #[test]
+    fn a_placeholder_is_still_replaced() {
+        let img = r#"<img loading="lazy" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" data-src="https://upload.example.org/commons/portrait.jpg">"#;
+        let article = extract(&page(img), "https://example.org/wiki/Arrow").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("upload.example.org/commons/portrait.jpg")
+        );
+    }
 }

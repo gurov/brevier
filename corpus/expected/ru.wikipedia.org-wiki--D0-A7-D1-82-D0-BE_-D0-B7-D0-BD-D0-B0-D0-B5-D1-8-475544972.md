@@ -8,7 +8,7 @@ Contributors to Wikimedia projects
 
 [англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Olive Kitteridge
 
-[![](https://ru.wikipedia.org/wiki/Файл:Olive_Kitteridge_poster.jpg)](https://ru.wikipedia.org/wiki/Файл:Olive_Kitteridge_poster.jpg)
+[![](https://upload.wikimedia.org/wikipedia/ru/a/a0/Olive_Kitteridge_poster.jpg?utm_source=ru.wikipedia.org&utm_campaign=parser&utm_content=thumbnail_unscaled)](https://ru.wikipedia.org/wiki/Файл:Olive_Kitteridge_poster.jpg)
 
 [драма](https://ru.wikipedia.org/wiki/Драма_\(жанр\) "Драма (жанр)")
 
