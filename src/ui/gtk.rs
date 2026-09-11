@@ -41,7 +41,19 @@ const BODY_FAMILY: &str = "Noto Sans";
 const MONO_FAMILY: &str = "Noto Sans Mono";
 /// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
 const BOLD: i32 = 700;
+/// Ширина полки: с чего она начинает и в каких пределах её тянут
+/// за делитель. Верхний предел ещё и упирается в меру статьи: ужать
+/// колонку текста делитель не даёт.
 const TOC_WIDTH: i32 = 260;
+const TOC_MIN: i32 = 150;
+const TOC_MAX: i32 = 520;
+/// Сколько строк отводим пункту полки. Что не влезло — многоточие.
+/// Заголовки бывают длинными, и обрезанный заголовок хуже длинного:
+/// по нему не опознать раздел, ради которого в полку и смотрят.
+const TOC_LINES: i32 = 5;
+/// Длиннее этого заголовок в полку не отдаём вовсе: раскладывать абзац,
+/// от которого видно пять строк, незачем.
+const TOC_CHARS: usize = 300;
 /// Короче этого оглавление не нужно: страница и так вся под рукой.
 const MIN_DOC_CHARS: i32 = 4000;
 /// Во сколько знаков текста обходится картинка в колонку. Нужно там, где
@@ -125,7 +137,20 @@ struct Ui {
     back: gtk::Button,
     forward: gtk::Button,
     contents: gtk::ListBox,
-    contents_pane: gtk::ScrolledWindow,
+    /// Полка целиком: подпись, черта и прокрутка под ними. Прячется
+    /// и показывается она, а не список, — подпись обязана уходить вместе
+    /// с оглавлением.
+    shelf: gtk::Box,
+    /// Окно прокрутки полки. Нужно отдельно: по нему подсвеченную строку
+    /// доводят до глаз, когда оглавление длиннее полки.
+    shelf_view: gtk::ScrolledWindow,
+    /// Делитель окна: ширину полки читатель задаёт перетаскиванием.
+    split: gtk::Paned,
+    /// Ширина полки, которую выбрал читатель. Храним ширину, а не позицию
+    /// делителя: позиция считается от левого края, полка стоит у правого,
+    /// и при смене размера окна одна и та же позиция означала бы разную
+    /// ширину.
+    shelf_width: Rc<Cell<i32>>,
     show_contents: gtk::ToggleButton,
     dark_mode: gtk::ToggleButton,
     show_images: gtk::ToggleButton,
@@ -290,13 +315,32 @@ fn build(app: &Application, start: Vec<String>) {
         back: gtk::Button::from_icon_name("go-previous-symbolic"),
         forward: gtk::Button::from_icon_name("go-next-symbolic"),
         contents: gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
+            // Выделение здесь не выбор, а «вы сейчас здесь»: строку под
+            // глазами полка отмечает сама, по ходу чтения.
+            .selection_mode(gtk::SelectionMode::Single)
             .build(),
-        contents_pane: gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .width_request(TOC_WIDTH)
+        shelf: gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .width_request(TOC_MIN)
             .visible(false)
             .build(),
+        shelf_view: gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .build(),
+        split: gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            // Лишнее место при смене размера окна достаётся статье,
+            // полка держит свою ширину.
+            .resize_start_child(true)
+            .resize_end_child(false)
+            // Ужать статью уже меры делитель не даст: мера — обещание
+            // продукта, а не предпочтение читателя.
+            .shrink_start_child(false)
+            .shrink_end_child(false)
+            .vexpand(true)
+            .build(),
+        shelf_width: Rc::new(Cell::new(TOC_WIDTH)),
         show_contents: gtk::ToggleButton::builder()
             .icon_name("view-list-symbolic")
             .tooltip_text("Contents")
@@ -330,8 +374,25 @@ fn build(app: &Application, start: Vec<String>) {
         tally: gtk::Label::builder().width_chars(10).xalign(1.0).build(),
         paint: gtk::CssProvider::new(),
     };
-    ui.contents_pane.set_child(Some(&ui.contents));
-    ui.contents_pane.add_css_class("shelf");
+    // Подпись над полкой. Стоит над прокруткой, а не первой строкой
+    // списка: иначе она уезжает вверх вместе с оглавлением ровно тогда,
+    // когда по ней сверяются.
+    let shelf_title = gtk::Label::builder()
+        .label("Contents")
+        .xalign(0.0)
+        .margin_start(10)
+        .margin_end(10)
+        .margin_top(8)
+        .margin_bottom(8)
+        .build();
+    shelf_title.add_css_class("shelf-title");
+    ui.shelf_view.set_child(Some(&ui.contents));
+    ui.shelf.append(&shelf_title);
+    ui.shelf
+        .append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    ui.shelf.append(&ui.shelf_view);
+    ui.shelf.add_css_class("shelf");
+    ui.shelf_view.add_css_class("shelf");
     ui.contents.add_css_class("shelf");
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
@@ -374,15 +435,13 @@ fn build(app: &Application, start: Vec<String>) {
     ui.search.set_show_close_button(true);
     ui.search.connect_entry(&ui.needle);
 
-    let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    body.append(&ui.notebook);
-    body.append(&ui.contents_pane);
-    body.set_vexpand(true);
+    ui.split.set_start_child(Some(&ui.notebook));
+    ui.split.set_end_child(Some(&ui.shelf));
 
     // Поиск внизу, как в браузерах: строка приходит и уходит, и двигать
     // ради неё текст незачем.
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    root.append(&body);
+    root.append(&ui.split);
     root.append(&ui.search);
     root.append(&ui.notice);
     ui.window.set_child(Some(&root));
@@ -526,9 +585,29 @@ fn build(app: &Application, start: Vec<String>) {
             });
     }
     {
-        let pane = ui.contents_pane.clone();
+        let ui = ui.clone();
         ui.show_contents.clone().connect_toggled(move |button| {
-            pane.set_visible(button.is_active() && button.is_sensitive());
+            ui.shelf
+                .set_visible(button.is_active() && button.is_sensitive());
+            fit_shelf(&ui);
+        });
+    }
+    {
+        // Делитель подвинули — запоминаем ширину полки, а не позицию.
+        //
+        // Пока мы позицию не поставили, ею распоряжается GTK, и полка
+        // у него схлопнута до `width_request`: принять это за выбор
+        // читателя значит выбор потерять.
+        let ui = ui.clone();
+        ui.split.clone().connect_position_notify(move |split| {
+            if !ui.shelf.is_visible() || !split.is_position_set() {
+                return;
+            }
+            let width = split.width();
+            if width > 0 {
+                ui.shelf_width
+                    .set((width - split.position()).clamp(TOC_MIN, TOC_MAX));
+            }
         });
     }
     {
@@ -546,7 +625,11 @@ fn build(app: &Application, start: Vec<String>) {
             match act {
                 Some(Row::Jump(offset)) => {
                     if let Some(view) = current(&ui, &state) {
-                        scroll_to(&view, offset, ANCHOR_ALIGN);
+                        // Доводим прокрутку до конца, а не прыгаем один раз:
+                        // пока картинки и таблицы добирают высоту, одиночный
+                        // прыжок промахивается мимо заголовка — и на полке
+                        // загорается соседний пункт.
+                        settle(&view, offset, ANCHOR_ALIGN);
                     }
                 }
                 Some(Row::Open(address)) => open_current(&ui, &state, address, true),
@@ -740,6 +823,17 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         });
     }
 
+    {
+        // Читатель прокрутил страницу — полка отмечает, куда он доехал.
+        let ui = ui.clone();
+        let state = state.clone();
+        scroller.vadjustment().connect_value_changed(move |_| {
+            if current_id(&ui, &state) == Some(id) {
+                follow(&ui, &state);
+            }
+        });
+    }
+
     // ── клик по ссылке
     // Ноль значит «все кнопки»: по умолчанию жест слушает только левую,
     // и средняя до ссылки не доходила.
@@ -865,6 +959,12 @@ fn close_tab(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
     }
     ui.notebook.set_show_tabs(ui.notebook.n_pages() > 1);
     sync(ui, state, None);
+}
+
+/// Какая вкладка открыта. Прокрутка фоновой вкладки полку не трогает.
+fn current_id(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<u64> {
+    let index = ui.notebook.current_page()? as usize;
+    state.try_borrow().ok()?.tabs.get(index).map(|tab| tab.id)
 }
 
 fn current(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<gtk::TextView> {
@@ -1060,13 +1160,118 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let empty = shelf.is_empty();
     state.borrow_mut().shelf = shelf;
     ui.show_contents.set_sensitive(!empty);
-    ui.contents_pane
-        .set_visible(ui.show_contents.is_active() && !empty);
+    ui.shelf.set_visible(ui.show_contents.is_active() && !empty);
+    fit_shelf(ui);
+    follow(ui, state);
 
     // Поиск открыт — ищем в том, что теперь на экране: подсветка и счётчик
     // принадлежат странице, а не строке ввода.
     if ui.search.is_search_mode() {
         find(ui, state, &ui.needle.text(), true);
+    }
+}
+
+/// Поставить делитель так, чтобы полка вышла той ширины, какую выбрали.
+///
+/// Позицию GTK считает от левого края, а полка стоит у правого: держать
+/// позицию значило бы отдавать полке весь прирост окна. Поэтому хранится
+/// ширина, а позиция каждый раз считается заново.
+fn fit_shelf(ui: &Ui) {
+    let width = ui.split.width();
+    if width <= 0 {
+        // Окно ещё не разложено, ширины нет — считать не по чему. Первая
+        // страница открывается до показа окна, и без этого возврата полка
+        // так и осталась бы самой узкой, какую позволяет `width_request`.
+        let ui = ui.clone();
+        ui.split.clone().add_tick_callback(move |split, _| {
+            if split.width() <= 0 {
+                return glib::ControlFlow::Continue;
+            }
+            fit_shelf(&ui);
+            glib::ControlFlow::Break
+        });
+        return;
+    }
+    // Шире половины окна полки не бывает: она рядом со статьёй, а не вместо
+    // неё. Снизу её держит `width_request`, и делитель туда не пустит.
+    let room = TOC_MAX.min((width / 2).max(TOC_MIN));
+    ui.split
+        .set_position(width - ui.shelf_width.get().clamp(TOC_MIN, room));
+}
+
+/// Отметить на полке то место страницы, где читатель сейчас.
+///
+/// Полка без этого отвечает только на вопрос «что на странице есть»,
+/// а читателю по ходу чтения нужен и второй — «где я в ней».
+fn follow(ui: &Ui, state: &Rc<RefCell<State>>) {
+    if !ui.shelf.is_visible() {
+        return;
+    }
+    let Some(page) = ui.notebook.current_page() else {
+        return;
+    };
+    // Прокрутка приходит и посреди перестройки состояния: заём тогда занят,
+    // а подсветке довольно дождаться следующего движения.
+    let Ok(borrowed) = state.try_borrow() else {
+        return;
+    };
+    let Some(tab) = borrowed.tabs.get(page as usize) else {
+        return;
+    };
+    let view = tab.view.clone();
+
+    // Мерим не по верхней кромке, а по той строке, куда ставит заголовок
+    // прыжок по оглавлению: иначе заголовок, к которому только что перешли,
+    // оказывается выше пробы и текущим не считается.
+    //
+    // Плюс полстроки запаса. Прыжок ставит верх заголовка ровно на линию
+    // пробы, и промаха в пиксель хватает, чтобы проба попала в строку выше,
+    // а на полке отметился предыдущий раздел — то самое «кликнул, а горит
+    // не то».
+    let seen = view.visible_rect();
+    let slack = (text_px() * LINE_HEIGHT / 2.0) as i32;
+    let probe = seen.y() + (f64::from(seen.height()) * ANCHOR_ALIGN) as i32 + slack;
+    // Проба мимо текста — не ответ «конец документа», а «сейчас не знаю».
+    // Посреди прокрутки `GtkTextView` перекладывает строки, и высота
+    // документа на кадр расходится с прокруткой; считать такую пробу
+    // концом значило бы подсвечивать последний пункт — он и мигал.
+    let Some(place) = view.iter_at_location(0, probe) else {
+        return;
+    };
+    let offset = place.offset();
+
+    let mut here = None;
+    for (index, row) in borrowed.shelf.iter().enumerate() {
+        match row {
+            Row::Jump(at) if *at <= offset => here = Some(index),
+            // Дальше только заголовки ниже пробы: они по порядку.
+            Row::Jump(_) => break,
+            _ => {}
+        }
+    }
+    drop(borrowed);
+
+    match here.and_then(|index| ui.contents.row_at_index(index as i32)) {
+        // Выше первого заголовка отмечать нечего: читатель ещё во врезке.
+        None => ui.contents.unselect_all(),
+        Some(row) if row.is_selected() => {}
+        Some(row) => {
+            ui.contents.select_row(Some(&row));
+            reveal(&ui.shelf_view, &row);
+        }
+    }
+}
+
+/// Довести отмеченную строку до глаз — и не дальше того. Полка, которая
+/// прыгает на каждом повороте колеса, мешает больше, чем помогает.
+fn reveal(pane: &gtk::ScrolledWindow, row: &gtk::ListBoxRow) {
+    let bar = pane.vadjustment();
+    let top = f64::from(row.allocation().y());
+    let bottom = top + f64::from(row.height());
+    if top < bar.value() {
+        bar.set_value(top);
+    } else if bottom > bar.value() + bar.page_size() {
+        bar.set_value(bottom - bar.page_size());
     }
 }
 
@@ -1119,6 +1324,7 @@ fn page_css(dark: bool) -> String {
     };
     let colors = colors(dark);
     let (dim, rule) = (colors.dim, colors.rule);
+    let (chosen, touched) = (colors.chosen, colors.touched);
 
     format!(
         // Шапка и окно — в тот же тёплый ряд, что и бумага. Иначе слоновая
@@ -1127,6 +1333,11 @@ fn page_css(dark: bool) -> String {
         "window, headerbar {{ background-color: {shelf}; }}\n\
          .page, .page text {{ background-color: {paper}; color: {ink}; }}\n\
          .shelf, .shelf > viewport, .shelf list, .shelf row {{ background-color: {shelf}; }}\n\
+         .shelf separator {{ background-color: {rule}; }}\n\
+         .shelf-title {{ color: {dim}; font-weight: 500; }}\n\
+         .shelf row:hover {{ background-color: {touched}; }}\n\
+         .shelf row:selected {{ background-color: {chosen}; }}\n\
+         .shelf row:selected, .shelf row:selected label {{ color: {ink}; }}\n\
          .shot {{ border: 1px dashed {dim}; border-radius: 6px; padding: 20px 14px; \
                   color: {dim}; margin: 6px 0; }}\n\
          .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n\
@@ -1171,6 +1382,10 @@ struct Colors {
     comment: &'static str,
     /// Линейки таблицы.
     rule: &'static str,
+    /// Строка полки под глазами и строка под курсором. В тёплом ряду
+    /// бумаги, а не в синем ряду темы: полка стоит вплотную к странице.
+    chosen: &'static str,
+    touched: &'static str,
 }
 
 fn colors(dark: bool) -> Colors {
@@ -1184,6 +1399,8 @@ fn colors(dark: bool) -> Colors {
             number: "#dda15e",
             comment: "#8a8175",
             rule: "#3d3833",
+            chosen: "#332e27",
+            touched: "#252220",
         }
     } else {
         Colors {
@@ -1195,6 +1412,8 @@ fn colors(dark: bool) -> Colors {
             number: "#9a5518",
             comment: "#857c6e",
             rule: "#e2d9c6",
+            chosen: "#e7dabc",
+            touched: "#efe7d6",
         }
     }
 }
@@ -1754,18 +1973,10 @@ fn fill_contents(list: &gtk::ListBox, marks: &[Mark], entries: &[Entry]) -> Vec<
         shelf.push(Row::Header);
     }
     for entry in entries {
-        let label = gtk::Label::builder()
-            .label(clip(&entry.title, 42))
-            .xalign(0.0)
-            .wrap(true)
-            .margin_top(4)
-            .margin_bottom(4)
-            .margin_start(10)
-            .margin_end(10)
-            .build();
+        let (row, label) = shelf_row(&entry.title, 0);
         // Куда уводит строка, читатель вправе знать до нажатия.
         label.set_tooltip_text(Some(&entry.address.display()));
-        list.append(&gtk::ListBoxRow::builder().child(&label).build());
+        list.append(&row);
         shelf.push(Row::Open(entry.address.clone()));
     }
     if !entries.is_empty() && !marks.is_empty() {
@@ -1774,27 +1985,43 @@ fn fill_contents(list: &gtk::ListBox, marks: &[Mark], entries: &[Entry]) -> Vec<
     }
 
     for mark in marks {
-        let label = gtk::Label::builder()
-            .label(clip(&mark.title, 42))
-            .xalign(0.0)
-            .wrap(true)
-            .margin_top(4)
-            .margin_bottom(4)
-            .margin_start(10 + i32::from(mark.level.saturating_sub(1)) * 12)
-            .margin_end(10)
-            .build();
+        let (row, label) = shelf_row(&mark.title, i32::from(mark.level.saturating_sub(1)) * 12);
         if !mark.heading {
             // Веха — не структура автора, а наша выжимка. Пусть это видно.
             label.add_css_class("dim-label");
         }
-
-        let row = gtk::ListBoxRow::builder().child(&label).build();
         list.append(&row);
         // Точное попадание: смещение в буфере, а не доля высоты.
         shelf.push(Row::Jump(mark.offset));
     }
 
     shelf
+}
+
+/// Строка полки: подпись, за которой стоит работа.
+///
+/// Многоточие ставим только тому, что не влезло в три строки. Считать
+/// знаки, как раньше, значит рубить заголовок там, где место ещё было:
+/// полка теперь шире или уже по воле читателя, и сколько знаков в неё
+/// войдёт, знает Pango, а не мы. Ограничение по знакам остаётся крайним
+/// (`TOC_CHARS`) — на случай «заголовка» в целый абзац.
+fn shelf_row(title: &str, indent: i32) -> (gtk::ListBoxRow, gtk::Label) {
+    let label = gtk::Label::builder()
+        .label(clip(title, TOC_CHARS))
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(pango::WrapMode::WordChar)
+        .ellipsize(pango::EllipsizeMode::End)
+        .lines(TOC_LINES)
+        .margin_top(4)
+        .margin_bottom(4)
+        .margin_start(10 + indent)
+        .margin_end(10)
+        .build();
+    let row = gtk::ListBoxRow::builder().child(&label).build();
+    // Строка куда-то ведёт, и курсор обязан это показать — как на ссылке.
+    row.set_cursor_from_name(Some("pointer"));
+    (row, label)
 }
 
 /// Подпись над группой полки. Не строка: нажимать её не на что.
