@@ -2741,5 +2741,3 @@ The tooling around rustc and clippy looks *awesome*. Having seasoned Rust develo
 If you don’t, well, heck, I just might.
 
 (JavaScript is required to see this. Or maybe my stuff broke)
-
-Did you know I also make videos? Check them out on [YouTube](https://youtube.com/@fasterthanlime)!

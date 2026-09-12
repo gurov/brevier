@@ -6,6 +6,8 @@ Client/server SQL database engines strive to implement a shared repository of en
 
 SQLite does not compete with client/server databases. SQLite competes with [fopen()](http://man.he.net/man3/fopen).
 
+# 1\. Situations Where SQLite Works Well
+
 - **Embedded devices and the internet of things**
 
   Because an SQLite database requires no administration, it works well in devices that must operate without expert human support. SQLite is a good fit for use in cellphones, set-top boxes, televisions, game consoles, cameras, watches, kitchen appliances, thermostats, automobiles, machine tools, airplanes, remote sensors, drones, medical devices, and robots: the "internet of things".
@@ -80,6 +82,8 @@ SQLite does not compete with client/server databases. SQLite competes with [fope
 
   The simple, modular design of SQLite makes it a good platform for prototyping new, experimental database language features or ideas.
 
+  # 2\. Situations Where A Client/Server RDBMS May Work Better
+
 - **Client/Server Applications**
 
   If there are many client programs sending SQL to the same database over a network, then use a client/server database engine instead of SQLite. SQLite will work over a network filesystem, but because of the latency associated with most network filesystems, performance will not be great. Also, file locking logic is buggy in many network filesystem implementations (on both Unix and Windows). If file locking does not work correctly, two or more clients might try to modify the same part of the same database at the same time, resulting in corruption. Because this problem results from bugs in the underlying filesystem implementation, there is nothing SQLite can do to prevent it.
@@ -97,6 +101,8 @@ SQLite does not compete with client/server databases. SQLite competes with [fope
 - **High Concurrency**
 
   SQLite supports an unlimited number of simultaneous readers, but it will only allow one writer at any instant in time. For many situations, this is not a problem. Writers queue up. Each application does its database work quickly and moves on, and no lock lasts for more than a few dozen milliseconds. But there are some applications that require more concurrency, and those applications may need to seek a different solution.
+
+# 3\. Checklist For Choosing The Right Database Engine
 
 1. **Is the data separated from the application by a network? → choose client/server**
 

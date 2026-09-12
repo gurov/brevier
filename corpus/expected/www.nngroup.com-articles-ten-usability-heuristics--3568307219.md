@@ -8,6 +8,8 @@ Summary:  Jakob Nielsen's 10 general principles for interaction design. They ar
 
 *Thank you to [Kate Moran](https://www.nngroup.com/people/kate-moran/) and [Feifei Liu](https://www.nngroup.com/people/feifei-liu/) for updating the heuristic names, descriptions, and examples.*
 
+## In This Article:
+
 - [1: Visibility of System Status](#toc-1-visibility-of-system-status-1)
 - [2: Match Between the System and the Real World](#toc-2-match-between-the-system-and-the-real-world-2)
 - [3: User Control and Freedom](#toc-3-user-control-and-freedom-3)

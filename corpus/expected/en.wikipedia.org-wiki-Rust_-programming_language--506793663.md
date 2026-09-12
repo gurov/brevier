@@ -40,6 +40,8 @@ Software developer Graydon Hoare created Rust in 2006 while working at [Mozilla]
 
 Rust has been adopted by many software projects, especially [web services](https://en.wikipedia.org/wiki/Web_service "Web service") and [system software](https://en.wikipedia.org/wiki/System_software "System software"). It has been studied academically and has a growing community of developers.
 
+## History
+
 ### 2006–2009: Early years
 
 \[[edit](https://en.wikipedia.org/w/index.php?title=Rust_\(programming_language\)&action=edit&section=2 "Edit section: 2006–2009: Early years")\]
@@ -53,6 +55,8 @@ In 2006, Rust began as a personal project by [Mozilla](https://en.wikipedia.org/
 Early contributors have agreed that the language was based primarily on existing ideas. Hoare cited languages from the 1970s, 1980s, and 1990s as influences — including [CLU](https://en.wikipedia.org/wiki/CLU_\(programming_language\) "CLU (programming language)"), [BETA](https://en.wikipedia.org/wiki/BETA_\(programming_language\) "BETA (programming language)"), [Mesa](https://en.wikipedia.org/wiki/Mesa_\(programming_language\) "Mesa (programming language)"), NIL,[\[note 4\]](#cite_note-nil-11) [Erlang](https://en.wikipedia.org/wiki/Erlang_\(programming_language\) "Erlang (programming language)"), [Newsqueak](https://en.wikipedia.org/wiki/Newsqueak "Newsqueak"), [Napier](https://en.wikipedia.org/wiki/Napier88 "Napier88"), [Hermes](https://en.wikipedia.org/wiki/Hermes_\(programming_language\) "Hermes (programming language)"), [Sather](https://en.wikipedia.org/wiki/Sather "Sather"), [Alef](https://en.wikipedia.org/wiki/Alef_\(programming_language\) "Alef (programming language)"), and [Limbo](https://en.wikipedia.org/wiki/Limbo_\(programming_language\) "Limbo (programming language)").[^18] He described the language as "technology from the past come to save the future from itself."[^17]: 8:17 [^18] Early contributor Manish Goregaokar similarly described it as based on "mostly decades-old research."[^16]
 
 The first [compiler](https://en.wikipedia.org/wiki/Compiler "Compiler") was written in about 38,000 lines of [OCaml](https://en.wikipedia.org/wiki/OCaml "OCaml").[^17]: 15:34 [^19] It supported a number of features no longer present today, including explicit [object-oriented programming](https://en.wikipedia.org/wiki/Object-oriented_programming "Object-oriented programming") via an `obj` keyword[^17]: 10:08  and a [typestate analysis](https://en.wikipedia.org/wiki/Typestate_analysis "Typestate analysis") system tracking variable state such as going from uninitialized to initialized.[^17]: 13:12
+
+### 2009–2012: Mozilla sponsorship
 
 In 2009, Mozilla officially sponsored the project.[^16] [Brendan Eich](https://en.wikipedia.org/wiki/Brendan_Eich "Brendan Eich") and other executives, intrigued by the possibility of using Rust for a safe [web browser](https://en.wikipedia.org/wiki/Web_browser "Web browser") engine, placed engineers on the project including Patrick Walton, Niko Matsakis, Felix Klock, and Manish Goregaokar.[^16] A conference room taken by the project developers was dubbed "the nerd cave," with a sign placed outside the door.[^16]
 
@@ -114,6 +118,8 @@ Rust's [syntax](https://en.wikipedia.org/wiki/Syntax_\(programming_languages\) "
 
 Below is a ["Hello, World!" program](https://en.wikipedia.org/wiki/"Hello,_World!"_program "\"Hello, World!\" program") in Rust. The `fn` keyword denotes a [function](https://en.wikipedia.org/wiki/Function_\(computer_programming\) "Function (computer programming)"), and the `println!` [macro](https://en.wikipedia.org/wiki/Macro_\(computer_science\) "Macro (computer science)") (see [§ Macros](#Macros)) prints the message to [standard output](https://en.wikipedia.org/wiki/Standard_output "Standard output").[^45] [Statements](https://en.wikipedia.org/wiki/Statement_\(computer_science\) "Statement (computer science)") in Rust are separated by [semicolons](https://en.wikipedia.org/wiki/Semicolon#Programming "Semicolon").
 
+### Variables
+
 fn main() {
     println!("Hello, World!");
 }
@@ -169,6 +175,8 @@ fn main() {
 
 Trailing expressions of function bodies are used as the return value:[^51]
 
+#### `if` expressions
+
 fn add_two(x: i32) -> i32 {
     x + 2
 }
@@ -191,6 +199,8 @@ fn main() {
 }
 
 `if` and `else` blocks can evaluate to a value, which can then be assigned to a variable:[^52]
+
+#### `while` loops
 
 fn main() {
     let x = 10;
@@ -235,6 +245,8 @@ Iterators can be combined with functions over iterators like `map`, `filter`, an
 
 More generally, the `loop` keyword allows repeating a portion of code until a `break` occurs. `break` may optionally exit the loop with a value. In the case of nested loops, labels denoted by `'label_name` can be used to break an outer loop rather than the innermost loop.[^55]
 
+### Pattern matching
+
 fn main() {
     let value = 456;
     let mut x = 1;
@@ -277,6 +289,8 @@ fn double(x: Option<u64>) -> u64 {
 
 Equivalently, this can be written with `if let` and `else`:
 
+### Types
+
 fn double(x: Option<u64>) -> u64 {
     if let Some(value) = x {
         value * 2
@@ -290,11 +304,15 @@ The [unit type](https://en.wikipedia.org/wiki/Unit_type "Unit type"), notated `(
 
 The default integer type is `i32`, and the default [floating point](https://en.wikipedia.org/wiki/Floating_point "Floating point") type is `f64`. If the type of a [literal](https://en.wikipedia.org/wiki/Literal_\(computer_programming\) "Literal (computer programming)") number is not explicitly provided, it is either inferred from the context or the default type is used.[^58]
 
+#### Primitive types
+
 [Integer types](https://en.wikipedia.org/wiki/Integer_type "Integer type") in Rust are named based on the [signedness](https://en.wikipedia.org/wiki/Signedness "Signedness") and the number of bits the type takes. For example, `i32` is a signed integer that takes 32 bits of storage, whereas `u8` is unsigned and only takes 8 bits of storage. `isize` and `usize` take storage depending on the [memory address bus width](https://en.wikipedia.org/wiki/Bus_\(computing\)#Address_bus "Bus (computing)") of the compilation target. For example, when building for [32-bit targets](https://en.wikipedia.org/wiki/32-bit_computing "32-bit computing"), both types will take up 32 bits of space.[^59][^60]
 
 By default, integer literals are in base-10, but different [radices](https://en.wikipedia.org/wiki/Radix "Radix") are supported with prefixes, for example, `0b11` for [binary numbers](https://en.wikipedia.org/wiki/Binary_number "Binary number"), `0o567` for [octals](https://en.wikipedia.org/wiki/Octal "Octal"), and `0xDB` for [hexadecimals](https://en.wikipedia.org/wiki/Hexadecimal "Hexadecimal"). By default, integer literals default to `i32` as its type. Suffixes such as `4u32` can be used to explicitly set the type of a literal.[^61] Byte literals such as `b'X'` are available to represent the [ASCII](https://en.wikipedia.org/wiki/ASCII "ASCII") value (as a `u8`) of a specific character.[^62]
 
 The [Boolean type](https://en.wikipedia.org/wiki/Boolean_type "Boolean type") is referred to as `bool` which can take a value of either `true` or `false`. A `char` takes up 32 bits of space and represents a Unicode scalar value:[^63] a [Unicode codepoint](https://en.wikipedia.org/wiki/Unicode_codepoint "Unicode codepoint") that is not a [surrogate](https://en.wikipedia.org/wiki/Universal_Character_Set_characters#Surrogates "Universal Character Set characters").[^64] [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754 "IEEE 754") floating point numbers are supported with `f32` for [single precision floats](https://en.wikipedia.org/wiki/Single_precision_float "Single precision float") and `f64` for [double precision floats](https://en.wikipedia.org/wiki/Double_precision_float "Double precision float").[^65]
+
+#### Compound types
 
 Compound types can contain multiple values. Tuples are fixed-size lists that can contain values whose types can be different. Arrays are fixed-size lists whose values are of the same type. Expressions of the tuple and array types can be written through listing the values, and can be accessed with `.index` (with tuples) or `[index]` (with arrays):[^66]
 
@@ -340,6 +358,8 @@ Because of these ownership rules, Rust types are known as *[affine types](https:
 
 When a value goes out of scope, it is *dropped* by running its [destructor](https://en.wikipedia.org/wiki/Destructor_\(computer_programming\) "Destructor (computer programming)"). The destructor may be programmatically defined through implementing the `Drop` [trait](#Traits). This helps manage resources such as file handles, network sockets, and [locks](https://en.wikipedia.org/wiki/Lock_\(computer_science\) "Lock (computer science)"), since when objects are dropped, the resources associated with them are closed or released automatically.[^73]
 
+#### Lifetimes
+
 [Object lifetime](https://en.wikipedia.org/wiki/Object_lifetime "Object lifetime") refers to the period of time during which a reference is valid; that is, the time between the object creation and destruction.[^74] These *lifetimes* are implicitly associated with all Rust reference types. While often inferred, they can also be indicated explicitly with named lifetime parameters (often denoted `'a`, `'b`, and so on).[^75]
 
 A value's lifetime in Rust is inferred from the set of locations in the source code (i.e., function, line, and column numbers) for which a variable is valid.[^76] For example, a reference to a local variable has a lifetime from the expression it is declared in up until the last use of it.[^76]
@@ -381,9 +401,13 @@ fn remove_prefix<'a>(mut original: &'a str, prefix: &str) -> &'a str {
 
 In the compiler, ownership and lifetimes work together to prevent memory safety issues such as dangling pointers.[^81][^82]
 
+### User-defined types
+
 User-defined types are created with the `struct` or `enum` keywords. The `struct` keyword is used to denote a [record type](https://en.wikipedia.org/wiki/Record_\(computer_science\) "Record (computer science)") that groups multiple related values.[^83] `enum`s can take on different variants at runtime, with their capabilities similar to [algebraic data types](https://en.wikipedia.org/wiki/Algebraic_data_types "Algebraic data types") found in functional programming languages.[^84] Both records and enum variants can contain [fields](https://en.wikipedia.org/wiki/Field_\(computer_science\) "Field (computer science)") with different types.[^85] Alternative names, or aliases, for the same type can be defined with the `type` keyword.[^86]
 
 The `impl` keyword can define methods for a user-defined type. Data and functions are defined separately. Implementations fulfill a role similar to that of [classes](https://en.wikipedia.org/wiki/Class_\(programming\) "Class (programming)") within other languages.[^87]
+
+#### Standard library
 
 [![](https://thumb.wikimedia.org/wikipedia/commons/thumb/a/af/Rust_standard_libraries.svg/250px-Rust_standard_libraries.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://en.wikipedia.org/wiki/File:Rust_standard_libraries.svg)
 
@@ -409,9 +433,15 @@ fn main() {
 
 Similarly, Rust's [result type](https://en.wikipedia.org/wiki/Result_type "Result type") `Result<T, E>` holds either a successfully computed value (the `Ok` variant) or an error (the `Err` variant).[^90] Like `Option`, the use of `Result` means that the inner value cannot be used directly; programmers must use a `match` expression, syntactic sugar such as `?` (the "try" operator), or an explicit `unwrap` assertion to access it. Both `Option` and `Result` are used throughout the standard library and are a fundamental part of Rust's explicit approach to handling errors and missing data.
 
+### Pointers
+
 The `&` and `&mut` reference types are guaranteed to not be null and point to valid memory.[^91] The raw pointer types `*const` and `*mut` opt out of the safety guarantees, thus they may be null or invalid; however, it is impossible to dereference them unless the code is explicitly declared unsafe through the use of an `unsafe` block.[^92] Unlike dereferencing, the creation of raw pointers is allowed inside safe Rust code.[^93]
 
+### Type conversion
+
 Rust provides no implicit type conversion (coercion) between most primitive types. But, explicit type conversion (casting) can be performed using the `as` keyword.[^94]
+
+### Polymorphism
 
 let x: i32 = 1000;
 println!("1000 as a u16 is: {}", x as u16);
@@ -419,6 +449,8 @@ println!("1000 as a u16 is: {}", x as u16);
 A presentation on Rust by Emily Dunham from [Mozilla](https://en.wikipedia.org/wiki/Mozilla "Mozilla")'s Rust team ([linux.conf.au](https://en.wikipedia.org/wiki/Linux.conf.au "Linux.conf.au") conference, Hobart, 2017)
 
 Rust supports [polymorphism](https://en.wikipedia.org/wiki/Polymorphism_\(computer_science\) "Polymorphism (computer science)") through [traits](https://en.wikipedia.org/wiki/Trait_\(computer_programming\) "Trait (computer programming)"), [generic functions](https://en.wikipedia.org/wiki/Generic_function "Generic function"), and [trait objects](https://en.wikipedia.org/wiki/Trait_object_\(Rust\) "Trait object (Rust)").[^95]
+
+#### Traits
 
 Common behavior between types is declared using traits and `impl` blocks:[^96]
 
@@ -442,6 +474,8 @@ impl Zero for f32 {
 
 The example above includes a method `is_zero` that provides a default implementation that may be overridden when implementing the trait.[^96]
 
+#### Generic functions
+
 A function can be made generic by adding type parameters inside angle brackets (`<Num>`), which only allow types that implement the trait:
 
 // zero is a generic function with one type parameter, Num
@@ -458,6 +492,8 @@ fn main() {
 In the examples above, `Num: Zero` as well as `where Self: PartialEq` are trait bounds that constrain the type to only allow types that implement `Zero` or `PartialEq`.[^96] Within a trait or impl, `Self` refers to the type that the code is implementing.[^97]
 
 Generics can be used in functions to allow implementing a behavior for different types without repeating the same code (see [bounded parametric polymorphism](https://en.wikipedia.org/wiki/Bounded_parametric_polymorphism "Bounded parametric polymorphism")). Generic functions can be written in relation to other generics, without knowing the actual type.[^98]
+
+#### Trait objects
 
 By default, traits use [static dispatch](https://en.wikipedia.org/wiki/Static_dispatch "Static dispatch"): the compiler [monomorphizes](https://en.wikipedia.org/wiki/Monomorphization "Monomorphization") the function for each concrete type instance, yielding performance equivalent to type-specific code at the cost of longer compile times and larger binaries.[^99]
 
@@ -479,9 +515,13 @@ for x in v {
 
 If an element in the list does not implement the `Display` trait, it will cause a compile-time error.[^103]
 
+### Memory management
+
 Rust does not use [garbage collection](https://en.wikipedia.org/wiki/Garbage_collection_\(computer_science\) "Garbage collection (computer science)"). Memory and other resources are instead managed through the "resource acquisition is initialization" convention,[^104] with optional [reference counting](https://en.wikipedia.org/wiki/Reference_counting "Reference counting"). Rust provides deterministic management of resources, with very low [overhead](https://en.wikipedia.org/wiki/Overhead_\(computing\) "Overhead (computing)").[^105] Values are [allocated on the stack](https://en.wikipedia.org/wiki/Stack-based_memory_allocation "Stack-based memory allocation") by default, and all [dynamic allocations](https://en.wikipedia.org/wiki/Dynamic_allocation "Dynamic allocation") must be explicit.[^106]
 
 The built-in reference types using the `&` symbol do not involve run-time reference counting. The safety and validity of the underlying pointers are verified at compile time, preventing [dangling pointers](https://en.wikipedia.org/wiki/Dangling_pointers "Dangling pointers") and other forms of [undefined behavior](https://en.wikipedia.org/wiki/Undefined_behavior "Undefined behavior").[^107] Rust's type system separates shared, [immutable](https://en.wikipedia.org/wiki/Immutable "Immutable") references of the form `&T` from unique, mutable references of the form `&mut T`. A mutable reference can be coerced to an immutable reference, but not vice versa.[^108]
+
+### Unsafe
 
 Rust's memory safety checks (See [#Safety](#Safety)) may be circumvented through the use of `unsafe` blocks. This allows programmers to dereference arbitrary raw pointers, call external code, or perform other low-level functionality not allowed by safe Rust.[^109] Some low-level functionality enabled in this way includes [volatile memory access](https://en.wikipedia.org/wiki/Volatile_\(computer_programming\) "Volatile (computer programming)"), architecture-specific intrinsics, [type punning](https://en.wikipedia.org/wiki/Type_punning "Type punning"), and inline assembly.[^110]
 
@@ -489,7 +529,11 @@ Unsafe code is needed, for example, in the implementation of data structures.[^1
 
 Programmers using unsafe Rust are considered responsible for upholding Rust's memory and type safety requirements, for example, that no two mutable references exist pointing to the same location.[^116] If programmers write code that violates these requirements, this results in [undefined behavior](https://en.wikipedia.org/wiki/Undefined_behavior "Undefined behavior").[^116] The Rust documentation includes a list of behaviors considered undefined, including accessing dangling or misaligned pointers, or breaking the aliasing rules for references.[^117]
 
+### Macros
+
 Macros allow the generation and transformation of Rust code to reduce repetition. Macros come in two forms, with *declarative macros* defined through `macro_rules!`, and *procedural macros*, which are defined in separate crates.[^118][^119]
+
+#### Declarative macros
 
 A declarative macro (also called a "macro by example") is a macro, defined using the `macro_rules!` keyword, that uses pattern matching to determine its expansion.[^120][^121] Below is an example that sums over all its arguments:
 
@@ -505,6 +549,8 @@ fn main() {
 }
 
 In this example, the macro named `sum` is defined using the form `macro_rules! sum {` `(...) => { ... } }`. The first part inside the parentheses of the definition, the macro pattern `( $initial:expr $(, $expr:expr )* $(,)? )` specifies the structure of input it can take. Here, `$initial:expr` represents the first expression, while `$(, $expr:expr )*` means there can be zero or more additional comma-separated expressions after it. The trailing `$(,)?` allows the caller to optionally include a final comma without causing an error. The second part, after the arrow `=>`, describes what code will be generated when the macro is invoked. In this case, `$initial $(+ $expr)*` means that the generated code will start with the first expression, followed by a `+` and each of the additional expressions in sequence. The `*` again means "repeat this pattern zero or more times". This means, when the macro is later called in line 8, as `sum!(1, 2, 3)`, the macro will resolve to `1 + 2 + 3` representing the addition of all of the passed expressions.
+
+#### Procedural macros
 
 Procedural macros are Rust functions that run and modify the compiler's input [token](https://en.wikipedia.org/wiki/Token_\(parser\) "Token (parser)") stream, before any other components are compiled. They are generally more flexible than declarative macros, but are more difficult to maintain due to their complexity.[^122][^123]
 
@@ -528,19 +574,27 @@ unsafe extern "C" {
 
 The `#[repr(C)]` attribute enables deterministic memory layouts for `struct`s and `enum`s for use across FFI boundaries.[^124] External libraries such as `bindgen` and `cxx` can generate Rust bindings for C/C++.[^124][^125]
 
+## Safety
+
 [Safety properties](https://en.wikipedia.org/wiki/Safety_properties "Safety properties") guaranteed by Rust include [memory safety](https://en.wikipedia.org/wiki/Memory_safety "Memory safety"), [type safety](https://en.wikipedia.org/wiki/Type_safety "Type safety"), and [data race](https://en.wikipedia.org/wiki/Data_race "Data race") freedom. As described above, these guarantees can be circumvented by using the `unsafe` keyword.
 
 Memory safety includes the absence of dereferences to [null](https://en.wikipedia.org/wiki/Null_pointer "Null pointer"), [dangling](https://en.wikipedia.org/wiki/Dangling_pointer "Dangling pointer"), and misaligned [pointers](https://en.wikipedia.org/wiki/Pointer_\(computer_programming\) "Pointer (computer programming)"), and the absence of [buffer overflows](https://en.wikipedia.org/wiki/Buffer_overflow "Buffer overflow") and [double free](https://en.wikipedia.org/wiki/Double_free "Double free") errors.[^126][^127][^128][^129]
 
 [Memory leaks](https://en.wikipedia.org/wiki/Memory_leak "Memory leak") are possible in safe Rust.[^130] Memory leaks may occur as a result of creating reference-counted pointers that point at each other (a reference cycle)[^130] or can be deliberately created through calling `Box::leak`.[^131]
 
+## Ecosystem
+
 Compiling a Rust program with Cargo
 
 The Rust ecosystem includes its compiler, [standard library](#Standard_library), and other software development [toolchain](https://en.wikipedia.org/wiki/Toolchain "Toolchain") components. Component installation is typically managed by `rustup`, a Rust [toolchain](https://en.wikipedia.org/wiki/Toolchain "Toolchain") installer.[^132]
 
+### Compiler
+
 The [Rust compiler](https://en.wikipedia.org/wiki/Rust_compiler "Rust compiler"), `rustc`, compiles Rust code into [executables](https://en.wikipedia.org/wiki/Executable "Executable"). Source code is parsed as an [abstract syntax tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree "Abstract syntax tree") (AST) and lowered through multiple [intermediate representations](https://en.wikipedia.org/wiki/Intermediate_representation "Intermediate representation") (IRs). Next, a compiler backend is invoked to apply [optimizations](https://en.wikipedia.org/wiki/Optimizing_compiler "Optimizing compiler") and produce [object code](https://en.wikipedia.org/wiki/Object_code "Object code"), and a [linker](https://en.wikipedia.org/wiki/Linker_\(computing\) "Linker (computing)") combines the object(s) into a single binary executable.[^133]
 
 The compiler uses [LLVM](https://en.wikipedia.org/wiki/LLVM "LLVM") as its default backend, and supports alternatives such as [GCC](https://en.wikipedia.org/wiki/GNU_Compiler_Collection "GNU Compiler Collection") and [Cranelift](https://en.wikipedia.org/wiki/Cranelift "Cranelift").[^134] The intention of those alternative backends is to increase platform coverage of Rust or to improve compilation times.[^135][^136]
+
+### Cargo
 
 [![](https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Crates.io_website.png/250px-Crates.io_website.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://en.wikipedia.org/wiki/File:Crates.io_website.png)
 
@@ -552,7 +606,11 @@ By default, Cargo sources its dependencies from the user-contributed registry *c
 
 Cargo supports reproducible builds through two metadata files: Cargo.toml and Cargo.lock.[^139] Cargo.toml declares each package used and its version requirements. Cargo.lock is generated automatically during dependency resolution and records exact versions of all dependencies, including [transitive dependencies](https://en.wikipedia.org/wiki/Transitive_dependency "Transitive dependency").[^140]
 
+### Rustfmt
+
 Rustfmt is a [code formatter](https://en.wikipedia.org/wiki/Code_formatter "Code formatter") for Rust. It formats whitespace and [indentation](https://en.wikipedia.org/wiki/Indentation_style "Indentation style") to produce code in accordance with a common [programming style](https://en.wikipedia.org/wiki/Programming_style "Programming style"). It can be invoked as a standalone program or through Cargo.[^141]
+
+### Clippy
 
 [![](https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6c/Cargo_clippy_hello_world_example.png/250px-Cargo_clippy_hello_world_example.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://en.wikipedia.org/wiki/File:Cargo_clippy_hello_world_example.png)
 
@@ -560,11 +618,17 @@ Example output of Clippy on a hello world Rust program
 
 Clippy is Rust's built-in [linting](https://en.wikipedia.org/wiki/Linting "Linting") tool to improve the correctness, performance, and readability of Rust code. As of 2026, it has over 800 rules.[^142][^143]
 
+### Versioning system
+
 Following Rust 1.0, new features are developed in *nightly* versions, released daily. During each six-week release cycle, changes to nightly versions are released to beta, while changes from the previous beta version are released to a new stable version.[^144]
 
 Every two or three years, a new "edition" is produced. Editions are released to allow making limited [breaking changes](https://en.wikipedia.org/wiki/Breaking_changes "Breaking changes"), such as promoting `await` to a keyword to support [async/await](https://en.wikipedia.org/wiki/Async/await "Async/await") features. Crates targeting different editions can interoperate with each other, so a crate can upgrade to a new edition even if its callers or its dependencies still target older editions. Migration to a new edition can be assisted with automated tooling.[^145]
 
+### IDE support
+
 *rust-analyzer* is a set of [utilities](https://en.wikipedia.org/wiki/Utility_software "Utility software") that provides [integrated development environments](https://en.wikipedia.org/wiki/Integrated_development_environment "Integrated development environment") (IDEs) and [text editors](https://en.wikipedia.org/wiki/Text_editor "Text editor") with information about a Rust project through the [Language Server Protocol](https://en.wikipedia.org/wiki/Language_Server_Protocol "Language Server Protocol"). Among other features, this is used for [autocomplete](https://en.wikipedia.org/wiki/Autocomplete "Autocomplete") and displaying [compilation errors](https://en.wikipedia.org/wiki/Compilation_error "Compilation error") during editing.[^146]
+
+## Performance
 
 Lacking garbage collection, Rust is often faster than other memory-safe languages.[^147][^72][^148] Most of Rust's memory safety guarantees impose no runtime overhead,[^149] with the notable exception of [array indexing](https://en.wikipedia.org/wiki/Array_\(data_structure\) "Array (data structure)"), which is checked at runtime by default.[^150] The performance impact of array indexing bounds checks varies, but can be significant in some cases.[^150]
 
@@ -573,6 +637,8 @@ Many of Rust's features are *zero-cost abstractions*, meaning they are optimized
 Unlike in C and C++, the Rust compiler may reorder struct and enum elements unless a `#[repr(C)]` representation attribute is applied.[^155] This can produce more efficient code in some cases.[^156]
 
 Performance improvements in [LLVM](https://en.wikipedia.org/wiki/LLVM "LLVM") carry over to Rust using the default backend.[^157]
+
+## Adoption
 
 [![](https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a0/Firefox_logo%2C_2019.svg/250px-Firefox_logo%2C_2019.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://en.wikipedia.org/wiki/File:Firefox_logo,_2019.svg)
 
@@ -604,11 +670,15 @@ Outside of computer science, Rust has been investigated for its use in scientifi
 
 The 2025 [DARPA](https://en.wikipedia.org/wiki/DARPA "DARPA") project TRACTOR aims to automatically translate C to Rust using techniques such as static analysis, dynamic analysis, and large language models.[^194]
 
+## Community
+
 [![A bright orange crab icon](https://thumb.wikimedia.org/wikipedia/commons/thumb/2/20/Rustacean-orig-noshadow.svg/250px-Rustacean-orig-noshadow.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://en.wikipedia.org/wiki/File:Rustacean-orig-noshadow.svg)
 
 Some Rust users refer to themselves as Rustaceans (similar to the word [crustaceans](https://en.wikipedia.org/wiki/Crustacean "Crustacean")) and have adopted an orange crab, Ferris (shown above), as their mascot[^195][^196]
 
 According to the *[MIT Technology Review](https://en.wikipedia.org/wiki/MIT_Technology_Review "MIT Technology Review")*, the Rust community has been seen as "unusually friendly" to newcomers and particularly attracted people from the [queer community](https://en.wikipedia.org/wiki/Queer_community "Queer community"), partly due to its [code of conduct](https://en.wikipedia.org/wiki/Code_of_conduct "Code of conduct").[^16] Inclusiveness has been cited as an important factor for some developers.[^137] The official blog collects and publishes demographic data each year.[^197]
+
+### Rust Foundation
 
 Rust Foundation
 Formation
@@ -632,6 +702,8 @@ The **Rust Foundation** is a non-profit [membership organization](https://en.wik
 It was established on February 8, 2021.[^200] The foundation's board was chaired by Shane Miller,[^201] with Ashley Williams as interim executive director.[^43] In late 2021, Rebecca Rumbul became executive director and CEO.[^202]
 
 The foundation's website lists ARM, Amazon, Google, Huawei, Meta, Microsoft, and OpenAI as platinum members.[^203] OpenAI is the latest platinum member, having joined in June 2026.[^41]
+
+### Governance teams
 
 The Rust project is maintained by 8 top-level *teams* as of November 2025: the leadership council, compiler team, dev tools team, infrastructure team, language team, launching pad, library team, and moderation team.[^204] The leadership council oversees the project and is formed by representatives among the other teams.[^205]
 

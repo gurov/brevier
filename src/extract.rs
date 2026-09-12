@@ -88,6 +88,13 @@ const ASIDE_WORDS: usize = 40;
 /// в форму, в подпись к картинке.
 const ASIDE_TAGS: [&str; 5] = ["aside", "footer", "nav", "form", "figure"];
 
+/// Заголовок длиннее этого — не заголовок, а абзац, которому забыли сменить
+/// тег: такие попадаются в старой вёрстке, и возвращать их незачем.
+const HEAD_CHARS: usize = 120;
+
+/// Всё, что бывает заголовком раздела.
+const HEAD_TAGS: &str = "h1, h2, h3, h4, h5, h6";
+
 /// Чем бывает тело сноски. Только блок: ссылка-номер ведёт и на `<sup>`
 /// в самом тексте — так устроена обратная ссылка у википедии, — а телом
 /// сноски `<sup>` не бывает нигде.
@@ -119,6 +126,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     keep_lang(&doc);
     unglue(&doc);
     unprint(&doc);
+    unpermalink(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
@@ -147,7 +155,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // Сироты возвращаем только в статью: в ленте абзацев статьи нет,
     // а решение «лента или статья» принято по строгому содержимому.
     let content_html = if listing_html.is_none() {
-        restore(&source, &content_html, url).unwrap_or(content_html)
+        restore(&source, &content_html, url, &article.title).unwrap_or(content_html)
     } else {
         content_html
     };
@@ -365,7 +373,7 @@ fn captioned(image: &NodeRef) -> bool {
 /// Порядок сохраняем, вставляя накопленное одним куском: `after_html`
 /// ставит новое сразу за якорем, и два вызова подряд перевернули бы пару
 /// абзацев местами.
-fn restore(source: &Document, content: &str, base: &str) -> Option<String> {
+fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<String> {
     let article = Document::from(content.to_string());
 
     let mut places: HashMap<String, NodeRef> = HashMap::new();
@@ -386,27 +394,69 @@ fn restore(source: &Document, content: &str, base: &str) -> Option<String> {
     // получал один и тот же текст по второму разу.
     let mut inside = squeeze(&article.select("body").text());
 
-    let page: Vec<(NodeRef, String, usize)> = source
-        .select("p")
+    // Заголовки, которые в статье уже есть, — по своему тексту. Сверять их
+    // с телом статьи целиком нельзя: строка в два слова находится в прозе
+    // слишком легко, и настоящий заголовок пропал бы из-за случайного
+    // совпадения.
+    let kept: HashSet<String> = article
+        .select(HEAD_TAGS)
         .nodes()
         .iter()
-        .filter_map(|node| para_key(node).map(|(key, words)| (*node, key, words)))
+        .filter_map(head_key)
         .collect();
 
-    let first = page
+    let page: Vec<(NodeRef, Piece)> = source
+        .select(&format!("p, {HEAD_TAGS}"))
+        .nodes()
         .iter()
-        .position(|(_, key, _)| places.contains_key(key))?;
-    let last = page
-        .iter()
-        .rposition(|(_, key, _)| places.contains_key(key))?;
+        .filter_map(|node| piece_of(node).map(|piece| (*node, piece)))
+        .collect();
+
+    // Границы считаем по абзацам, как и считали: заголовок в шапке страницы
+    // или в подвале границей статьи не является.
+    let inside_article = |piece: &Piece| match piece {
+        Piece::Para(key, _) => places.contains_key(key),
+        Piece::Head(_) => false,
+    };
+    let first = page.iter().position(|(_, piece)| inside_article(piece))?;
+    let last = page.iter().rposition(|(_, piece)| inside_article(piece))?;
 
     let mut anchor: Option<NodeRef> = None;
     let mut pending: Vec<String> = Vec::new();
     let mut blocks: HashSet<dom_query::NodeId> = HashSet::new();
     let mut restored = 0;
 
-    for (node, key, words) in &page[first..=last] {
+    let mut heads: HashSet<String> = HashSet::new();
+    let mut used: HashSet<dom_query::NodeId> = HashSet::new();
+
+    for (node, piece) in &page[first..=last] {
+        let (key, words) = match piece {
+            Piece::Para(key, words) => (key, *words),
+            // Заголовок, которого в статье нет, встаёт перед ближайшим
+            // следующим её абзацем — то есть туда же, куда его накопленным
+            // куском поставит якорь. Отдельного места ему не нужно.
+            Piece::Head(text) => {
+                if !kept.contains(text)
+                    && worth_heading(node, text, title)
+                    && heads.insert(text.clone())
+                {
+                    pending.push(fragment(&node.html(), base));
+                    restored += 1;
+                }
+                continue;
+            }
+        };
         if let Some(place) = places.get(key) {
+            // Каждое место в статье служит якорем один раз. Один и тот же
+            // абзац на странице встречается дважды — повторённая цитата,
+            // копия врезки на узкий экран, — а в статье ему соответствует
+            // один узел: второй раз якорь уехал бы назад, и всё следующее
+            // за ним встало бы выше по тексту. Поймано на теореме Эрроу:
+            // цитата теоремы повторена в двух формулировках, и заголовок
+            // «Доказательство» вставал перед разделом, которому предшествует.
+            if !used.insert(place.id) {
+                continue;
+            }
             if let Some(previous) = anchor.take()
                 && !pending.is_empty()
             {
@@ -416,7 +466,7 @@ fn restore(source: &Document, content: &str, base: &str) -> Option<String> {
             anchor = Some(place_after(place));
             continue;
         }
-        if !worth_restoring(node, *words) || inside.contains(key.as_str()) {
+        if !worth_restoring(node, words) || inside.contains(key.as_str()) {
             continue;
         }
         let block = lost_block(node, &places);
@@ -503,6 +553,77 @@ fn place_after<'a>(anchor: &NodeRef<'a>) -> NodeRef<'a> {
 
 /// Ключ абзаца и его вес в словах. Ключ — начало текста без лишних
 /// пробелов: этого хватает, чтобы узнать абзац в извлечённом.
+/// Что именно встретилось в исходном дереве: абзац или заголовок раздела.
+enum Piece {
+    Para(String, usize),
+    Head(String),
+}
+
+fn piece_of(node: &NodeRef) -> Option<Piece> {
+    let name = node.node_name()?;
+    if name.as_ref() == "p" {
+        return para_key(node).map(|(key, words)| Piece::Para(key, words));
+    }
+    head_key(node).map(Piece::Head)
+}
+
+fn head_key(node: &NodeRef) -> Option<String> {
+    let text = squeeze(&node.text());
+    (!text.is_empty()).then_some(text)
+}
+
+/// Значок ссылки на сам заголовок — не текст заголовка.
+///
+/// Генераторы сайтов оборачивают заголовок ссылкой на него же, а внутрь
+/// кладут «#», «¶» или звено цепи, спрятанные от скринридера
+/// (`aria-hidden="true"`): глазами это кнопка «дай ссылку на этот раздел»,
+/// в тексте — мусор перед первым словом («## [#TLDR](…)» у overreacted.io).
+///
+/// Правило по форме и узкое с двух сторон: только внутри заголовка, только
+/// то, что сама страница объявила невидимым для чтения, и только если это
+/// знак-другой. Подпись, честно спрятанную от скринридера как дубль
+/// (карточки ленты, см. `thumbs`), такое правило не заденет — она длиннее.
+fn unpermalink(doc: &Document) {
+    const GLYPH_CHARS: usize = 2;
+
+    let inside_heads: String = HEAD_TAGS
+        .split(", ")
+        .map(|tag| format!("{tag} [aria-hidden=\"true\"]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    for node in doc.select(&inside_heads).nodes() {
+        if node.text().trim().chars().count() <= GLYPH_CHARS {
+            node.remove_from_parent();
+        }
+    }
+}
+
+/// Стоит ли возвращать выпавший заголовок.
+///
+/// Правило узкое, потому что заголовков на странице всегда больше, чем
+/// в статье: у коробки навигации, у инфобокса, у подвала — свои. Признаки
+/// по форме: заголовок это короткая строка (`HEAD_CHARS`), он не лежит
+/// в обвязке (`ASIDE_TAGS`) и не лежит в таблице — там он подпись
+/// к таблице, а не раздел статьи.
+fn worth_heading(node: &NodeRef, text: &str, title: &str) -> bool {
+    if text.chars().count() > HEAD_CHARS {
+        return false;
+    }
+    // Название статьи мы печатаем сами, первой строкой. Заголовок, который
+    // его повторяет, — это тот же `<h1>` со страницы, и вернуть его значит
+    // напечатать название дважды. Поймано на polygon: `<title>` набран
+    // капитализацией, `<h1>` обычной строкой, — поэтому сверяем без учёта
+    // регистра, а не побайтово.
+    if !title.trim().is_empty() && text.to_lowercase() == squeeze(title).to_lowercase() {
+        return false;
+    }
+    !node.ancestors_it(None).any(|up| {
+        up.node_name()
+            .is_some_and(|name| ASIDE_TAGS.contains(&name.as_ref()) || name.as_ref() == "table")
+    })
+}
+
 fn para_key(node: &NodeRef) -> Option<(String, usize)> {
     let text = squeeze(&node.text());
     let words = text.split_whitespace().count();
@@ -1088,7 +1209,7 @@ mod tests {
              <p>Последний абзац статьи, на котором она заканчивается тут</p>\
              </div>";
 
-        let restored = restore(&source, content, "https://example.org/post").expect("ничего");
+        let restored = restore(&source, content, "https://example.org/post", "").expect("ничего");
 
         assert!(restored.contains("Выпавший абзац"), "{restored}");
         assert!(
@@ -1105,6 +1226,100 @@ mod tests {
         assert!(!restored.contains("Шапка сайта"), "{restored}");
         assert!(!restored.contains("Подвал сайта"), "{restored}");
         assert!(!restored.contains("Реклама курса"), "{restored}");
+    }
+
+    /// Заголовки статьи возвращаются на свои места — и только они.
+    ///
+    /// Современный MediaWiki заворачивает заголовок в `<div class="mw-heading">`,
+    /// и кандидат выбирается мимо них: на теореме Эрроу в выводе не оставалось
+    /// ни одного `##`, оглавление собиралось из вех по абзацам. Заголовков
+    /// на странице при этом всегда больше, чем в статье, — у коробки
+    /// навигации и у подвала свои, — поэтому правило узкое с четырёх сторон.
+    #[test]
+    fn the_headings_of_the_article_come_back_and_nothing_else() {
+        let source = Document::from(
+            "<body>\
+             <nav><h2>Навигация по сайту</h2></nav>\
+             <article>\
+             <h1>Заголовок статьи, он же её название</h1>\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <div class=\"mw-heading\"><h2>Формулировки</h2></div>\
+             <p>Второй абзац статьи, он идёт сразу за заголовком раздела</p>\
+             <div class=\"mw-heading\"><h3>Доказательство</h3></div>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             <table><tr><td><h2>Подпись таблицы, а не раздел</h2></td></tr></table>\
+             </article>\
+             <footer><h2>Подвал сайта</h2></footer>\
+             </body>"
+                .to_string(),
+        );
+        let content = "<div id=\"readability-page-1\">\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <p>Второй абзац статьи, он идёт сразу за заголовком раздела</p>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </div>";
+
+        let restored = restore(
+            &source,
+            content,
+            "https://example.org/post",
+            "Заголовок статьи, он же её название",
+        )
+        .expect("заголовки не вернулись");
+
+        // Порядок — страницы, а не наш: раздел стоит перед своим абзацем.
+        let head = restored.find("Формулировки").expect("нет заголовка");
+        let para = restored.find("Второй абзац").expect("нет абзаца");
+        assert!(head < para, "{restored}");
+        assert!(restored.contains("Доказательство"), "{restored}");
+
+        // Название статьи мы печатаем сами: второй раз не надо.
+        assert!(!restored.contains("он же её название"), "{restored}");
+        // Обвязка за границами статьи и подпись таблицы — не разделы.
+        assert!(!restored.contains("Навигация по сайту"), "{restored}");
+        assert!(!restored.contains("Подвал сайта"), "{restored}");
+        assert!(!restored.contains("Подпись таблицы"), "{restored}");
+    }
+
+    /// Заголовок, который в статье уже есть, вторым экземпляром не приезжает.
+    #[test]
+    fn a_heading_already_in_the_article_is_left_alone() {
+        let source = Document::from(
+            "<body><article>\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <h2>Раздел про шину</h2>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </article></body>"
+                .to_string(),
+        );
+        let content = "<div id=\"readability-page-1\">\
+             <p>Первый абзац статьи, с которого всё начинается тут</p>\
+             <h2>Раздел про шину</h2>\
+             <p>Последний абзац статьи, на котором она заканчивается тут</p>\
+             </div>";
+        assert!(restore(&source, content, "https://example.org/post", "").is_none());
+    }
+
+    /// Значок ссылки на сам заголовок — не текст заголовка.
+    #[test]
+    fn a_permalink_glyph_is_not_part_of_the_heading() {
+        let doc = Document::from(
+            "<body><article>\
+             <h2 id=\"tldr\"><a href=\"#tldr\"><span aria-hidden=\"true\">#</span>TLDR</a></h2>\
+             <p>Абзац с подписью, спрятанной от скринридера как дубль</p>\
+             <figure><img src=\"a.png\"><figcaption aria-hidden=\"true\">Подпись, которую \
+             скринридер услышит из alt, и она длиннее значка</figcaption></figure>\
+             </article></body>"
+                .to_string(),
+        );
+        unpermalink(&doc);
+
+        let html = doc.select("body").inner_html().to_string();
+        assert!(!html.contains(">#<"), "{html}");
+        assert!(html.contains("TLDR"), "{html}");
+        // Правило живёт только внутри заголовка: спрятанное в другом месте
+        // бывает содержанием (карточки ленты, см. `thumbs`).
+        assert!(html.contains("Подпись, которую"), "{html}");
     }
 
     /// Дубль — не сирота, и ловится он текстом, а не разметкой: в статье
@@ -1132,6 +1347,7 @@ mod tests {
             &Document::from(page(&note)),
             &format!("<div id=\"readability-page-1\">{head}{tail}</div>"),
             "https://example.org/post",
+            "",
         )
         .expect("сноска не вернулась");
         assert_eq!(restored.matches("Сноска про шину").count(), 1, "{restored}");
@@ -1143,7 +1359,8 @@ mod tests {
             restore(
                 &Document::from(page(&note)),
                 &already,
-                "https://example.org/post"
+                "https://example.org/post",
+                ""
             )
             .is_none()
         );
@@ -1164,7 +1381,7 @@ mod tests {
              <p>Первый абзац статьи, с которого всё начинается тут</p>\
              <p>Последний абзац статьи, на котором она заканчивается тут</p>\
              </div>";
-        assert!(restore(&source, content, "https://example.org/post").is_none());
+        assert!(restore(&source, content, "https://example.org/post", "").is_none());
     }
 
     /// Значок против картинки: правило проверяется на всех местах сразу,

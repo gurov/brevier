@@ -69,6 +69,8 @@ p.s. Eventually, they'll want to pay you for your help too. A lot more than you 
 
 I continue to talk about it on podcasts even in 2022 - see the live updating list here: [https://www.swyx.io/ideas/?filter=learn%20in%20public](https://www.swyx.io/ideas/?filter=learn%20in%20public)
 
+## Related links
+
 * * *
 
 - Patio11: [Do not end the week with nothing](https://training.kalzumeus.com/newsletters/archive/do-not-end-the-week-with-nothing)

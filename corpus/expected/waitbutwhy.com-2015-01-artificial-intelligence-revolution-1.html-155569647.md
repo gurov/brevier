@@ -72,6 +72,8 @@ If you look only at very recent history, the part of the S-curve you’re on at 
 
 So while *nahhhhh* might feel right as you read this post, it’s probably actually wrong. The fact is, if we’re being truly logical and expecting historical patterns to continue, we should conclude that much, much, *much* more should change in the coming decades than we intuitively expect. Logic also suggests that if the most advanced species on a planet keeps making larger and larger leaps forward at an ever-faster rate, at some point, they’ll make a leap so great that it completely alters life as they know it and the perception they have of what it means to be a human—kind of like how evolution kept making great leaps toward intelligence until finally it made such a large leap to the human being that it completely altered what it meant for any creature to live on planet Earth. And if you spend some time reading about what’s going on today in science and technology, you start to see a lot of signs quietly hinting that life as we currently know it cannot withstand the leap that’s coming next.
 
+## The Road to Superintelligence
+
 \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
 
 ### **What Is AI?**

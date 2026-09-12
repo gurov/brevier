@@ -30,6 +30,8 @@ This may sound easy. But it is not. Most of us, most of the time, get sucked in 
 
 This is no way to live, man. So stop fucking around. Get your fucks together. And here, allow me to fucking show you.
 
+## Subtlety #1: Not Giving a Fuck Does Not Mean Being Indifferent; It Means Being Comfortable With Being Different
+
 When most people envision giving no fucks whatsoever, they envision a kind of perfect and serene indifference to everything, a calm that weathers all storms.
 
 This is misguided. There’s absolutely nothing admirable or confident about indifference. People who are indifferent are lame and scared. They’re couch potatoes and [internet trolls](https://markmanson.net/internet). In fact, indifferent people often attempt to be indifferent because in reality they actually give too many fucks. They are afraid of the world and the repercussions of their own choices. Therefore, they make none. They hide in a grey emotionless pit of their own making, self-absorbed and self-pitied, perpetually distracting themselves from this unfortunate thing demanding their time and energy called life.
@@ -69,6 +71,8 @@ If you find yourself consistently giving too many fucks about trivial shit that 
 In life, our fucks must be spent on something. There really is no such thing as not giving a fuck. The question is simply how we each choose to allot our fucks. You only get a limited number of fucks to give over your lifetime, so you must spend them with care.
 
 As my father used to say, “Fucks don’t grow on trees, Mark.” OK, he never actually said that. But fuck it, pretend like he did. The point is that fucks have to be earned and then invested wisely. Fucks are cultivated like a beautiful fucking garden, where if you fuck shit up and the fucks get fucked, then you’ve fucking fucked your fucks all the fuck up.
+
+## Subtlety #3: We All Have a Limited Number of Fucks to Give; Pay Attention to Where and Who You Give Them to
 
 When we’re young, we have tons of energy. Everything is new and exciting. And everything seems to matter so much. Therefore, we give tons of fucks. We give a fuck about everything and everyone—about what people are saying about us, about whether that cute boy/girl called us back or not, about whether our socks match or not or what color our birthday balloon is.
 

@@ -223,3 +223,15 @@ These changes will take some getting used to for most teams. Most people tend to
 The LMAX team certainly feels that the days of the coordinating transactional database are numbered. The fact that you can write software more easily using this kind of architecture and that it runs more quickly removes much of the justification for the traditional central database.
 
 For my part, I find this a very exciting story. Much of my goal is to concentrate on software that models complex domains. An architecture like this provides good separation of concerns, allowing people to focus on Domain-Driven Design and keeping much of the platform complexity well separated. The close coupling between domain objects and databases has always been an irritation - approaches like this suggest a way out.
+
+## Footnotes
+
+### 1: The Free Lunch is Over
+
+### 3: User Base
+
+### 4: Hardware
+
+### 7: What's in a transaction
+
+### 17: Ensuring a single writer to a memory location
