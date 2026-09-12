@@ -47,8 +47,10 @@ of them.
 
 ## A desktop entry
 
-The window gets its icon from the desktop entry — that is how a Wayland compositor finds
-it, by matching the application id. To install both for your user:
+The icon ships inside the binary: the window wears it on X11 with nothing installed —
+Brevier unpacks it into its own cache and points GTK's icon theme there. A launcher menu
+and a Wayland compositor need more than that, because there the icon is chosen by the
+desktop entry and the application id, not by the program. To install both for your user:
 
 ```sh
 cargo install --path . --features ui

@@ -168,6 +168,10 @@ fn main() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
 
+    // Иконка ставится на запуске приложения, а не в `main`: темы значков
+    // до открытого дисплея ещё нет.
+    app.connect_startup(|_| use_bundled_icon());
+
     app.connect_command_line(|app, command_line| {
         let start: Vec<String> = command_line
             .arguments()
@@ -2631,6 +2635,49 @@ fn open_in_system_browser(target: &str) {
         .spawn();
 }
 
+/// Куда окно выкладывает то, что везёт в себе: гарнитуры и иконку.
+///
+/// Кэш, потому что это производное от бинарника: удалили — разложится
+/// заново при следующем запуске.
+fn unpacked() -> std::path::PathBuf {
+    glib::user_cache_dir().join("brevier")
+}
+
+/// Иконка программы — в комплекте, как и гарнитуры.
+const LOGO: &[u8] = include_bytes!("../../assets/brevier.svg");
+
+/// Показать окну его иконку, ничего не устанавливая в систему.
+///
+/// Иконку окно берёт не из файла, а из темы значков — по имени, и имя это
+/// идентификатор программы. Поэтому свою кладём в тему: выкладываем в кэш
+/// (`icons/hicolor/scalable/apps/dev.brevier.Brevier.svg`) и добавляем этот
+/// каталог в поиск темы. Приём тот же, что и с гарнитурами, и причина та же:
+/// своё добро приложение раскладывает у себя, а не в системных каталогах.
+///
+/// Цена записана честно: на Wayland иконку окна выбирает не программа,
+/// а композитор — по ярлыку `.desktop` и идентификатору приложения, — и без
+/// установки ярлыка там останется заглушка. На X11 работает и без установки.
+fn use_bundled_icon() {
+    let theme = unpacked().join("icons");
+    let apps = theme.join("hicolor").join("scalable").join("apps");
+    let file = apps.join(format!("{APP_ID}.svg"));
+
+    // Имя ставим всегда, даже если разложить не удалось: на машине,
+    // где иконка установлена по-человечески (ярлык плюс тема значков),
+    // она найдётся и без нашего кэша.
+    gtk::Window::set_default_icon_name(APP_ID);
+
+    // Перезаписываем только при расхождении: иконку меняют раз в год,
+    // а запусков много.
+    let same = std::fs::read(&file).is_ok_and(|bytes| bytes == LOGO);
+    if !same && (std::fs::create_dir_all(&apps).is_err() || std::fs::write(&file, LOGO).is_err()) {
+        return;
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::IconTheme::for_display(&display).add_search_path(&theme);
+    }
+}
+
 /// Гарнитуры из комплекта — в обход системной установки.
 ///
 /// GTK берёт шрифты у fontconfig, а тот знает только про установленные.
@@ -2673,7 +2720,7 @@ fn use_bundled_fonts() {
         ),
     ];
 
-    let home = glib::user_cache_dir().join("brevier");
+    let home = unpacked();
     let fonts = home.join("fonts");
     if std::fs::create_dir_all(&fonts).is_err() {
         return;

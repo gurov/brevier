@@ -1,4 +1,76 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 163 191" role="img" fill="#3a5894">
-  <title>Brevier</title>
-  <path fill-rule="evenodd" d="M1.3 0 L1.3 75.8 L12.8 64.3 L12.8 14.8 L15.2 12.4 L98.5 12.4 L101.5 15.4 L101.5 57 L143 57 L146 60 L146 73.3 L125 94.4 L125 99 L150 124.1 L150 152.3 L124.6 177.8 L17.2 177.8 L13 173.5 L13.3 114 L22 105.1 L28.1 101.9 L73.1 101.9 L75.4 104.2 L57.1 122.6 L65.3 130.8 L67.3 130.8 L101 96.9 L65.8 61.6 L57.2 70.5 L73.3 86.7 L71.1 88.9 L24.9 88.9 L14.2 93.9 L4.6 103.6 L0 112.9 L0 188.8 L2.3 191 L129.1 191 L131 190 L163 157.9 L163 119.5 L143 99.4 L143 94.3 L159 78.2 L159 48.6 L110.5 0 Z M135.2 42.3 L133.9 44.5 L117.4 44.5 L114.9 42.1 L114.9 23.3 Z"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 163 191"
+   role="img"
+   version="1.1"
+   id="svg6"
+   sodipodi:docname="brevier.svg"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <defs
+     id="defs10">
+    <linearGradient
+       id="linearGradient1819"
+       x1="29.4173"
+       y1="95.3389"
+       x2="136.1961"
+       y2="95.3389"
+       gradientUnits="userSpaceOnUse"
+       spreadMethod="pad">
+      <stop
+         style="stop-color:#55ff00;stop-opacity:1;"
+         offset="0"
+         id="stop1813" />
+      <stop
+         style="stop-color:#e000ae;stop-opacity:1;"
+         offset="1"
+         id="stop1815" />
+    </linearGradient>
+  </defs>
+  <sodipodi:namedview
+     id="namedview8"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="true"
+     showguides="true"
+     inkscape:zoom="3.911979"
+     inkscape:cx="92.919722"
+     inkscape:cy="111.45254"
+     inkscape:window-width="1920"
+     inkscape:window-height="1010"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg6" />
+  <title
+     id="title2">Brevier</title>
+  <g
+     aria-label="B"
+     id="text1716"
+     style="font-size:231.625px;line-height:1.25;font-family:'Classic Russian';-inkscape-font-specification:'Classic Russian';letter-spacing:0px;word-spacing:0px;fill:url(#linearGradient1819)">
+    <path
+       d="M 48.642153,144.09579 V 48.897919 q 0,-11.349625 -1.158125,-15.28725 -0.9265,-4.16925 -7.180375,-4.16925 -2.084625,0 -5.09575,0.9265 -3.011125,0.9265 -3.706,0.9265 -2.084625,0 -2.084625,-2.084625 0,-3.706 8.570125,-5.559 12.50775,-2.7795 36.59675,-2.7795 25.941997,0 36.828377,5.790625 7.87525,4.400875 12.50775,11.812875 4.86412,7.412 4.86412,17.14025 0,12.739375 -7.64362,20.84625 -7.64363,8.106875 -18.06675,10.886375 13.20262,1.853 23.1625,13.202621 9.95987,11.118 9.95987,27.795 0,20.61463 -14.59237,32.4275 -6.4855,5.32738 -13.20263,7.18038 -6.71712,1.853 -16.445372,1.853 -7.412,0 -22.467625,-0.46325 -15.055625,-0.46325 -22.930875,-0.46325 -1.621375,0 -5.559,0.46325 -3.937625,0.46325 -6.02225,0.46325 -3.24275,0 -3.24275,-3.47438 0,-2.31625 4.6325,-2.31625 8.80175,0 10.423125,-3.47437 1.853,-3.706 1.853,-16.44538 z M 63.234528,42.644044 v 32.659125 q 0,4.6325 0.231625,6.717125 0.46325,1.853 1.38975,3.011125 1.158125,0.9265 2.547875,1.158125 1.38975,0.231625 5.09575,0.231625 h 9.959875 q 15.518875,0 22.467627,-8.3385 6.94875,-8.106875 6.94875,-21.3095 0,-11.118 -4.40088,-18.06675 -4.16925,-7.180375 -11.349622,-10.1915 -7.180375,-3.24275 -15.7505,-3.24275 -12.276125,0 -15.28725,4.16925 -1.853,2.7795 -1.853,13.202625 z m 0,59.064376 v 37.29162 q 0,18.29838 5.559,22.46763 4.16925,3.47437 17.6035,3.47437 15.982122,0 23.857372,-9.265 9.265,-10.42312 9.265,-26.63687 0,-21.54113 -14.12912,-31.269376 -9.265002,-6.717125 -29.416377,-6.717125 -9.496625,0 -11.118,0.9265 -1.621375,0.9265 -1.621375,9.728251 z"
+       id="path1236" />
+  </g>
+  <metadata
+     id="metadata944">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:title>Brevier</dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
 </svg>
