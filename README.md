@@ -158,6 +158,10 @@ menu come from GTK.
   pretending there was an article to find.
 - **`Ctrl+S` saves** a `.md`, or a zip with an `images/` folder when the page has
   pictures and they were loaded.
+- **Tabs come back.** Close the window with five things half-read and they are there next
+  time: every tab, its back and forward, the tab you were on, and the line you were on in
+  each. Opening Brevier with an address on the command line does not restore — you asked
+  for a page, not for yesterday.
 - **Pages you read are remembered, and the address bar suggests them** as you type —
   what matched from the start of the host first, then the rest of the address, then the
   title; among equals, where you go often and where you went last. `Ctrl+H` opens the
@@ -229,10 +233,11 @@ superscript that jumps to the note and back.
 
 ## On the disk
 
-History lives in a plain text file, one visit a line, tab-separated:
+History and the open tabs live in plain text files, one line each, tab-separated:
 
 ```
 ~/.local/share/brevier/history.tsv            # Linux, or $XDG_DATA_HOME/brevier
+~/.local/share/brevier/session.tsv            # …and the tabs you left open
 ~/Library/Application Support/Brevier/        # macOS
 %LOCALAPPDATA%\Brevier\                      # Windows
 ```
@@ -251,6 +256,12 @@ everything. The oldest visits are dropped once there are more than five thousand
 Only the window writes there. `brevier <url> | less` is a pipe tool and keeps no
 history of its own, and neither the pages Brevier failed to open nor its own
 `brevier:history` are recorded.
+
+The session file is a snapshot, not a log: `here` or `tab`, the entry of that tab's
+history you were on, how far down the text you were, then its addresses. The place is
+an offset in the text rather than in pixels, so it survives a different window size,
+a different zoom step, even a different font. When several windows are open, the first
+one owns the session — the second is "open me one more link", not "here are my tabs".
 
 ## On the network
 

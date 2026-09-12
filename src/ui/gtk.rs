@@ -11,6 +11,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 mod article;
 mod formula;
@@ -35,7 +36,7 @@ use brevier::outline::{
     ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
 };
 use brevier::save;
-use brevier::store::{HINTS, Hint, Store};
+use brevier::store::{self, HINTS, Hint, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
@@ -72,6 +73,9 @@ const HINT_HEIGHT: i32 = 330;
 /// Уже этого список не показываем, даже если адресная строка уже: в узком
 /// окне она короче адреса, и подсказка из одних многоточий не подсказка.
 const HINT_WIDTH: i32 = 420;
+
+/// Докуда растёт «Loading…», прежде чем начать сначала.
+const LOADING_DOTS: usize = 10;
 /// Что говорим на странице, оказавшейся списком ссылок, а не статьёй.
 const LISTING: &str = "A list of links, not an article — pick one to read.";
 /// Сколько совпадений подсвечиваем. Дальше это уже не поиск, а заливка.
@@ -291,6 +295,14 @@ struct Tab {
     /// Номер загрузки. Ответ брошенной страницы отличаем по нему: отменить
     /// синхронный `ureq` нечем, но и слушать его уже незачем.
     generation: u64,
+    /// Страница едет прямо сейчас. По нему живёт счётчик точек в слове
+    /// «Loading»: номера загрузки мало — он остаётся тем же и после того,
+    /// как страница приехала.
+    loading: bool,
+    /// Куда вернуть читателя, когда страница приедет: смещение в буфере
+    /// из сохранённой сессии. Живёт во вкладке, а не в аргументах `open`,
+    /// потому что нужно ровно один раз и ровно после загрузки.
+    resume: Option<i32>,
 }
 
 struct State {
@@ -314,6 +326,10 @@ struct State {
     /// строятся подсказки адресной строки, а страница истории читает файл
     /// заново — программа может быть открыта и дважды.
     store: Store,
+    /// Это окно отвечает за сессию: оно её подняло, оно её и пишет.
+    /// Сессия одна на программу, а окон бывает несколько — иначе второе
+    /// окно затирало бы вкладки первого своими.
+    keeps_session: bool,
     /// Что сейчас в списке подсказок. Как и у полки: обработчик подключён
     /// один раз, а строка ищет себя по месту в списке.
     hints: Vec<String>,
@@ -610,6 +626,9 @@ fn build(app: &Application, start: Vec<String>) {
         images: true,
         zoom: HashMap::new(),
         store: Store::open(),
+        // Сессию поднимает и пишет первое окно процесса. Второе окно —
+        // это «открой мне ещё одну ссылку», а не «вот мои вкладки».
+        keeps_session: OWNS_SESSION.with(|first| first.replace(false)),
         hints: Vec::new(),
         search: Search::default(),
         shelf: Vec::new(),
@@ -887,7 +906,11 @@ fn build(app: &Application, start: Vec<String>) {
         ui.notebook.clone().connect_switch_page(move |_, _, _| {
             let ui = ui.clone();
             let state = state.clone();
-            glib::idle_add_local_once(move || sync(&ui, &state, None));
+            glib::idle_add_local_once(move || {
+                sync(&ui, &state, None);
+                resume_place(&ui, &state);
+                remember_session(&ui, &state);
+            });
         });
     }
 
@@ -899,13 +922,30 @@ fn build(app: &Application, start: Vec<String>) {
         .filter_map(|text| address::parse(text).ok())
         .collect();
     if addresses.is_empty() {
-        new_tab(&ui, &state, None);
+        // Названного адреса нет — значит окно открывают «просто так»,
+        // и вернуть надо то, что в нём было. Названный адрес сессию
+        // не поднимает: попросили страницу, а не вчерашний день.
+        let restored = state.borrow().keeps_session && restore_session(&ui, &state);
+        if !restored {
+            new_tab(&ui, &state, None);
+        }
     } else {
         for address in addresses {
             new_tab(&ui, &state, Some(address));
         }
         // Открываем первую: читатель просил их в этом порядке, а не наоборот.
         ui.notebook.set_current_page(Some(0));
+    }
+
+    {
+        // Место в тексте меняется молча, без событий, — значит последний
+        // снимок надо взять ровно перед тем, как окно закроется.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.window.clone().connect_close_request(move |_| {
+            remember_session(&ui, &state);
+            glib::Propagation::Proceed
+        });
     }
 
     ui.window.present();
@@ -1144,6 +1184,8 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             entries_for: None,
             document: None,
             generation: 0,
+            loading: false,
+            resume: None,
         });
         id
     };
@@ -1324,10 +1366,14 @@ fn close_tab(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
     // Окно без вкладок показывать нечем — заводим чистую.
     if state.borrow().tabs.is_empty() {
         new_tab(ui, state, None);
+        // Закрыли всё до одной — это тоже решение читателя, и сессия
+        // обязана стать пустой, а не помнить закрытое.
+        remember_session(ui, state);
         return;
     }
     ui.notebook.set_show_tabs(ui.notebook.n_pages() > 1);
     sync(ui, state, None);
+    remember_session(ui, state);
 }
 
 /// Какая вкладка открыта. Прокрутка фоновой вкладки полку не трогает.
@@ -1350,6 +1396,139 @@ fn current_address(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<String> {
         .history
         .current()
         .map(Address::display)
+}
+
+/// «Loading» с точками. Точка прибавляется раз в секунду до десяти
+/// и начинается заново: это не индикатор доли — долю мы не знаем,
+/// `ureq` синхронный и о ходе загрузки не рассказывает, — а признак жизни.
+/// Большая страница едет секунды, и неподвижная надпись всё это время
+/// выглядит как зависшая программа.
+fn show_loading(view: &gtk::TextView, dots: usize) {
+    show_message(view, &format!("Loading{}", ".".repeat(dots)), "", None);
+}
+
+/// Заводить часы на время загрузки. Останавливаются сами: вкладку закрыли,
+/// страница приехала или читатель ушёл на другую — во всех трёх случаях
+/// показывать точки больше некому.
+fn tick_loading(state: &Rc<RefCell<State>>, id: u64, generation: u64, view: gtk::TextView) {
+    let state = state.clone();
+    let dots = Cell::new(1usize);
+    glib::timeout_add_local(Duration::from_secs(1), move || {
+        let alive = state
+            .borrow_mut()
+            .find(id)
+            .is_some_and(|tab| tab.loading && tab.generation == generation);
+        if !alive {
+            return glib::ControlFlow::Break;
+        }
+        dots.set(dots.get() % LOADING_DOTS + 1);
+        show_loading(&view, dots.get());
+        glib::ControlFlow::Continue
+    });
+}
+
+/// Вернуть вкладку туда, где её застали в прошлый раз.
+///
+/// Делается, только когда вкладка на экране и уже загрузилась:
+/// `GtkTextView` невидимой страницы блокнота раскладки не считает,
+/// и прокрутка в ней уходит в никуда. Поэтому место ждёт своего часа
+/// во вкладке (`resume`) — восстановленная вкладка, куда за весь сеанс
+/// так и не заглянули, унесёт своё место в следующую сессию нетронутым.
+///
+/// `settle`, а не один прыжок: картинки и таблицы добирают высоту
+/// не сразу, и ранний прыжок промахивается — та же причина, что и у прыжка
+/// по якорю.
+fn resume_place(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let ready = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.tabs.get_mut(index as usize) else {
+            return;
+        };
+        if tab.loading || tab.document.is_none() {
+            return;
+        }
+        match tab.resume.take() {
+            Some(place) if place > 0 => Some((tab.view.clone(), place)),
+            _ => None,
+        }
+    };
+    if let Some((view, place)) = ready {
+        settle(&view, place, 0.0);
+    }
+}
+
+/// Запомнить открытое: вкладки, их путь и место в тексте.
+///
+/// Зовётся на каждое событие, которое меняет состав окна, — открыли,
+/// закрыли, перешли, переключились. Файл маленький, запись целиком, так что
+/// дешевле ловить момент «читатель закрыл окно» и надёжнее его же.
+fn remember_session(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let borrowed = state.borrow();
+    if !borrowed.keeps_session {
+        return;
+    }
+    let current = ui.notebook.current_page().unwrap_or_default() as usize;
+    let tabs: Vec<store::Opened> = borrowed
+        .tabs
+        .iter()
+        .enumerate()
+        .map(|(index, tab)| store::Opened {
+            addresses: tab.history.entries().iter().map(Address::display).collect(),
+            at: tab.history.at(),
+            // Место, которое ещё не применили, старше того, что показывает
+            // виджет: у вкладки, которая пока не грузилась или не была
+            // на экране, он честно отвечает «ноль», и этим нулём мы бы
+            // затёрли настоящее место.
+            place: tab.resume.unwrap_or_else(|| top_of(&tab.view)),
+            current: index == current,
+        })
+        .collect();
+    drop(borrowed);
+    store::remember(&tabs);
+}
+
+/// Открыть заново то, что было открыто. Возвращает `false`, если сессии нет:
+/// тогда заводится обычная пустая вкладка.
+fn restore_session(ui: &Ui, state: &Rc<RefCell<State>>) -> bool {
+    let mut opened = 0;
+    let mut front = 0;
+    for tab in store::session() {
+        let entries: Vec<Address> = tab
+            .addresses
+            .iter()
+            .filter_map(|text| address::parse(text).ok())
+            .collect();
+        let at = tab.at.min(entries.len().saturating_sub(1));
+        let Some(address) = entries.get(at).cloned() else {
+            continue;
+        };
+
+        // Вкладка заводится пустой, а история ставится готовой: иначе
+        // «назад» после восстановления упирался бы в начальную страницу.
+        new_tab(ui, state, None);
+        let id = {
+            let mut borrowed = state.borrow_mut();
+            let Some(fresh) = borrowed.tabs.last_mut() else {
+                continue;
+            };
+            fresh.history = History::restored(entries, at);
+            fresh.resume = Some(tab.place);
+            fresh.id
+        };
+        if tab.current {
+            front = opened;
+        }
+        opened += 1;
+        open(ui, state, id, address, false);
+    }
+    if opened == 0 {
+        return false;
+    }
+    ui.notebook.set_current_page(Some(front));
+    true
 }
 
 /// Показать подсказки к напечатанному.
@@ -1527,13 +1706,18 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             tab.history.visit(address.clone());
         }
         tab.generation += 1;
+        tab.loading = true;
+        // Корешок вкладки не мигает точками намеренно: ширина строки в нём
+        // меняла бы ширину самой вкладки, и полоса корешков дёргалась бы
+        // раз в секунду.
         tab.label.set_text(&clip("Loading…", TAB_LABEL));
         tab.generation
     };
     sync(ui, state, None);
 
     if let Some(view) = view_of(state, id) {
-        show_message(&view, "Loading…", "", None);
+        show_loading(&view, 1);
+        tick_loading(state, id, generation, view);
     }
 
     let ui = ui.clone();
@@ -1556,7 +1740,14 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             Ok(Ok(document)) => {
                 dress(&state, &view, &document.address);
                 let page = render(&view, &document, anchor.as_deref());
-                view.grab_focus();
+                // Клавиатуру отдаём только той вкладке, которую читатель
+                // видит. Фоновая, догрузившись, забирала её себе, и стрелки
+                // с пробелом переставали прокручивать открытую страницу —
+                // заметно это стало на восстановлении сессии, где вкладок
+                // приезжает сразу несколько.
+                if current_id(&ui, &state) == Some(id) {
+                    view.grab_focus();
+                }
                 // Список ссылок показываем как есть, но говорим, что это он:
                 // читатель пришёл на главную блога не читать, а выбирать.
                 if document.kind == brevier::Kind::Listing {
@@ -1570,6 +1761,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                     .store
                     .record(&document.address, &document.title, local_offset());
                 if let Some(tab) = borrowed.find(id) {
+                    tab.loading = false;
                     tab.label.set_text(&clip(&document.title, TAB_LABEL));
                     tab.label.set_tooltip_text(Some(&document.title));
                     tab.links = page.links;
@@ -1580,6 +1772,8 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 }
                 drop(borrowed);
                 sync(&ui, &state, None);
+                resume_place(&ui, &state);
+                remember_session(&ui, &state);
                 seek_entries(&ui, &state, id, &document.address);
                 // Заглушки оживляем после того, как вкладка узнала про них:
                 // клик по заглушке ищет вкладку по номеру.
@@ -1606,6 +1800,8 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 );
                 let mut borrowed = state.borrow_mut();
                 if let Some(tab) = borrowed.find(id) {
+                    tab.loading = false;
+                    tab.resume = None;
                     tab.label.set_text(&clip(problem.headline, TAB_LABEL));
                     tab.links.clear();
                     tab.marks.clear();
@@ -1615,8 +1811,16 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 }
                 drop(borrowed);
                 sync(&ui, &state, None);
+                // Вкладка с отказом — тоже открытая вкладка, и в сессии
+                // ей место: читатель закрыл окно с ней и ждёт её обратно.
+                remember_session(&ui, &state);
             }
-            Err(_) => show_message(&view, "The load fell through", "", None),
+            Err(_) => {
+                if let Some(tab) = state.borrow_mut().find(id) {
+                    tab.loading = false;
+                }
+                show_message(&view, "The load fell through", "", None);
+            }
         }
     });
 }
@@ -1967,6 +2171,8 @@ fn rgb(hex: &str) -> [u8; 3] {
 
 thread_local! {
     static ZOOM: Cell<f32> = const { Cell::new(1.0) };
+    /// Первое окно процесса — то, которое отвечает за сессию.
+    static OWNS_SESSION: Cell<bool> = const { Cell::new(true) };
 }
 
 /// По какому ключу помнится ступень. Для страницы — хост, для репозитория

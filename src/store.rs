@@ -26,6 +26,11 @@
 //! **Пишет только окно.** `brevier <url> | less` — инструмент конвейера,
 //! и молча писать в историю читателя он не должен; в браузерах то же
 //! правило действует для headless-режима.
+//!
+//! Жильцов здесь двое: журнал посещённого (`history.tsv`) и сессия —
+//! открытые вкладки (`session.tsv`). Формат у них один, и это то самое,
+//! ради чего вопрос решался целиком: второе хранилище со своей судьбой
+//! не заводится.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -325,6 +330,116 @@ impl Store {
         }
         self.writable = fs::write(path, text).is_ok();
     }
+}
+
+/// Сколько шагов «назад» помним на вкладку. Больше полусотни не помнит
+/// и сам читатель, а файл сессии должен оставаться обозримым.
+const DEPTH: usize = 50;
+
+/// Вкладка, какой её застали: весь её путь, место в этом пути и место
+/// в тексте.
+///
+/// Хранить только текущий адрес было бы дешевле, но вернувшаяся вкладка
+/// с мёртвыми «назад» и «вперёд» — это не та вкладка, которую закрыли.
+/// Браузеры хранят то же самое и по той же причине.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opened {
+    pub addresses: Vec<String>,
+    /// Какой из адресов открыт сейчас.
+    pub at: usize,
+    /// Смещение в буфере той строки, что стояла у верхнего края. Не пиксели:
+    /// они зависят от ширины окна, кегля и ступени масштаба, а смещение
+    /// в тексте — ни от чего. Тем же приёмом держится место при смене
+    /// масштаба (`redraw`).
+    pub place: i32,
+    /// Эта вкладка была впереди.
+    pub current: bool,
+}
+
+/// Строка-пояснение в начале файла сессии. Файл читательский, и он должен
+/// объяснять себя сам — как и журнал истории, только там формат очевиден
+/// из данных, а здесь нет.
+const SESSION_HEADER: &str =
+    "# Brevier session: here|tab <entry you were on> <scroll offset> <addresses…>\n";
+
+/// Что было открыто в прошлый раз.
+pub fn session() -> Vec<Opened> {
+    match data_dir() {
+        Some(dir) => session_at(dir.join("session.tsv")),
+        None => Vec::new(),
+    }
+}
+
+/// Запомнить открытое.
+pub fn remember(tabs: &[Opened]) {
+    if let Some(dir) = data_dir() {
+        remember_at(dir.join("session.tsv"), tabs);
+    }
+}
+
+/// То же, но в названном файле — отдельно ради тестов, как и `Store::at`:
+/// сессию читателя они трогать не должны.
+pub fn session_at(path: impl AsRef<Path>) -> Vec<Opened> {
+    let text = fs::read_to_string(path.as_ref()).unwrap_or_default();
+    text.lines().filter_map(parse_tab).collect()
+}
+
+/// Пишется целиком: вкладок десятки, а не тысячи, и дописывать тут нечего —
+/// сессия это не журнал, а слепок.
+pub fn remember_at(path: impl AsRef<Path>, tabs: &[Opened]) {
+    let path = path.as_ref();
+    if let Some(dir) = path.parent()
+        && fs::create_dir_all(dir).is_err()
+    {
+        return;
+    }
+    let mut text = String::from(SESSION_HEADER);
+    for tab in tabs {
+        // Вкладка без адреса — это начальная страница; запоминать в ней
+        // нечего, а восстанавливать её незачем: пустая вкладка и так
+        // заводится сама.
+        if tab.addresses.is_empty() {
+            continue;
+        }
+        // Хвост истории режем со стороны старого, а место пересчитываем:
+        // выбросить то, на чём стоим, было бы хуже, чем забыть начало пути.
+        let extra = tab.addresses.len().saturating_sub(DEPTH);
+        let kept = &tab.addresses[extra..];
+        let at = tab.at.saturating_sub(extra).min(kept.len() - 1);
+
+        text.push_str(if tab.current { "here" } else { "tab" });
+        text.push_str(&format!("\t{at}\t{}", tab.place.max(0)));
+        for address in kept {
+            text.push('\t');
+            text.push_str(&escape(address));
+        }
+        text.push('\n');
+    }
+    let _ = fs::write(path, text);
+}
+
+fn parse_tab(line: &str) -> Option<Opened> {
+    if line.starts_with('#') || line.trim().is_empty() {
+        return None;
+    }
+    let mut parts = line.split('\t');
+    let current = match parts.next()? {
+        "here" => true,
+        "tab" => false,
+        _ => return None,
+    };
+    let at: usize = parts.next()?.parse().ok()?;
+    let place: i32 = parts.next()?.parse().ok()?;
+    let addresses: Vec<String> = parts.map(unescape).filter(|a| !a.is_empty()).collect();
+    if addresses.is_empty() {
+        return None;
+    }
+    Some(Opened {
+        at: at.min(addresses.len() - 1),
+        place: place.max(0),
+        addresses,
+        current,
+    })
 }
 
 /// Куда кладём то, что переживает запуск. Данные, настройки и кэш — три
@@ -909,6 +1024,74 @@ mod tests {
         store.record(&web("https://example.test/"), "  Two\n   lines  ", 0);
         assert_eq!(store.visits()[0].title, "Two lines");
         assert_eq!(Store::at(&path).visits()[0].title, "Two lines");
+    }
+
+    fn opened(addresses: &[&str], at: usize, place: i32, current: bool) -> Opened {
+        Opened {
+            addresses: addresses.iter().map(|a| (*a).to_owned()).collect(),
+            at,
+            place,
+            current,
+        }
+    }
+
+    #[test]
+    fn a_session_comes_back_as_it_went() {
+        let path = temporary("session").with_file_name("session.tsv");
+        let tabs = vec![
+            opened(&["https://a.test/", "https://b.test/"], 1, 4200, false),
+            opened(&["gh:BurntSushi/ripgrep"], 0, 0, true),
+        ];
+        remember_at(&path, &tabs);
+        assert_eq!(session_at(&path), tabs);
+
+        // Файл объясняет себя сам: читателю его открывать и править.
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# Brevier session:"));
+        assert!(text.contains("here\t0\t0\tgh:BurntSushi/ripgrep"));
+    }
+
+    #[test]
+    fn an_empty_tab_is_not_worth_remembering() {
+        let path = temporary("empty-tab").with_file_name("session.tsv");
+        remember_at(&path, &[opened(&[], 0, 0, true)]);
+        assert!(session_at(&path).is_empty());
+    }
+
+    #[test]
+    fn a_deep_history_is_cut_from_the_old_end() {
+        let path = temporary("deep").with_file_name("session.tsv");
+        let addresses: Vec<String> = (0..DEPTH + 5)
+            .map(|n| format!("https://example.test/{n}"))
+            .collect();
+        let tabs = vec![Opened {
+            at: addresses.len() - 1,
+            addresses,
+            place: 0,
+            current: true,
+        }];
+        remember_at(&path, &tabs);
+
+        let back = session_at(&path);
+        assert_eq!(back[0].addresses.len(), DEPTH);
+        // Резали начало, а стоим по-прежнему на последней странице.
+        assert_eq!(back[0].addresses[0], "https://example.test/5");
+        assert_eq!(back[0].at, DEPTH - 1);
+    }
+
+    #[test]
+    fn a_hand_broken_session_loses_only_the_broken_line() {
+        let path = temporary("broken-session").with_file_name("session.tsv");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "# заголовок\nмусор\nhere\tничего\t0\thttps://a.test/\ntab\t0\t12\thttps://b.test/\n",
+        )
+        .unwrap();
+        let back = session_at(&path);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].addresses[0], "https://b.test/");
+        assert_eq!(back[0].place, 12);
     }
 
     #[test]

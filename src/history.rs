@@ -17,8 +17,25 @@ impl History {
         Self::default()
     }
 
+    /// История, поднятая с диска: список адресов и место в нём.
+    /// Заведена ради восстановления сессии — вкладка обязана вернуться
+    /// не только на свою страницу, но и со своими «назад» и «вперёд».
+    pub fn restored(entries: Vec<Address>, at: usize) -> Self {
+        let at = at.min(entries.len().saturating_sub(1));
+        Self { entries, at }
+    }
+
     pub fn current(&self) -> Option<&Address> {
         self.entries.get(self.at)
+    }
+
+    /// Весь путь вкладки и место в нём — то, что кладётся в сессию.
+    pub fn entries(&self) -> &[Address] {
+        &self.entries
+    }
+
+    pub fn at(&self) -> usize {
+        self.at
     }
 
     pub fn is_empty(&self) -> bool {
@@ -104,6 +121,35 @@ mod tests {
         assert!(!history.can_go_forward());
         assert_eq!(history.current(), Some(&web("https://c.test/")));
         assert_eq!(history.back(), Some(&web("https://a.test/")));
+    }
+
+    #[test]
+    fn a_restored_history_walks_both_ways() {
+        let entries = vec![
+            web("https://a.test/"),
+            web("https://b.test/"),
+            web("https://c.test/"),
+        ];
+        let mut history = History::restored(entries, 1);
+        assert_eq!(history.current(), Some(&web("https://b.test/")));
+        assert!(history.can_go_back() && history.can_go_forward());
+        assert_eq!(history.forward(), Some(&web("https://c.test/")));
+
+        // Место вне списка — не повод падать: файл сессии правят руками,
+        // и он приезжает каким угодно.
+        let short = History::restored(vec![web("https://a.test/")], 9);
+        assert_eq!(short.current(), Some(&web("https://a.test/")));
+        assert!(History::restored(Vec::new(), 3).current().is_none());
+    }
+
+    #[test]
+    fn a_history_hands_out_what_it_holds() {
+        let mut history = History::new();
+        history.visit(web("https://a.test/"));
+        history.visit(web("https://b.test/"));
+        history.back();
+        assert_eq!(history.entries().len(), 2);
+        assert_eq!(history.at(), 0);
     }
 
     #[test]
