@@ -115,6 +115,7 @@ Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extra
 | `Ctrl+L` | focus the address bar |
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
 | `Ctrl+H` | what you have read |
+| `Ctrl+D` | keep this page, or take it off again |
 | `Ctrl+Tab`, `Ctrl+PageUp`/`PageDown` | switch tabs |
 | `Ctrl+F` | find on page |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | zoom the page in, out, back to 100% |
@@ -164,6 +165,9 @@ menu come from GTK.
   by the title they had when you read them — and load the moment you switch to one.
   Opening Brevier with an address on the command line does not restore — you asked for
   a page, not for yesterday.
+- **A star keeps the page** (`Ctrl+D`, or the star in the header) and pressing it again
+  takes it off. The list is `brevier:bookmarks`; History and Bookmarks link to each
+  other, so one button in the header reaches both.
 - **Pages you read are remembered, and the address bar suggests them** as you type —
   what matched from the start of the host first, then the rest of the address, then the
   title; among equals, where you go often and where you went last. `Ctrl+H` opens the
@@ -240,6 +244,7 @@ History and the open tabs live in plain text files, one line each, tab-separated
 ```
 ~/.local/share/brevier/history.tsv            # Linux, or $XDG_DATA_HOME/brevier
 ~/.local/share/brevier/session.tsv            # …and the tabs you left open
+~/.local/share/brevier/bookmarks.tsv          # …and the pages you kept
 ~/Library/Application Support/Brevier/        # macOS
 %LOCALAPPDATA%\Brevier\                      # Windows
 ```
@@ -264,6 +269,10 @@ Text rather than a database: SQLite would mean a C library in a program that sel
 memory safety, and a reading history is thousands of lines, not millions. The file is
 yours — open it in an editor, delete a line to forget a page, delete the file to forget
 everything. The oldest visits are dropped once there are more than five thousand.
+
+Settings has a button that forgets everything you have read — it empties the journal
+and nothing else: bookmarks and open tabs stay. One page is forgotten by deleting its
+line from the file.
 
 Only the window writes there. `brevier <url> | less` is a pipe tool and keeps no
 history of its own, and neither the pages Brevier failed to open nor its own

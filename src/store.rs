@@ -239,7 +239,7 @@ impl Store {
     /// markdown — внутреннее представление, а рисует его тот же отрисовщик,
     /// что и статью, поэтому история набрана той же типографикой.
     pub fn page(&self) -> String {
-        let mut out = String::from("# History\n\n");
+        let mut out = String::from("# History\n\n[Bookmarks](brevier:bookmarks)\n\n");
 
         if !self.writable {
             out.push_str(&format!(
@@ -299,11 +299,26 @@ impl Store {
 
         if let Some(path) = self.path.as_deref().filter(|_| self.writable) {
             out.push_str(&format!(
-                "\n---\n\nThis list is a plain text file: {}. Delete a line to forget a page.\n",
+                "\n---\n\nThis list is a plain text file: {}. Delete a line to forget one page; \
+                 Settings has a button that forgets them all.\n",
                 where_it_is(path),
             ));
         }
         out
+    }
+
+    /// Забыть всё прочитанное.
+    ///
+    /// Файл опустошаем, а не удаляем: у него уже есть место и права,
+    /// а «файла нет» и «история пуста» для чтения одно и то же. Закладок
+    /// и сессии это не касается — их читатель складывал руками.
+    pub fn forget(&mut self) {
+        self.visits.clear();
+        if let Some(path) = &self.path
+            && self.writable
+        {
+            self.writable = fs::write(path, "").is_ok();
+        }
     }
 
     /// Дописать строку в конец журнала. Ошибку глотаем: сказать о ней
@@ -340,6 +355,119 @@ impl Store {
                 visit.stamp.text(),
                 escape(&visit.address),
                 escape(&visit.title)
+            ));
+        }
+        self.writable = fs::write(path, text).is_ok();
+    }
+}
+
+/// Закладки: страницы, которые читатель отметил сам.
+///
+/// Хранятся тем же форматом, что и журнал, — отметка, адрес, заголовок.
+/// Разница не в данных, а в том, кто их кладёт: журнал пишется сам и растёт,
+/// пока его не подрежут, а закладку ставят руками, поэтому её умеют и снять.
+/// Отсюда же и запись целиком вместо дописывания: закладки меняются по одной.
+#[derive(Debug, Default)]
+pub struct Marks {
+    path: Option<PathBuf>,
+    marks: Vec<Visit>,
+    writable: bool,
+}
+
+impl Marks {
+    pub fn open() -> Self {
+        match data_dir() {
+            Some(dir) => Self::at(dir.join("bookmarks.tsv")),
+            None => Self::default(),
+        }
+    }
+
+    pub fn at(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        let writable = match path.parent() {
+            Some(dir) => fs::create_dir_all(dir).is_ok(),
+            None => true,
+        };
+        Self {
+            marks: text.lines().filter_map(parse_line).collect(),
+            path: Some(path),
+            writable,
+        }
+    }
+
+    pub fn marks(&self) -> &[Visit] {
+        &self.marks
+    }
+
+    pub fn has(&self, address: &str) -> bool {
+        self.marks.iter().any(|mark| mark.address == address)
+    }
+
+    /// Отметить страницу или снять отметку. Отвечает тем, отмечена ли она
+    /// теперь: на этот ответ смотрит звёздочка в панели.
+    pub fn toggle(&mut self, address: &Address, title: &str, offset: i32) -> bool {
+        let address = address.display();
+        if self.has(&address) {
+            self.marks.retain(|mark| mark.address != address);
+            self.write();
+            return false;
+        }
+        self.marks.push(Visit {
+            stamp: Stamp::now(offset),
+            title: title.split_whitespace().collect::<Vec<_>>().join(" "),
+            address,
+        });
+        self.write();
+        true
+    }
+
+    /// Страница закладок. Дней тут нет, в отличие от истории: закладку
+    /// ставят не «когда-то», а «вот это»; порядок — свежие сверху.
+    pub fn page(&self) -> String {
+        let mut out = String::from("# Bookmarks\n\n[History](brevier:history)\n\n");
+        if self.marks.is_empty() {
+            out.push_str(
+                "Nothing here yet. **Ctrl+D** keeps the page you are reading, \
+                 and takes it off this list if it is already here.\n",
+            );
+            return out;
+        }
+        for mark in self.marks.iter().rev() {
+            let title = if mark.title.is_empty() {
+                mark.address.clone()
+            } else {
+                mark.title.clone()
+            };
+            let source = source_of(&mark.address);
+            let source = if source == mark.address {
+                String::new()
+            } else {
+                format!(" — {source}")
+            };
+            out.push_str(&format!("- {}{source}\n", link(&title, &mark.address)));
+        }
+        if let Some(path) = self.path.as_deref().filter(|_| self.writable) {
+            out.push_str(&format!(
+                "\n---\n\nThis list is a plain text file: {}.\n",
+                where_it_is(path),
+            ));
+        }
+        out
+    }
+
+    fn write(&mut self) {
+        let Some(path) = &self.path else { return };
+        if !self.writable {
+            return;
+        }
+        let mut text = String::new();
+        for mark in &self.marks {
+            text.push_str(&format!(
+                "{}\t{}\t{}\n",
+                mark.stamp.text(),
+                escape(&mark.address),
+                escape(&mark.title)
             ));
         }
         self.writable = fs::write(path, text).is_ok();
@@ -1113,7 +1241,7 @@ mod tests {
         );
 
         let page = store.page();
-        assert!(page.starts_with("# History\n\n## Today\n"));
+        assert!(page.starts_with("# History\n\n[Bookmarks](brevier:bookmarks)\n\n## Today\n"));
         assert!(page.contains("## Today"));
         assert!(page.contains("## Yesterday"));
         assert!(
@@ -1151,6 +1279,55 @@ mod tests {
         store.record(&web("https://example.test/"), "  Two\n   lines  ", 0);
         assert_eq!(store.visits()[0].title, "Two lines");
         assert_eq!(Store::at(&path).visits()[0].title, "Two lines");
+    }
+
+    #[test]
+    fn a_bookmark_goes_on_and_comes_off() {
+        let path = temporary("marks").with_file_name("bookmarks.tsv");
+        let mut marks = Marks::at(&path);
+        let page = web("https://danluu.com/keyboard-latency/");
+
+        assert!(marks.toggle(&page, "Keyboard latency", 0));
+        assert!(marks.has("https://danluu.com/keyboard-latency/"));
+        // Пережило закрытие программы.
+        assert!(Marks::at(&path).has("https://danluu.com/keyboard-latency/"));
+
+        // Второй раз — снять: звёздочка работает в обе стороны.
+        assert!(!marks.toggle(&page, "Keyboard latency", 0));
+        assert!(!marks.has("https://danluu.com/keyboard-latency/"));
+        assert!(Marks::at(&path).marks().is_empty());
+    }
+
+    #[test]
+    fn the_bookmarks_page_lists_the_freshest_first() {
+        let path = temporary("marks-page").with_file_name("bookmarks.tsv");
+        let mut marks = Marks::at(&path);
+        marks.toggle(&web("https://sive.rs/faq"), "FAQ", 0);
+        marks.toggle(&web("https://danluu.com/"), "danluu", 0);
+
+        let page = marks.page();
+        assert!(page.starts_with("# Bookmarks\n\n[History](brevier:history)\n"));
+        assert!(page.find("danluu").unwrap() < page.find("FAQ").unwrap());
+        assert!(
+            Marks::at(temporary("no-marks"))
+                .page()
+                .contains("Nothing here yet")
+        );
+    }
+
+    #[test]
+    fn forgetting_empties_the_journal_but_leaves_the_file() {
+        let path = temporary("forget");
+        let mut store = Store::at(&path);
+        store.record(&web("https://danluu.com/"), "danluu", 0);
+        store.forget();
+
+        assert!(store.visits().is_empty());
+        assert!(Store::at(&path).visits().is_empty());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        // Забыли — но писать по-прежнему умеем.
+        store.record(&web("https://sive.rs/"), "sivers", 0);
+        assert_eq!(Store::at(&path).visits().len(), 1);
     }
 
     fn opened(addresses: &[&str], at: usize, place: i32, current: bool) -> Opened {

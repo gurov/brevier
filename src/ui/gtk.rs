@@ -36,7 +36,7 @@ use brevier::outline::{
     ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
 };
 use brevier::save;
-use brevier::store::{self, HINTS, Hint, Settings, Store};
+use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
@@ -256,6 +256,10 @@ struct Ui {
     /// а кнопка, которая всегда показывает «100%», не говорит ничего.
     zoom_level: gtk::Button,
     save: gtk::Button,
+    /// Закладка на открытую страницу. Кнопка, а не строка настроек:
+    /// решение это не «раз и надолго», а про ту страницу, что сейчас
+    /// на экране, — и состояние своё она показывает сама, значком.
+    star: gtk::Button,
     /// Строка состояния внизу: что сохранилось, что не загрузилось.
     notice: gtk::Label,
     /// Поиск по странице: строка внизу окна, как в браузерах.
@@ -331,6 +335,9 @@ struct State {
     /// строятся подсказки адресной строки, а страница истории читает файл
     /// заново — программа может быть открыта и дважды.
     store: Store,
+    /// Страницы, отмеченные читателем. В памяти — чтобы звёздочка знала,
+    /// зажигаться ли ей, не заглядывая на диск при каждом переходе.
+    marks: Marks,
     /// Это окно отвечает за сессию: оно её подняло, оно её и пишет.
     /// Сессия одна на программу, а окон бывает несколько — иначе второе
     /// окно затирало бы вкладки первого своими.
@@ -522,6 +529,7 @@ fn build(app: &Application, start: Vec<String>) {
             .visible(false)
             .build(),
         save: gtk::Button::from_icon_name("document-save-symbolic"),
+        star: gtk::Button::from_icon_name("non-starred-symbolic"),
         notice: gtk::Label::builder()
             .xalign(0.0)
             .wrap(true)
@@ -597,9 +605,9 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_end(&ui.zoom_level);
     header.pack_end(&ui.show_contents);
     header.pack_end(&ui.save);
+    header.pack_end(&ui.star);
     header.set_title_widget(Some(&ui.entry));
     ui.window.set_titlebar(Some(&header));
-    build_settings(&ui);
 
     let find_previous = gtk::Button::from_icon_name("go-up-symbolic");
     let find_next = gtk::Button::from_icon_name("go-down-symbolic");
@@ -628,6 +636,7 @@ fn build(app: &Application, start: Vec<String>) {
     ui.window.set_child(Some(&root));
     ui.notice.add_css_class("caption");
     ui.save.set_tooltip_text(Some("Save the article (Ctrl+S)"));
+    ui.star.set_tooltip_text(Some("Keep this page (Ctrl+D)"));
 
     let state = Rc::new(RefCell::new(State {
         tabs: Vec::new(),
@@ -636,6 +645,7 @@ fn build(app: &Application, start: Vec<String>) {
         images: settings.images,
         zoom: HashMap::new(),
         store: Store::open(),
+        marks: Marks::open(),
         // Сессию поднимает и пишет первое окно процесса. Второе окно —
         // это «открой мне ещё одну ссылку», а не «вот мои вкладки».
         keeps_session: OWNS_SESSION.with(|first| first.replace(false)),
@@ -644,6 +654,9 @@ fn build(app: &Application, start: Vec<String>) {
         shelf: Vec::new(),
     }));
     apply_theme(&ui, &state);
+    // Окно настроек собирается после состояния: кнопка «забыть» работает
+    // с журналом, а журнал лежит там.
+    build_settings(&ui, &state);
 
     // ── сцепка виджетов с действиями
     {
@@ -774,6 +787,13 @@ fn build(app: &Application, start: Vec<String>) {
         ui.save
             .clone()
             .connect_clicked(move |_| ask_where_to_save(&ui, &state));
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.star
+            .clone()
+            .connect_clicked(move |_| keep_page(&ui, &state));
     }
     {
         let ui = ui.clone();
@@ -976,7 +996,7 @@ fn build(app: &Application, start: Vec<String>) {
 /// что нужно на каждой странице, и свалкой быть не должна. Тема и картинки
 /// нужны не на каждой, зато у каждой настройки есть причина, которую надо
 /// объяснить строкой, — в кнопку с иконкой такое не помещается.
-fn build_settings(ui: &Ui) {
+fn build_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
     page.set_margin_top(18);
     page.set_margin_bottom(18);
@@ -1004,6 +1024,35 @@ fn build_settings(ui: &Ui) {
     ));
     page.append(&rows);
 
+    let kept = gtk::Label::builder().label("History").xalign(0.0).build();
+    kept.add_css_class("shelf-title");
+    page.append(&kept);
+
+    // Действие, а не настройка, и место ему всё же здесь: вычистить историю
+    // хотят раз в полгода, а панель шапки — для того, что нужно на каждой
+    // странице. Сама страница истории на эту кнопку и показывает.
+    let forget = gtk::Button::builder()
+        .label("Forget")
+        .valign(gtk::Align::Center)
+        .build();
+    forget.add_css_class("destructive-action");
+    let history_rows = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    history_rows.add_css_class("rich-list");
+    history_rows.append(&action_row(
+        "Forget everything you have read",
+        "The list at brevier:history goes away, and the address bar stops \
+         suggesting those pages. Bookmarks and open tabs stay.",
+        &forget,
+    ));
+    page.append(&history_rows);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        forget.connect_clicked(move |_| forget_everything(&ui, &state));
+    }
+
     ui.settings_window.set_transient_for(Some(&ui.window));
     ui.settings_window.set_child(Some(&page));
 
@@ -1012,7 +1061,13 @@ fn build_settings(ui: &Ui) {
 }
 
 /// Строка настройки: что делает, почему так и сам переключатель.
-fn setting_row(title: &str, why: &str, switch: &gtk::Switch) -> gtk::ListBoxRow {
+/// Строка с кнопкой вместо переключателя: то же место и тот же вид,
+/// но действие, а не состояние.
+fn action_row(title: &str, why: &str, button: &gtk::Button) -> gtk::ListBoxRow {
+    setting_row(title, why, button)
+}
+
+fn setting_row(title: &str, why: &str, switch: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
     let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
     text.set_hexpand(true);
     let name = gtk::Label::builder().label(title).xalign(0.0).build();
@@ -1133,6 +1188,14 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         });
     }
     add("find", &["<Control>f"], find_action);
+
+    let keep = gio::SimpleAction::new("keep", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        keep.connect_activate(move |_, _| keep_page(&ui, &state));
+    }
+    add("keep", &["<Control>d"], keep);
 
     let save = gio::SimpleAction::new("save", None);
     {
@@ -1478,6 +1541,82 @@ fn resume_place(ui: &Ui, state: &Rc<RefCell<State>>) {
     if let Some((view, place)) = ready {
         settle(&view, place, 0.0);
     }
+}
+
+/// Отметить открытую страницу — или снять отметку.
+///
+/// Про внутренние страницы (сама история, сами закладки) отметки не бывает:
+/// класть список в список незачем, и звёздочка на них гаснет.
+fn keep_page(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let page = {
+        let borrowed = state.borrow();
+        let Some(tab) = borrowed.tabs.get(index as usize) else {
+            return;
+        };
+        let title = tab
+            .document
+            .as_ref()
+            .map(|document| document.title.clone())
+            .unwrap_or_default();
+        tab.history
+            .current()
+            .filter(|address| !address.is_internal())
+            .cloned()
+            .map(|address| (address, title))
+    };
+    let Some((address, title)) = page else { return };
+
+    let kept = {
+        let mut borrowed = state.borrow_mut();
+        let offset = local_offset();
+        borrowed.marks.toggle(&address, &title, offset)
+    };
+    show_star(ui, kept);
+    notice(
+        ui,
+        if kept {
+            "Kept — the list is at brevier:bookmarks"
+        } else {
+            "Taken off the bookmarks"
+        },
+    );
+}
+
+/// Зажечь или погасить звёздочку.
+fn show_star(ui: &Ui, kept: bool) {
+    ui.star.set_icon_name(if kept {
+        "starred-symbolic"
+    } else {
+        "non-starred-symbolic"
+    });
+}
+
+/// Забыть всё прочитанное — с вопросом, потому что назад это не отыграть.
+fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let dialog = gtk::AlertDialog::builder()
+        .message("Forget everything you have read?")
+        .detail(
+            "The list of pages goes away, and the address bar stops suggesting them.              Bookmarks and open tabs stay.",
+        )
+        .buttons(["Cancel", "Forget"])
+        .cancel_button(0)
+        .default_button(0)
+        .modal(true)
+        .build();
+
+    let window = ui.settings_window.clone();
+    let ui = ui.clone();
+    let state = state.clone();
+    dialog.choose(Some(&window), gio::Cancellable::NONE, move |answer| {
+        if answer != Ok(1) {
+            return;
+        }
+        state.borrow_mut().store.forget();
+        notice(&ui, "The list of pages you have read is empty now");
+    });
 }
 
 /// Запомнить решения читателя: тему, картинки, полку и её ширину.
@@ -1924,11 +2063,17 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
     let Some(index) = index else { return };
 
-    let (address, here, can_back, can_forward, marks, entries, title) = {
+    let (address, here, can_back, can_forward, marks, entries, title, kept) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.get(index) else {
             return;
         };
+        // Звёздочка — про открытую страницу, а не про вкладку: гаснет
+        // на внутренних (список в списке ни к чему) и на пустой.
+        let open_now = tab.history.current();
+        let kept = open_now
+            .filter(|address| !address.is_internal())
+            .map(|address| borrowed.marks.has(&address.display()));
         (
             tab.history
                 .current()
@@ -1940,8 +2085,11 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             tab.marks.clone(),
             tab.entries.clone(),
             tab.label.text().to_string(),
+            kept,
         )
     };
+    ui.star.set_sensitive(kept.is_some());
+    show_star(ui, kept.unwrap_or(false));
 
     set_address(ui, &address);
     ui.back.set_sensitive(can_back);
@@ -3937,32 +4085,23 @@ fn ask_where_to_save(ui: &Ui, state: &Rc<RefCell<State>>) {
         return;
     };
 
-    let chooser = gtk::FileChooserNative::new(
-        Some("Save article"),
-        Some(&ui.window),
-        gtk::FileChooserAction::Save,
-        Some("Save"),
-        Some("Cancel"),
-    );
-    chooser.set_current_name(&save::suggested_name(&document));
+    let chooser = gtk::FileDialog::builder()
+        .title("Save article")
+        .initial_name(save::suggested_name(&document))
+        .modal(true)
+        .build();
 
-    let chooser = Rc::new(chooser);
-    let alive = chooser.clone();
+    let window = ui.window.clone();
     let ui = ui.clone();
-    chooser.connect_response(move |chooser, answer| {
-        // Ссылка на самого себя держит диалог в живых до ответа: местных
-        // переменных к этому моменту уже нет.
-        let _ = &alive;
-        chooser.hide();
-        if answer != gtk::ResponseType::Accept {
-            return;
-        }
-        let Some(path) = chooser.file().and_then(|file| file.path()) else {
+    // `FileDialog` сам держит себя в живых до ответа и сам зовёт обратно —
+    // прежний `FileChooserNative` требовал ссылки на самого себя и разбора
+    // кода ответа.
+    chooser.save(Some(&window), gio::Cancellable::NONE, move |answer| {
+        let Some(path) = answer.ok().and_then(|file| file.path()) else {
             return;
         };
         save_to(&ui, path, document.clone());
     });
-    chooser.show();
 }
 
 /// Записать статью на диск.

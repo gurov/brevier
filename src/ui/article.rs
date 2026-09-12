@@ -68,7 +68,10 @@ mod imp {
 glib::wrapper! {
     pub struct Article(ObjectSubclass<imp::Article>)
         @extends gtk::TextView, gtk::Widget,
-        @implements gtk::Buildable, gtk::ConstraintTarget, gtk::Scrollable;
+        // `Accessible` в списке обязателен с GTK 4.10 и по делу: любой виджет
+        // его реализует, а продукт, обещающий доступность, объявить это
+        // должен явно.
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Scrollable;
 }
 
 impl Default for Article {

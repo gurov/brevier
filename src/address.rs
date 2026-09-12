@@ -30,6 +30,7 @@ pub enum Address {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Internal {
     History,
+    Bookmarks,
 }
 
 impl Internal {
@@ -37,12 +38,14 @@ impl Internal {
     pub fn name(self) -> &'static str {
         match self {
             Internal::History => "history",
+            Internal::Bookmarks => "bookmarks",
         }
     }
 
     fn of_name(name: &str) -> Option<Self> {
         match name.trim_start_matches("//").trim_end_matches('/') {
             "history" => Some(Internal::History),
+            "bookmarks" => Some(Internal::Bookmarks),
             _ => None,
         }
     }
@@ -442,7 +445,11 @@ mod tests {
         assert_eq!(parse("brevier://history/").unwrap(), history);
         // Снаружи её открыть нечем, и выдумывать адрес для этого не станем.
         assert!(history.external().is_empty());
-        assert!(matches!(parse("brevier:bookmarks"), Err(Error::BadUrl(_))));
+        assert_eq!(
+            parse("brevier:bookmarks").unwrap(),
+            Address::Internal(Internal::Bookmarks)
+        );
+        assert!(matches!(parse("brevier:nowhere"), Err(Error::BadUrl(_))));
     }
 
     #[test]

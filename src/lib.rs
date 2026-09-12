@@ -76,6 +76,7 @@ pub fn open(address: &Address, ua: UserAgent) -> Result<Document, Error> {
 fn open_internal(page: Internal) -> Document {
     let (title, markdown) = match page {
         Internal::History => ("History", store::Store::open().page()),
+        Internal::Bookmarks => ("Bookmarks", store::Marks::open().page()),
     };
     Document {
         address: Address::Internal(page),
