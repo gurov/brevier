@@ -13,7 +13,7 @@ const HELP: &str = "\
 brevier — a JavaScript-free reader: fetches a page, extracts the article,
 prints it as Markdown (CommonMark + GFM).
 
-Usage: brevier [options] <url|gh:owner/repo|gl:owner/repo>
+Usage: brevier [options] <url|gh:owner/repo|gl:owner/repo|brevier:history>
 
 Options:
       --ua <honest|browser>  User-Agent to send (default: honest)
@@ -162,7 +162,7 @@ fn run(args: &Args) -> Result<String, Error> {
     // Точки входа в документацию — вопрос к репозиторию, а не к документу:
     // отвечаем на него до того, как что-то скачано и разобрано.
     if args.docs {
-        let Some(Address::Repo(repo)) = repository(args) else {
+        let Some(Address::Repo(repo)) = direct(args) else {
             return Err(Error::BadUrl(format!("{} is not a repository", args.url)));
         };
         let mut out = String::new();
@@ -179,10 +179,11 @@ fn run(args: &Args) -> Result<String, Error> {
             .map_err(Error::Convert)?;
         page_text(&html, &args.url, args)?
     } else {
-        match repository(args) {
+        match direct(args) {
             // Репозиторий читается своим трактом: конвертировать нечего,
             // формат родной. Работа там в другом — развернуть ссылки внутри
-            // документа, которых в сыром `.md` нет.
+            // документа, которых в сыром `.md` нет. Своя страница (история)
+            // идёт тем же путём и по той же причине: сети за ней нет.
             Some(address) => {
                 let document = brevier::open(&address, args.ua)?;
                 // Каталог без README приезжает списком ссылок. Говорим
@@ -237,15 +238,16 @@ fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
     Ok(reading.markdown)
 }
 
-/// Адрес репозитория — или `None`, если это обычная страница. `--raw`
-/// и `--html` спрашивают про извлечение из веба, которого в репозитории
-/// нет вовсе; при них тракт всегда веб-овый.
-fn repository(args: &Args) -> Option<Address> {
+/// Адрес, который ядро открывает целиком само: репозиторий или наша
+/// собственная страница. `--raw` и `--html` спрашивают про извлечение
+/// из веба, которого ни там, ни там нет вовсе; при них тракт всегда
+/// веб-овый.
+fn direct(args: &Args) -> Option<Address> {
     if args.raw || args.html {
         return None;
     }
     match address::parse(&args.url) {
-        Ok(address @ Address::Repo(_)) => Some(address),
+        Ok(address @ (Address::Repo(_) | Address::Internal(_))) => Some(address),
         _ => None,
     }
 }

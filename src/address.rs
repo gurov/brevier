@@ -19,6 +19,33 @@ pub enum Address {
     Repo(Repo),
     /// Локальный файл: формат родной, конвертировать нечего.
     File(PathBuf),
+    /// Страница самой программы: история, а дальше и закладки. Адрес у неё
+    /// настоящий (`brevier:history`), потому что иначе её не положить
+    /// ни в историю вкладки, ни в адресную строку — а браузеры, у которых
+    /// это `chrome://history` и `about:history`, ровно за это её и держат.
+    Internal(Internal),
+}
+
+/// Какая из внутренних страниц.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Internal {
+    History,
+}
+
+impl Internal {
+    /// Имя после `brevier:` — оно же то, что читатель печатает.
+    pub fn name(self) -> &'static str {
+        match self {
+            Internal::History => "history",
+        }
+    }
+
+    fn of_name(name: &str) -> Option<Self> {
+        match name.trim_start_matches("//").trim_end_matches('/') {
+            "history" => Some(Internal::History),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,7 +228,16 @@ impl Address {
             Address::Web(url) => url.clone(),
             Address::Repo(repo) => repo.web_url(),
             Address::File(path) => format!("file://{}", path.display()),
+            // Внутренней странице снаружи соответствия нет. Пустая строка
+            // здесь честнее выдуманного адреса: окно по ней и понимает,
+            // что отдавать чужому браузеру нечего.
+            Address::Internal(_) => String::new(),
         }
+    }
+
+    /// Страница самой программы: сети за ней нет, и наружу её не отдать.
+    pub fn is_internal(&self) -> bool {
+        matches!(self, Address::Internal(_))
     }
 
     /// Как показать адрес в строке. Для веба — сам URL, для репозитория —
@@ -227,6 +263,7 @@ impl Address {
                 }
             }
             Address::File(path) => path.display().to_string(),
+            Address::Internal(page) => format!("brevier:{}", page.name()),
         }
     }
 }
@@ -251,6 +288,12 @@ pub fn parse(input: &str) -> Result<Address, Error> {
             "file" => Ok(Address::File(PathBuf::from(
                 rest.trim_start_matches("//").to_owned(),
             ))),
+            // Своя схема — для своих страниц. Имя после двоеточия одно
+            // на всю программу, поэтому неизвестное это опечатка, а не
+            // адрес, который стоило бы попробовать загрузить.
+            "brevier" => Internal::of_name(rest)
+                .map(Address::Internal)
+                .ok_or_else(|| Error::BadUrl(text.to_owned())),
             other => Err(Error::UnsupportedScheme(other.to_owned())),
         };
     }
@@ -387,6 +430,20 @@ fn looks_like_path(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn our_own_page_has_an_address_like_everything_else() {
+        // Внутренняя страница обязана разбираться обратно: она лежит
+        // в истории вкладки и печатается в адресной строке, а значит
+        // однажды приедет в `parse` из них же.
+        let history = Address::Internal(Internal::History);
+        assert_eq!(history.display(), "brevier:history");
+        assert_eq!(parse("brevier:history").unwrap(), history);
+        assert_eq!(parse("brevier://history/").unwrap(), history);
+        // Снаружи её открыть нечем, и выдумывать адрес для этого не станем.
+        assert!(history.external().is_empty());
+        assert!(matches!(parse("brevier:bookmarks"), Err(Error::BadUrl(_))));
+    }
 
     #[test]
     fn a_trailing_slash_asks_for_the_directory_itself() {

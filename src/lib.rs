@@ -25,6 +25,10 @@ pub mod repo;
 /// Сохранение статьи на диск. За фичей `save`: zip нужен окну, не корпусу.
 #[cfg(feature = "save")]
 pub mod save;
+/// Что и как храним на диске: история посещённого, а дальше закладки
+/// и сессия. Одно хранилище и один формат — иначе их заведётся два,
+/// с разной судьбой.
+pub mod store;
 
 use std::path::Path;
 
@@ -34,7 +38,7 @@ pub use fetch::UserAgent;
 pub use history::History;
 pub use markdown::Kind;
 
-use address::Repo;
+use address::{Internal, Repo};
 use fetch::ContentKind;
 
 /// Прочитанный документ в том виде, в каком его показывает окно.
@@ -62,6 +66,24 @@ pub fn open(address: &Address, ua: UserAgent) -> Result<Document, Error> {
         Address::Web(url) => open_web(url, ua),
         Address::Repo(repo) => open_repo(repo, ua),
         Address::File(path) => open_file(path),
+        Address::Internal(page) => Ok(open_internal(*page)),
+    }
+}
+
+/// Страница самой программы. Сети здесь нет, зато есть диск: историю
+/// читаем заново, а не из памяти окна, — так страница верна и тогда,
+/// когда программа открыта дважды.
+fn open_internal(page: Internal) -> Document {
+    let (title, markdown) = match page {
+        Internal::History => ("History", store::Store::open().page()),
+    };
+    Document {
+        address: Address::Internal(page),
+        title: title.to_owned(),
+        markdown,
+        // Ссылок тут список, но это не лента: читатель открыл историю
+        // намеренно, и говорить ему «это список ссылок» незачем.
+        kind: Kind::Article,
     }
 }
 

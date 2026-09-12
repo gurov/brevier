@@ -31,5 +31,6 @@ It reads markdown documentation straight out of repositories, too.
 Pages that need JavaScript will not render here. That is the point, not a
 defect — when it happens, **Ctrl+O** hands the address to your usual browser.
 
-**Ctrl+L** address · **Ctrl+T** new tab · **Ctrl+F** find · **Ctrl+S** save
+**Ctrl+L** address · **Ctrl+T** new tab · **Ctrl+H** history · **Ctrl+F** find
+· **Ctrl+S** save
 ";

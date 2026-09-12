@@ -26,7 +26,7 @@ use gtk::{Application, ApplicationWindow};
 
 use comrak::nodes::{ListType, NodeValue, TableAlignment};
 
-use brevier::address::{self, Address, Repo};
+use brevier::address::{self, Address, Internal, Repo};
 use brevier::code;
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
@@ -35,6 +35,7 @@ use brevier::outline::{
     ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
 };
 use brevier::save;
+use brevier::store::{HINTS, Hint, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
@@ -63,6 +64,14 @@ const MIN_DOC_CHARS: i32 = 4000;
 const IMAGE_CHARS: i32 = 500;
 /// Сколько знаков влезает на корешок вкладки.
 const TAB_LABEL: usize = 24;
+
+/// Докуда растёт список подсказок. Восемь строк в две строчки каждая —
+/// и ни пикселем больше: подсказка помогает выбрать, а не читать.
+const HINT_HEIGHT: i32 = 330;
+
+/// Уже этого список не показываем, даже если адресная строка уже: в узком
+/// окне она короче адреса, и подсказка из одних многоточий не подсказка.
+const HINT_WIDTH: i32 = 420;
 /// Что говорим на странице, оказавшейся списком ссылок, а не статьёй.
 const LISTING: &str = "A list of links, not an article — pick one to read.";
 /// Сколько совпадений подсвечиваем. Дальше это уже не поиск, а заливка.
@@ -120,9 +129,14 @@ Options:
   -h, --help     this text
   -V, --version  version
 
-Keys: Ctrl+L the address bar, Ctrl+T new tab, Ctrl+W close it, Ctrl+F find on
-      page, Ctrl+S save the article, Ctrl+O hand the page to your system
-      browser, Ctrl+plus/minus/0 zoom the page.
+Keys: Ctrl+L the address bar, Ctrl+T new tab, Ctrl+W close it, Ctrl+H what you
+      have read, Ctrl+F find on page, Ctrl+S save the article, Ctrl+O hand the
+      page to your system browser, Ctrl+plus/minus/0 zoom the page.
+
+Pages you read are remembered: the address bar suggests them as you type, and
+`brevier:history` lists them by day. The list is a plain text file under
+$XDG_DATA_HOME/brevier (BREVIER_DATA_DIR moves it); deleting a line forgets
+a page.
 ";
 
 fn main() -> glib::ExitCode {
@@ -198,6 +212,18 @@ struct Ui {
     entry: gtk::Entry,
     back: gtk::Button,
     forward: gtk::Button,
+    /// История посещённого. Место ей рядом с «назад» и «вперёд»: это тоже
+    /// навигация, только не по ссылкам, а по времени.
+    history: gtk::Button,
+    /// Подсказки адресной строки: список под ней, как в любом браузере.
+    /// Не `autohide`: всплывающее окно, забирающее себе клавиатуру, отняло
+    /// бы её у строки, в которой в этот момент печатают.
+    hints: gtk::Popover,
+    hint_list: gtk::ListBox,
+    /// Строку адреса окно правит и само — при каждом переходе. Пока правит,
+    /// подсказки молчат: список, выскакивающий после каждой загруженной
+    /// страницы, — это не помощь.
+    quiet: Rc<Cell<bool>>,
     contents: gtk::ListBox,
     /// Полка целиком: подпись, черта и прокрутка под ними. Прячется
     /// и показывается она, а не список, — подпись обязана уходить вместе
@@ -284,6 +310,13 @@ struct State {
     /// форматом, починкой при обновлении и вопросом «почему этот сайт
     /// открывается странно» через полгода.
     zoom: HashMap<String, usize>,
+    /// Куда читатель уже ходил. Журнал на диске, свод в памяти: по нему
+    /// строятся подсказки адресной строки, а страница истории читает файл
+    /// заново — программа может быть открыта и дважды.
+    store: Store,
+    /// Что сейчас в списке подсказок. Как и у полки: обработчик подключён
+    /// один раз, а строка ищет себя по месту в списке.
+    hints: Vec<String>,
     /// Поиск: строка одна на окно, поэтому и состояние одно.
     search: Search,
     /// Что делает строка полки. Полка одна на окно, значит и список один,
@@ -393,6 +426,20 @@ fn build(app: &Application, start: Vec<String>) {
             .build(),
         back: gtk::Button::from_icon_name("go-previous-symbolic"),
         forward: gtk::Button::from_icon_name("go-next-symbolic"),
+        history: gtk::Button::from_icon_name("document-open-recent-symbolic"),
+        hints: gtk::Popover::builder()
+            .autohide(false)
+            .has_arrow(false)
+            .position(gtk::PositionType::Bottom)
+            .build(),
+        hint_list: gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::Single)
+            // Строка подсказки фокуса не берёт: щелчок по ней не должен
+            // уводить курсор из адресной строки — иначе строка теряет фокус
+            // раньше, чем щелчок доходит до списка.
+            .can_focus(false)
+            .build(),
+        quiet: Rc::new(Cell::new(false)),
         contents: gtk::ListBox::builder()
             // Выделение здесь не выбор, а «вы сейчас здесь»: строку под
             // глазами полка отмечает сама, по ходу чтения.
@@ -499,9 +546,24 @@ fn build(app: &Application, start: Vec<String>) {
     let new_tab_button = gtk::Button::from_icon_name("tab-new-symbolic");
     new_tab_button.set_tooltip_text(Some("New tab (Ctrl+T)"));
 
+    // Подсказки висят на самой строке, а не на окне: тогда GTK сам держит
+    // их под ней при смене размера окна.
+    let hint_pane = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(HINT_HEIGHT)
+        .child(&ui.hint_list)
+        .build();
+    ui.hints.set_child(Some(&hint_pane));
+    ui.hints.set_parent(&ui.entry);
+    ui.hints.add_css_class("hints");
+    ui.hint_list.add_css_class("hints");
+    ui.history.set_tooltip_text(Some("History (Ctrl+H)"));
+
     let header = gtk::HeaderBar::builder().build();
     header.pack_start(&ui.back);
     header.pack_start(&ui.forward);
+    header.pack_start(&ui.history);
     header.pack_start(&new_tab_button);
     header.pack_end(&ui.settings);
     header.pack_end(&ui.zoom_level);
@@ -547,6 +609,8 @@ fn build(app: &Application, start: Vec<String>) {
         dark: false,
         images: true,
         zoom: HashMap::new(),
+        store: Store::open(),
+        hints: Vec::new(),
         search: Search::default(),
         shelf: Vec::new(),
     }));
@@ -575,6 +639,82 @@ fn build(app: &Application, start: Vec<String>) {
         ui.back
             .clone()
             .connect_clicked(move |_| step(&ui, &state, true));
+    }
+    {
+        // История открывается вкладкой, как `Ctrl+H` в хроме: читатель
+        // пришёл за ней, не бросив того, что читает.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.history.clone().connect_clicked(move |_| {
+            new_tab(&ui, &state, Some(Address::Internal(Internal::History)));
+        });
+    }
+    {
+        // Печатают — показываем, куда он уже ходил.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.entry
+            .clone()
+            .connect_changed(move |_| offer_hints(&ui, &state));
+    }
+    {
+        // Ушли из строки — список убираем: он висит над текстом статьи.
+        let ui = ui.clone();
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave(move |_| ui.hints.popdown());
+        ui.entry.add_controller(focus);
+    }
+    {
+        // Выбрали строку мышью.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.hint_list.clone().connect_row_activated(move |_, row| {
+            let chosen = state.borrow().hints.get(row.index() as usize).cloned();
+            if let Some(address) = chosen {
+                take_hint(&ui, &state, &address);
+            }
+        });
+    }
+    {
+        // Клавиши в адресной строке. Перехват до самой строки (`Capture`):
+        // иначе Enter уходит в неё и открывает напечатанное, а не выбранное.
+        let entry = ui.entry.clone();
+        let ui = ui.clone();
+        let state = state.clone();
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            let shown = ui.hints.is_visible();
+            match key {
+                gtk::gdk::Key::Down if shown => walk_hints(&ui, 1),
+                gtk::gdk::Key::Up if shown => walk_hints(&ui, -1),
+                gtk::gdk::Key::Escape if shown => ui.hints.popdown(),
+                gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter if shown => {
+                    let chosen = ui
+                        .hint_list
+                        .selected_row()
+                        .and_then(|row| state.borrow().hints.get(row.index() as usize).cloned());
+                    match chosen {
+                        Some(address) => take_hint(&ui, &state, &address),
+                        // Ничего не выбрано — открывается напечатанное,
+                        // и список просто уходит с дороги.
+                        None => {
+                            ui.hints.popdown();
+                            return glib::Propagation::Proceed;
+                        }
+                    }
+                }
+                _ => return glib::Propagation::Proceed,
+            }
+            glib::Propagation::Stop
+        });
+        entry.add_controller(keys);
+    }
+    {
+        // Всплывающее окно обязано отцепиться от строки раньше, чем строку
+        // разберут: иначе GTK жалуется на виджет с ребёнком при разборке.
+        let hints = ui.hints.clone();
+        ui.entry.clone().connect_destroy(move |_| hints.unparent());
     }
     {
         let ui = ui.clone();
@@ -892,6 +1032,16 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("close-tab", &["<Control>w"], close);
 
+    let history = gio::SimpleAction::new("history", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        history.connect_activate(move |_, _| {
+            new_tab(&ui, &state, Some(Address::Internal(Internal::History)));
+        });
+    }
+    add("history", &["<Control>h"], history);
+
     let focus = gio::SimpleAction::new("focus-address", None);
     {
         let ui = ui.clone();
@@ -1202,6 +1352,136 @@ fn current_address(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<String> {
         .map(Address::display)
 }
 
+/// Показать подсказки к напечатанному.
+///
+/// Список строится по журналу посещённого, порядок считает ядро
+/// (`store::suggest`): совпавшее с начала хоста, потом с середины адреса,
+/// потом заголовком. Здесь только показ.
+fn offer_hints(ui: &Ui, state: &Rc<RefCell<State>>) {
+    if ui.quiet.get() {
+        return;
+    }
+    let typed = ui.entry.text().to_string();
+    let found = state.borrow().store.suggest(&typed, HINTS);
+
+    while let Some(child) = ui.hint_list.first_child() {
+        ui.hint_list.remove(&child);
+    }
+    if found.is_empty() {
+        state.borrow_mut().hints.clear();
+        ui.hints.popdown();
+        return;
+    }
+
+    // Открытое всплывающее окно держит ту высоту, с которой его показали:
+    // строк стало меньше — под списком осталась бы пустая плита. Показываем
+    // заново, но только когда число строк и правда изменилось, иначе окно
+    // мигало бы на каждом нажатии.
+    if ui.hints.is_visible() && found.len() != state.borrow().hints.len() {
+        ui.hints.popdown();
+    }
+    for hint in &found {
+        ui.hint_list.append(&hint_row(hint));
+    }
+    // Ничего не выбрано: первое нажатие Enter обязано открыть напечатанное,
+    // а не то, что программа угадала за читателя. Выбирают стрелкой.
+    ui.hint_list.unselect_all();
+    state.borrow_mut().hints = found.into_iter().map(|hint| hint.address).collect();
+
+    // Ширину берём у строки: список — её продолжение вниз, и уже неё
+    // он выглядел бы чужим.
+    ui.hints
+        .set_size_request(ui.entry.width().max(HINT_WIDTH), -1);
+    ui.hints.popup();
+}
+
+/// Строка подсказки: заголовок сверху, адрес под ним приглушённым.
+/// Ровно так устроена подсказка в браузерах, и по делу: заголовок
+/// вспоминается, а адрес опознаётся.
+fn hint_row(hint: &Hint) -> gtk::ListBoxRow {
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    column.set_margin_start(10);
+    column.set_margin_end(10);
+    column.set_margin_top(4);
+    column.set_margin_bottom(4);
+
+    if !hint.title.is_empty() {
+        let title = gtk::Label::builder()
+            .label(&hint.title)
+            .xalign(0.0)
+            .ellipsize(pango::EllipsizeMode::End)
+            .build();
+        column.append(&title);
+    }
+    let address = gtk::Label::builder()
+        .label(&hint.address)
+        .xalign(0.0)
+        .ellipsize(pango::EllipsizeMode::Middle)
+        .build();
+    address.add_css_class("hint-address");
+    column.append(&address);
+
+    let row = gtk::ListBoxRow::builder().can_focus(false).build();
+    row.set_child(Some(&column));
+    row
+}
+
+/// Шаг по списку подсказок. По кругу, как в браузере: список короткий,
+/// и упираться в его край читателю незачем.
+fn walk_hints(ui: &Ui, step: i32) {
+    let mut rows = Vec::new();
+    let mut child = ui.hint_list.first_child();
+    while let Some(row) = child {
+        child = row.next_sibling();
+        if let Ok(row) = row.downcast::<gtk::ListBoxRow>() {
+            rows.push(row);
+        }
+    }
+    if rows.is_empty() {
+        return;
+    }
+    let at = match ui.hint_list.selected_row() {
+        Some(row) => row.index() + step,
+        // Сверху вниз — с первой строки, снизу вверх — с последней.
+        None if step > 0 => 0,
+        None => rows.len() as i32 - 1,
+    };
+    let at = at.rem_euclid(rows.len() as i32) as usize;
+    ui.hint_list.select_row(Some(&rows[at]));
+}
+
+/// Открыть выбранную подсказку.
+fn take_hint(ui: &Ui, state: &Rc<RefCell<State>>, address: &str) {
+    ui.hints.popdown();
+    set_address(ui, address);
+    match address::parse(address) {
+        Ok(address) => open_current(ui, state, address, true),
+        Err(error) => {
+            let problem = describe(&error);
+            if let Some(view) = current(ui, state) {
+                show_message(&view, problem.headline, &problem.detail, None);
+            }
+        }
+    }
+}
+
+/// Написать в адресной строке — от имени программы, а не читателя.
+/// На время правки подсказки молчат: иначе каждый переход по ссылке
+/// выбрасывал бы список поверх статьи.
+fn set_address(ui: &Ui, text: &str) {
+    ui.quiet.set(true);
+    ui.entry.set_text(text);
+    ui.quiet.set(false);
+}
+
+/// Смещение местных часов от UTC, в секундах. Часового пояса ядро не знает
+/// и знать не должно; у окна он есть — от GLib.
+fn local_offset() -> i32 {
+    glib::DateTime::now_local()
+        .map(|now| (now.utc_offset().0 / 1_000_000) as i32)
+        .unwrap_or(0)
+}
+
 fn open_current(ui: &Ui, state: &Rc<RefCell<State>>, address: Address, remember: bool) {
     let Some(index) = ui.notebook.current_page() else {
         return;
@@ -1283,6 +1563,12 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                     notice(&ui, LISTING);
                 }
                 let mut borrowed = state.borrow_mut();
+                // В историю идёт то, что открылось, и адрес итоговый —
+                // после редиректов. Неудачная загрузка визитом не считается:
+                // список «что я читал» не должен состоять из отказов.
+                borrowed
+                    .store
+                    .record(&document.address, &document.title, local_offset());
                 if let Some(tab) = borrowed.find(id) {
                     tab.label.set_text(&clip(&document.title, TAB_LABEL));
                     tab.label.set_tooltip_text(Some(&document.title));
@@ -1368,7 +1654,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         )
     };
 
-    ui.entry.set_text(&address);
+    set_address(ui, &address);
     ui.back.set_sensitive(can_back);
     ui.forward.set_sensitive(can_forward);
 
@@ -1584,6 +1870,12 @@ fn page_css(dark: bool) -> String {
          .shelf row:selected, .shelf row:selected label {{ color: {ink}; }}\n\
          .shot {{ border: 1px dashed {dim}; border-radius: 6px; padding: 20px 14px; \
                   color: {dim}; margin: 6px 0; }}\n\
+         popover.hints > contents {{ background-color: {shelf}; padding: 4px 0; }}\n\
+         .hints, .hints row {{ background-color: {shelf}; }}\n\
+         .hints row:hover {{ background-color: {touched}; }}\n\
+         .hints row:selected {{ background-color: {chosen}; }}\n\
+         .hints row:selected label {{ color: {ink}; }}\n\
+         .hint-address {{ color: {dim}; font-size: 0.85em; }}\n\
          .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n\
          .formula {{ padding: 0 2px; min-height: 0; min-width: 0; color: {dim}; }}\n\
          .table {{ margin: 10px 0 14px 0; }}\n\

@@ -127,6 +127,9 @@ pub fn resolve(base: &Address, src: &str) -> Option<Source> {
             let dir = path.parent().unwrap_or_else(|| Path::new("."));
             Some(Source::File(dir.join(src)))
         }
+        // Страницу программы пишем мы сами, и относительных картинок
+        // в ней нет — разворачивать нечего.
+        Address::Internal(_) => None,
     }
 }
 

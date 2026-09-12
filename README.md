@@ -78,6 +78,7 @@ brevier --stdin <url> < page.html       # HTML you already have; the url is
                                         # where it came from, for its links
 brevier --save <url>                    # write it to a file instead of stdout
 brevier --save -o notes.zip <url>       # …under a name you chose
+brevier brevier:history                 # what you have read, by day
 brevier <url> | less
 
 brevier-ui <url> [<url>…]               # read in a window, one tab per address
@@ -113,6 +114,7 @@ Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extra
 | arrows, `Home`/`End` | line, top, bottom |
 | `Ctrl+L` | focus the address bar |
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
+| `Ctrl+H` | what you have read |
 | `Ctrl+Tab`, `Ctrl+PageUp`/`PageDown` | switch tabs |
 | `Ctrl+F` | find on page |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | zoom the page in, out, back to 100% |
@@ -156,6 +158,11 @@ menu come from GTK.
   pretending there was an article to find.
 - **`Ctrl+S` saves** a `.md`, or a zip with an `images/` folder when the page has
   pictures and they were loaded.
+- **Pages you read are remembered, and the address bar suggests them** as you type —
+  what matched from the start of the host first, then the rest of the address, then the
+  title; among equals, where you go often and where you went last. `Ctrl+H` opens the
+  list itself (`brevier:history`), grouped by day, set in the same type as an article,
+  because it is the same Markdown.
 
 ## How well does it work
 
@@ -219,6 +226,31 @@ text in a list at the bottom, and every site spells it differently; none of it s
 conversion, so the mark became a dead link and, in `less`, a line of noise — 277 of them
 on one Wikipedia article. They now become GFM footnotes, and in the window the mark is a
 superscript that jumps to the note and back.
+
+## On the disk
+
+History lives in a plain text file, one visit a line, tab-separated:
+
+```
+~/.local/share/brevier/history.tsv            # Linux, or $XDG_DATA_HOME/brevier
+~/Library/Application Support/Brevier/        # macOS
+%LOCALAPPDATA%\Brevier\                      # Windows
+```
+
+Settings will go to `$XDG_CONFIG_HOME/brevier`, a cache to `$XDG_CACHE_HOME/brevier`:
+three directories rather than one profile, because the three have different fates —
+you would carry the first with you, edit the second by hand, and throw the third away
+without looking. `BREVIER_DATA_DIR` moves all of them, the way `--user-data-dir` does
+for a browser.
+
+Text rather than a database: SQLite would mean a C library in a program that sells
+memory safety, and a reading history is thousands of lines, not millions. The file is
+yours — open it in an editor, delete a line to forget a page, delete the file to forget
+everything. The oldest visits are dropped once there are more than five thousand.
+
+Only the window writes there. `brevier <url> | less` is a pipe tool and keeps no
+history of its own, and neither the pages Brevier failed to open nor its own
+`brevier:history` are recorded.
 
 ## On the network
 
