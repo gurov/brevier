@@ -157,6 +157,20 @@ impl Store {
         self.visits.push(visit);
     }
 
+    /// Под каким заголовком эту страницу читали в прошлый раз.
+    ///
+    /// Нужен восстановленной вкладке, которую ещё не открывали: корешок
+    /// обязан назвать её раньше, чем страница поедет из сети. Браузеры
+    /// держат заголовок прямо в сессии; нам его хранить второй раз незачем —
+    /// он уже записан в журнале.
+    pub fn title_of(&self, address: &str) -> Option<&str> {
+        self.visits
+            .iter()
+            .rev()
+            .find(|visit| visit.address == address && !visit.title.is_empty())
+            .map(|visit| visit.title.as_str())
+    }
+
     /// Похожие на напечатанное адреса, лучшие сверху.
     ///
     /// Порядок как у зрелых браузеров и по тем же причинам: сначала то,
@@ -908,6 +922,22 @@ mod tests {
             source_of(&store.visits()[0].address),
             "gh:BurntSushi/ripgrep"
         );
+    }
+
+    #[test]
+    fn a_page_is_remembered_by_the_title_it_had() {
+        let path = temporary("titles");
+        let mut store = Store::at(&path);
+        store.record(&web("https://sive.rs/faq"), "FAQ", 0);
+        store.record(&web("https://danluu.com/"), "danluu", 0);
+        store.record(&web("https://sive.rs/faq"), "Frequently Asked Questions", 0);
+
+        // Свежий заголовок старше прежнего: страницу могли переименовать.
+        assert_eq!(
+            store.title_of("https://sive.rs/faq"),
+            Some("Frequently Asked Questions")
+        );
+        assert_eq!(store.title_of("https://never.test/"), None);
     }
 
     #[test]

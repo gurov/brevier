@@ -160,8 +160,10 @@ menu come from GTK.
   pictures and they were loaded.
 - **Tabs come back.** Close the window with five things half-read and they are there next
   time: every tab, its back and forward, the tab you were on, and the line you were on in
-  each. Opening Brevier with an address on the command line does not restore — you asked
-  for a page, not for yesterday.
+  each. Only the tab you were on is fetched at startup; the rest are named on the strip —
+  by the title they had when you read them — and load the moment you switch to one.
+  Opening Brevier with an address on the command line does not restore — you asked for
+  a page, not for yesterday.
 - **Pages you read are remembered, and the address bar suggests them** as you type —
   what matched from the start of the host first, then the rest of the address, then the
   title; among equals, where you go often and where you went last. `Ctrl+H` opens the

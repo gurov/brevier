@@ -303,6 +303,11 @@ struct Tab {
     /// из сохранённой сессии. Живёт во вкладке, а не в аргументах `open`,
     /// потому что нужно ровно один раз и ровно после загрузки.
     resume: Option<i32>,
+    /// Вкладка есть, страницы ещё нет: так возвращается из сессии всё,
+    /// кроме той вкладки, что была впереди. Грузится она в тот миг,
+    /// когда на неё переключились, — десять восстановленных вкладок
+    /// не должны означать десять запросов на старте.
+    pending: bool,
 }
 
 struct State {
@@ -908,6 +913,7 @@ fn build(app: &Application, start: Vec<String>) {
             let state = state.clone();
             glib::idle_add_local_once(move || {
                 sync(&ui, &state, None);
+                wake_tab(&ui, &state);
                 resume_place(&ui, &state);
                 remember_session(&ui, &state);
             });
@@ -1186,6 +1192,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             generation: 0,
             loading: false,
             resume: None,
+            pending: false,
         });
         id
     };
@@ -1509,26 +1516,76 @@ fn restore_session(ui: &Ui, state: &Rc<RefCell<State>>) -> bool {
         // Вкладка заводится пустой, а история ставится готовой: иначе
         // «назад» после восстановления упирался бы в начальную страницу.
         new_tab(ui, state, None);
-        let id = {
+        {
             let mut borrowed = state.borrow_mut();
+            // Корешок называет страницу до того, как она поедет из сети:
+            // заголовок берём из журнала посещённого, а если её там нет —
+            // остаётся адрес, он тоже говорящий.
+            let shown = borrowed
+                .store
+                .title_of(&address.display())
+                .map(str::to_owned)
+                .unwrap_or_else(|| address.display());
             let Some(fresh) = borrowed.tabs.last_mut() else {
                 continue;
             };
             fresh.history = History::restored(entries, at);
             fresh.resume = Some(tab.place);
-            fresh.id
-        };
+            fresh.pending = true;
+            fresh.label.set_text(&clip(&shown, TAB_LABEL));
+            fresh.label.set_tooltip_text(Some(&shown));
+            // Начальную страницу, которую нарисовала пустая вкладка, убираем:
+            // «что это за программа» читателю, вернувшемуся к своим вкладкам,
+            // не адресовано, а показывать её вместо статьи — врать. Вместе
+            // с текстом уходят и её ссылки с оглавлением: смещения в пустом
+            // буфере ведут в никуда.
+            fresh.view.buffer().set_text("");
+            fresh.links.clear();
+            fresh.marks.clear();
+            fresh.anchors.clear();
+        }
         if tab.current {
             front = opened;
         }
         opened += 1;
-        open(ui, state, id, address, false);
     }
     if opened == 0 {
         return false;
     }
     ui.notebook.set_current_page(Some(front));
+    // Грузим ровно одну — ту, которую читатель сейчас видит. Остальные
+    // подождут своей очереди, и большинство её не дождётся: вкладок,
+    // до которых так и не дошли руки, в сессии всегда больше половины.
+    wake_tab(ui, state);
     true
+}
+
+/// Открыть вкладку, которая до сих пор была только вкладкой.
+///
+/// Зовётся там, где вкладка выходит на экран. Ничего не делает, если
+/// страница уже есть, — значит её можно звать не разбираясь.
+fn wake_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let waking = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.tabs.get_mut(index as usize) else {
+            return;
+        };
+        if !tab.pending {
+            return;
+        }
+        tab.pending = false;
+        tab.history
+            .current()
+            .cloned()
+            .map(|address| (tab.id, address))
+    };
+    // В историю вкладки этот адрес уже записан — он из неё и взят.
+    if let Some((id, address)) = waking {
+        open(ui, state, id, address, false);
+    }
 }
 
 /// Показать подсказки к напечатанному.
@@ -2278,6 +2335,16 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         };
         (tab.id, tab.view.clone(), tab.document.clone())
     };
+    // Вкладка, которая ещё не грузилась: рисовать нечего, и начальную
+    // страницу ей подсовывать нельзя — она не пустая, а неоткрытая.
+    if state
+        .borrow()
+        .tabs
+        .get(index)
+        .is_some_and(|tab| tab.pending)
+    {
+        return;
+    }
     // Пустая вкладка: на ней начальная страница, и у неё свой тракт.
     let Some(document) = document else {
         show_intro(ui, state, id, &view);
