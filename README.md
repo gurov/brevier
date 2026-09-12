@@ -94,8 +94,10 @@ Without `-o` the name comes from the article's title, and an existing file of th
 stops the run rather than being overwritten — with `-o` your choice is older than ours.
 
 `brevier-ui` takes as many addresses as you like, a tab each, and answers `--help` and
-`--version` in the terminal. It is a single application: launching it again adds a window
-to the one already running.
+`--version` in the terminal. It is a single application: an address handed to it while it
+is running — from the command line, or from a link you clicked in another program — opens
+as a tab in the window you already have, the way a browser does. Launching it with no
+address opens another window, which is how you ask for one.
 
 Below is `gh:gurov/brevier` — this very README, read out of the repository in the same
 type as any article, with its sections on the shelf:

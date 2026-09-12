@@ -74,6 +74,10 @@ const HINT_HEIGHT: i32 = 330;
 /// окне она короче адреса, и подсказка из одних многоточий не подсказка.
 const HINT_WIDTH: i32 = 420;
 
+/// Как называется дверь снаружи: действие окна, которым второй запуск
+/// передаёт адрес уже открытому.
+const OPEN_ACTION: &str = "open-address";
+
 /// Докуда растёт «Loading…», прежде чем начать сначала.
 const LOADING_DOTS: usize = 10;
 /// Что говорим на странице, оказавшейся списком ссылок, а не статьёй.
@@ -180,7 +184,26 @@ fn main() -> glib::ExitCode {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
 
-        build(app, start);
+        // Адрес, пришедший снаружи — из чата, почты, «открыть с помощью», —
+        // ложится вкладкой в уже открытое окно. Это продуктовый выбор,
+        // и он такой же, как у браузеров: ссылка означает «покажи мне ещё
+        // одну страницу», а не «дай мне ещё одно окно». Второе окно
+        // по-прежнему заводится запуском без адреса.
+        // Действие висит на `ApplicationWindow`: только он и умеет
+        // быть группой действий.
+        let open = app
+            .active_window()
+            .and_then(|window| window.downcast::<ApplicationWindow>().ok())
+            .filter(|_| !start.is_empty());
+        match open {
+            Some(window) => {
+                for text in &start {
+                    ActionGroupExt::activate_action(&window, OPEN_ACTION, Some(&text.to_variant()));
+                }
+                window.present();
+            }
+            None => build(app, start),
+        }
         glib::ExitCode::SUCCESS
     });
 
@@ -658,6 +681,25 @@ fn build(app: &Application, start: Vec<String>) {
         shelf: Vec::new(),
     }));
     apply_theme(&ui, &state);
+    {
+        // Дверь снаружи: по ней приезжают адреса из второго запуска.
+        // Действие принадлежит окну, а не приложению, — окон бывает
+        // несколько, и адрес должен попасть в то, которое открыто сейчас.
+        let window = ui.window.clone();
+        let ui = ui.clone();
+        let state = state.clone();
+        let open = gio::SimpleAction::new(OPEN_ACTION, Some(glib::VariantTy::STRING));
+        open.connect_activate(move |_, text| {
+            let Some(address) = text
+                .and_then(glib::Variant::str)
+                .and_then(|text| address::parse(text).ok())
+            else {
+                return;
+            };
+            new_tab(&ui, &state, Some(address));
+        });
+        window.add_action(&open);
+    }
     // Окно настроек собирается после состояния: кнопка «забыть» работает
     // с журналом, а журнал лежит там.
     build_settings(&ui, &state);
