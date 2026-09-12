@@ -1216,9 +1216,14 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         let ui = ui.clone();
         let state = state.clone();
         browser.connect_activate(move |_, _| {
-            let target = current_address(&ui, &state);
-            if let Some(target) = target {
-                open_in_system_browser(&target);
+            // Своей страницы снаружи нет: у неё и адреса-то наружу нет
+            // (`Address::external` пуст), и отдавать чужому браузеру нечего.
+            let target = current_target(&ui, &state);
+            match target {
+                Some(target) if !open_in_system_browser(&target) => {
+                    notice(&ui, "No other browser is registered for links");
+                }
+                _ => {}
             }
         });
     }
@@ -1514,17 +1519,6 @@ fn current_id(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<u64> {
 fn current(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<gtk::TextView> {
     let index = ui.notebook.current_page()? as usize;
     state.borrow().tabs.get(index).map(|tab| tab.view.clone())
-}
-
-fn current_address(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<String> {
-    let index = ui.notebook.current_page()? as usize;
-    state
-        .borrow()
-        .tabs
-        .get(index)?
-        .history
-        .current()
-        .map(Address::display)
 }
 
 /// «Loading» с точками. Точка прибавляется раз в секунду до десяти
@@ -1929,6 +1923,21 @@ fn local_offset() -> i32 {
     glib::DateTime::now_local()
         .map(|now| (now.utc_offset().0 / 1_000_000) as i32)
         .unwrap_or(0)
+}
+
+/// Чем открыть текущую страницу снаружи. Не то же, что показано в строке:
+/// короткую форму `gh:owner/repo` чужой браузер не понимает, а у своей
+/// страницы внешнего адреса нет вовсе.
+fn current_target(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<String> {
+    let index = ui.notebook.current_page()? as usize;
+    state
+        .borrow()
+        .tabs
+        .get(index)?
+        .history
+        .current()
+        .map(Address::external)
+        .filter(|target| !target.is_empty())
 }
 
 fn open_current(ui: &Ui, state: &Rc<RefCell<State>>, address: Address, remember: bool) {
@@ -2663,7 +2672,27 @@ fn dpi() -> f64 {
 
 /// Отдать адрес системному браузеру. Без внешних крейтов: это три команды,
 /// а каждая зависимость в проекте про безопасность стоит дороже трёх строк.
-fn open_in_system_browser(target: &str) {
+/// Отдать адрес чужому браузеру. Отвечает, нашлось ли кому.
+///
+/// Не `xdg-open` первым делом, и это поймано на живой системе: когда
+/// Brevier назначен браузером по умолчанию, `xdg-open` показывает на нас,
+/// и «открыть в браузере» превращается в ещё одну вкладку Brevier — ровно
+/// там, где читателю нужен настоящий браузер. Поэтому спрашиваем у системы
+/// список обработчиков `https` и берём первый, который не мы; порядок
+/// задаёт сама система, и первым в нём идёт её выбор по умолчанию.
+///
+/// `xdg-open` остаётся запасным путём — и единственным на macOS и Windows,
+/// где списка приложений GIO не ведёт. Там то же кольцо возможно, и это
+/// известный предел, а не недосмотр.
+fn open_in_system_browser(target: &str) -> bool {
+    if let Some(browser) = other_browser()
+        && browser
+            .launch_uris(&[target], None::<&gio::AppLaunchContext>)
+            .is_ok()
+    {
+        return true;
+    }
+
     let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
         ("open", &[])
     } else if cfg!(target_os = "windows") {
@@ -2671,10 +2700,19 @@ fn open_in_system_browser(target: &str) {
     } else {
         ("xdg-open", &[])
     };
-    let _ = std::process::Command::new(program)
+    std::process::Command::new(program)
         .args(args)
         .arg(target)
-        .spawn();
+        .spawn()
+        .is_ok()
+}
+
+/// Первый зарегистрированный обработчик ссылок, который не мы.
+fn other_browser() -> Option<gio::AppInfo> {
+    let ours = format!("{APP_ID}.desktop");
+    gio::AppInfo::all_for_type("x-scheme-handler/https")
+        .into_iter()
+        .find(|app| app.supports_uris() && app.id().is_some_and(|id| id.as_str() != ours))
 }
 
 /// Куда окно выкладывает то, что везёт в себе: гарнитуры и иконку.
@@ -2827,7 +2865,9 @@ fn show_message(view: &gtk::TextView, headline: &str, detail: &str, offer: Optio
         .label("Open in your browser")
         .halign(gtk::Align::Start)
         .build();
-    button.connect_clicked(move |_| open_in_system_browser(&target));
+    button.connect_clicked(move |_| {
+        open_in_system_browser(&target);
+    });
     view.add_child_at_anchor(&button, &anchor);
 }
 
@@ -4132,7 +4172,9 @@ fn show_shot(shot: &Shot, raster: Raster) {
     // до меры текста.
     let click = gtk::GestureClick::new();
     let target = shot.source.display();
-    click.connect_released(move |_, _, _, _| open_in_system_browser(&target));
+    click.connect_released(move |_, _, _, _| {
+        open_in_system_browser(&target);
+    });
     picture.add_controller(click);
 
     if !shot.alt.is_empty() {

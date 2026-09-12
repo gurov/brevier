@@ -62,7 +62,14 @@ update-desktop-database ~/.local/share/applications
 ```
 
 The entry declares `http`, `https` and `text/markdown`, so Brevier appears in "Open with"
-and can be chosen as the browser for a link. It does not make itself the default.
+and can be chosen as the browser for a link. It does not make itself the default; if you
+want that, `xdg-settings set default-web-browser dev.brevier.Brevier.desktop` plus
+`xdg-mime default dev.brevier.Brevier.desktop x-scheme-handler/http x-scheme-handler/https`
+— the first sets it for KDE, the second for everything that goes through `xdg-open`.
+
+Making Brevier the default does not cost you the way out: `Ctrl+O` asks the system for the
+browsers registered for links and takes the first one that is not Brevier, so it still
+lands in your usual browser rather than in another Brevier tab.
 
 ## Use
 
