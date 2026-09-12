@@ -244,11 +244,21 @@ History and the open tabs live in plain text files, one line each, tab-separated
 %LOCALAPPDATA%\Brevier\                      # Windows
 ```
 
-Settings will go to `$XDG_CONFIG_HOME/brevier`, a cache to `$XDG_CACHE_HOME/brevier`:
+What you decided once — the theme, whether images load, the shelf and its width — is in
+`$XDG_CONFIG_HOME/brevier/settings.tsv`, and a cache will go to `$XDG_CACHE_HOME/brevier`:
 three directories rather than one profile, because the three have different fates —
 you would carry the first with you, edit the second by hand, and throw the third away
 without looking. `BREVIER_DATA_DIR` moves all of them, the way `--user-data-dir` does
 for a browser.
+
+The settings file is the one people actually open in an editor, so its parsing is the
+forgiving kind: any whitespace separates a name from its value, an unknown line is
+skipped, a missing one keeps its default.
+
+Page zoom is the deliberate exception: it is remembered per site, but only for the run.
+What differs between sites is not the typography — Brevier sets that — but the material,
+and a file of per-site overrides is a question of "why does this site open strangely?"
+half a year later.
 
 Text rather than a database: SQLite would mean a C library in a program that sells
 memory safety, and a reading history is thousands of lines, not millions. The file is

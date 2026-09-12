@@ -36,7 +36,7 @@ use brevier::outline::{
     ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
 };
 use brevier::save;
-use brevier::store::{self, HINTS, Hint, Store};
+use brevier::store::{self, HINTS, Hint, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "dev.brevier.Brevier";
@@ -433,6 +433,10 @@ struct Mark {
 }
 
 fn build(app: &Application, start: Vec<String>) {
+    // Настройки поднимаем до виджетов: выставить их потом значило бы
+    // дёрнуть все обработчики разом и на глазах у читателя перекрасить
+    // окно из светлого в тёмное.
+    let settings = Settings::load();
     let ui = Ui {
         window: ApplicationWindow::builder()
             .application(app)
@@ -487,11 +491,11 @@ fn build(app: &Application, start: Vec<String>) {
             .shrink_end_child(false)
             .vexpand(true)
             .build(),
-        shelf_width: Rc::new(Cell::new(TOC_WIDTH)),
+        shelf_width: Rc::new(Cell::new(settings.shelf_width.unwrap_or(TOC_WIDTH))),
         show_contents: gtk::ToggleButton::builder()
             .icon_name("view-list-symbolic")
             .tooltip_text("Contents")
-            .active(true)
+            .active(settings.shelf)
             .sensitive(false)
             .build(),
         settings: gtk::Button::builder()
@@ -505,10 +509,13 @@ fn build(app: &Application, start: Vec<String>) {
             .default_width(420)
             .resizable(false)
             .build(),
-        dark_mode: gtk::Switch::builder().valign(gtk::Align::Center).build(),
+        dark_mode: gtk::Switch::builder()
+            .valign(gtk::Align::Center)
+            .active(settings.dark)
+            .build(),
         show_images: gtk::Switch::builder()
             .valign(gtk::Align::Center)
-            .active(true)
+            .active(settings.images)
             .build(),
         zoom_level: gtk::Button::builder()
             .tooltip_text("Reset zoom (Ctrl+0)")
@@ -625,10 +632,8 @@ fn build(app: &Application, start: Vec<String>) {
     let state = Rc::new(RefCell::new(State {
         tabs: Vec::new(),
         next_id: 0,
-        // Светлая по умолчанию: бумага белая, и читатель, которому нужно иначе,
-        // жмёт кнопку.
-        dark: false,
-        images: true,
+        dark: settings.dark,
+        images: settings.images,
         zoom: HashMap::new(),
         store: Store::open(),
         // Сессию поднимает и пишет первое окно процесса. Второе окно —
@@ -760,6 +765,7 @@ fn build(app: &Application, start: Vec<String>) {
         ui.dark_mode.clone().connect_active_notify(move |switch| {
             state.borrow_mut().dark = switch.is_active();
             apply_theme(&ui, &state);
+            remember_settings(&ui, &state);
         });
     }
     {
@@ -784,6 +790,7 @@ fn build(app: &Application, start: Vec<String>) {
             if switch.is_active() {
                 show_all_shots(&ui, &state);
             }
+            remember_settings(&ui, &state);
         });
     }
 
@@ -849,10 +856,12 @@ fn build(app: &Application, start: Vec<String>) {
     }
     {
         let ui = ui.clone();
+        let state = state.clone();
         ui.show_contents.clone().connect_toggled(move |button| {
             ui.shelf
                 .set_visible(button.is_active() && button.is_sensitive());
             fit_shelf(&ui);
+            remember_settings(&ui, &state);
         });
     }
     {
@@ -950,6 +959,10 @@ fn build(app: &Application, start: Vec<String>) {
         let state = state.clone();
         ui.window.clone().connect_close_request(move |_| {
             remember_session(&ui, &state);
+            // Ширина полки — тоже решение читателя, но извещение о ней
+            // приходит на каждый пиксель перетаскивания: писать файл там
+            // значит писать его сотню раз на один жест.
+            remember_settings(&ui, &state);
             glib::Propagation::Proceed
         });
     }
@@ -1465,6 +1478,21 @@ fn resume_place(ui: &Ui, state: &Rc<RefCell<State>>) {
     if let Some((view, place)) = ready {
         settle(&view, place, 0.0);
     }
+}
+
+/// Запомнить решения читателя: тему, картинки, полку и её ширину.
+///
+/// Пишут их все окна, а не одно: в отличие от сессии, это одни и те же
+/// значения, и затирать друг другу тут нечего.
+fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let borrowed = state.borrow();
+    Settings {
+        dark: borrowed.dark,
+        images: borrowed.images,
+        shelf: ui.show_contents.is_active(),
+        shelf_width: Some(ui.shelf_width.get()),
+    }
+    .save();
 }
 
 /// Запомнить открытое: вкладки, их путь и место в тексте.

@@ -346,6 +346,103 @@ impl Store {
     }
 }
 
+/// Настройки читателя — то, что решают раз и надолго.
+///
+/// Лежат в своей папке (`$XDG_CONFIG_HOME/brevier/settings.tsv`), потому что
+/// судьба у них третья: журнал читатель унесёт с собой, кэш выбросит,
+/// а настройки будет править руками. Поэтому и разбор здесь мягче — поля
+/// разделяет любой пробел, а не строго табуляция: этот файл открывают
+/// в редакторе чаще всех остальных.
+///
+/// Неизвестная строка молча пропускается, пропущенная — остаётся своим
+/// умолчанием: файл настроек переживает и обновление программы, и правку
+/// не той строки.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    pub dark: bool,
+    pub images: bool,
+    /// Показывать ли полку.
+    pub shelf: bool,
+    /// Ширина полки. `None` — «как решила программа»: типографскую модель
+    /// задаёт интерфейс, и подставлять сюда число из ядра значило бы соврать
+    /// про то, кто эту ширину выбрал.
+    pub shelf_width: Option<i32>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            // Светлая по умолчанию: бумага белая, и читатель, которому нужно
+            // иначе, жмёт переключатель.
+            dark: false,
+            // Читатель приходит читать статью с картинками, а не с рамками;
+            // выключить их есть чем.
+            images: true,
+            shelf: true,
+            shelf_width: None,
+        }
+    }
+}
+
+impl Settings {
+    pub fn load() -> Self {
+        match config_dir() {
+            Some(dir) => Self::at(dir.join("settings.tsv")),
+            None => Self::default(),
+        }
+    }
+
+    pub fn save(&self) {
+        if let Some(dir) = config_dir() {
+            self.save_at(dir.join("settings.tsv"));
+        }
+    }
+
+    /// То же, но в названном файле — отдельно ради тестов.
+    pub fn at(path: impl AsRef<Path>) -> Self {
+        let text = fs::read_to_string(path.as_ref()).unwrap_or_default();
+        let mut settings = Self::default();
+        for line in text.lines() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let mut parts = line.split_whitespace();
+            let (Some(name), Some(value)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            match name {
+                "theme" => settings.dark = value == "dark",
+                "images" => settings.images = value == "on",
+                "shelf" => settings.shelf = value == "on",
+                "shelf-width" => settings.shelf_width = value.parse().ok(),
+                _ => {}
+            }
+        }
+        settings
+    }
+
+    pub fn save_at(&self, path: impl AsRef<Path>) {
+        let path = path.as_ref();
+        if let Some(dir) = path.parent()
+            && fs::create_dir_all(dir).is_err()
+        {
+            return;
+        }
+        let switch = |on: bool| if on { "on" } else { "off" };
+        let mut text = String::from("# Brevier settings\n");
+        text.push_str(&format!(
+            "theme\t{}\nimages\t{}\nshelf\t{}\n",
+            if self.dark { "dark" } else { "light" },
+            switch(self.images),
+            switch(self.shelf),
+        ));
+        if let Some(width) = self.shelf_width {
+            text.push_str(&format!("shelf-width\t{width}\n"));
+        }
+        let _ = fs::write(path, text);
+    }
+}
+
 /// Сколько шагов «назад» помним на вкладку. Больше полусотни не помнит
 /// и сам читатель, а файл сессии должен оставаться обозримым.
 const DEPTH: usize = 50;
@@ -1063,6 +1160,35 @@ mod tests {
             place,
             current,
         }
+    }
+
+    #[test]
+    fn settings_survive_the_round_trip() {
+        let path = temporary("settings").with_file_name("settings.tsv");
+        let chosen = Settings {
+            dark: true,
+            images: false,
+            shelf: false,
+            shelf_width: Some(320),
+        };
+        chosen.save_at(&path);
+        assert_eq!(Settings::at(&path), chosen);
+    }
+
+    #[test]
+    fn a_missing_setting_keeps_its_default() {
+        let path = temporary("half-settings").with_file_name("settings.tsv");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Файл правят руками: пробелы вместо табуляции, незнакомая строка,
+        // половина ключей отсутствует.
+        fs::write(&path, "# мои настройки\ntheme dark\nloudness  11\n").unwrap();
+
+        let settings = Settings::at(&path);
+        assert!(settings.dark);
+        assert_eq!(settings.images, Settings::default().images);
+        assert_eq!(settings.shelf_width, None);
+        // Нет файла вовсе — тоже умолчания, а не отказ.
+        assert_eq!(Settings::at("/nowhere/at/all.tsv"), Settings::default());
     }
 
     #[test]
