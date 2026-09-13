@@ -250,8 +250,9 @@ fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
     Ok(reading.markdown)
 }
 
-/// Адрес, который ядро открывает целиком само: репозиторий или наша
-/// собственная страница. `--raw` и `--html` спрашивают про извлечение
+/// Адрес, который ядро открывает целиком само: репозиторий, наша
+/// собственная страница или локальный `.md` — окно их так и открывало,
+/// а cli отправлял файл в сеть и отвечал «not a URL». `--raw` и `--html` спрашивают про извлечение
 /// из веба, которого ни там, ни там нет вовсе; при них тракт всегда
 /// веб-овый.
 fn direct(args: &Args) -> Option<Address> {
@@ -259,7 +260,7 @@ fn direct(args: &Args) -> Option<Address> {
         return None;
     }
     match address::parse(&args.url) {
-        Ok(address @ (Address::Repo(_) | Address::Internal(_))) => Some(address),
+        Ok(address @ (Address::Repo(_) | Address::Internal(_) | Address::File(_))) => Some(address),
         _ => None,
     }
 }
