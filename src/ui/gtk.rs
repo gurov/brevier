@@ -2717,6 +2717,15 @@ fn dpi() -> f64 {
 /// где списка приложений GIO не ведёт. Там то же кольцо возможно, и это
 /// известный предел, а не недосмотр.
 fn open_in_system_browser(target: &str) -> bool {
+    // В песочнице наружу ведёт только портал, и спрашивать там некого:
+    // список приложений — это список приложений самой песочницы, а его
+    // хостовых браузеров в нём нет вовсе. Выбор делает хост, а сходить
+    // к нему умеет сам GTK.
+    if sandboxed() {
+        gtk::UriLauncher::new(target).launch(None::<&gtk::Window>, gio::Cancellable::NONE, |_| {});
+        return true;
+    }
+
     if let Some(browser) = other_browser()
         && browser
             .launch_uris(&[target], None::<&gio::AppLaunchContext>)
@@ -2737,6 +2746,15 @@ fn open_in_system_browser(target: &str) -> bool {
         .arg(target)
         .spawn()
         .is_ok()
+}
+
+/// Живём ли мы в песочнице flatpak.
+///
+/// Признак её собственный и надёжный: внутри `/.flatpak-info` есть всегда,
+/// снаружи не бывает. Обычную сборку это не задевает ни одной проверкой
+/// сверх одной.
+fn sandboxed() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
 }
 
 /// Первый зарегистрированный обработчик ссылок, который не мы.

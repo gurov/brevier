@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Карточка программы для магазинов приложений: Discover, GNOME Software,
+     страница на Flathub. Без неё Flathub пакет не принимает, а KDE Discover
+     показывает установленный flatpak безымянной строкой. -->
+<component type="desktop-application">
+  <id>dev.brevier.Brevier</id>
+
+  <name>Brevier</name>
+  <summary>Read the web without JavaScript</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+
+  <developer id="dev.brevier">
+    <name>gurov</name>
+  </developer>
+
+  <description>
+    <p>
+      Brevier fetches a page, reduces it to Markdown on your own machine, and renders it
+      in the typography you chose — not the one the site shipped. There is no JavaScript
+      engine and no site CSS. What survives is the text.
+    </p>
+    <p>
+      It also reads Markdown documentation straight out of git repositories: point it at
+      a GitHub or GitLab project and it shows the README, the entry points into the docs,
+      and the files of any directory.
+    </p>
+    <p>What you get:</p>
+    <ul>
+      <li>One measure, one scale, one paper colour on every site, light or dark</li>
+      <li>Fonts that travel with the program, so the page cannot pick its own</li>
+      <li>A shelf with the page's table of contents, the site's own menu, and the
+          project's documentation</li>
+      <li>Tabs that survive closing the window, history, bookmarks, and page search</li>
+      <li>Images off by one switch: after JavaScript is gone, the image decoder is the
+          one serious attack surface left</li>
+      <li>One key to hand the page to your usual browser when a site needs more than
+          text</li>
+    </ul>
+    <p>
+      Known limits, stated rather than hidden: no JavaScript means single-page sites do
+      not work, there are no forms or logins, and screen readers are supported on Linux
+      only.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">dev.brevier.Brevier.desktop</launchable>
+
+  <url type="homepage">https://github.com/gurov/brevier</url>
+  <url type="bugtracker">https://github.com/gurov/brevier/issues</url>
+  <url type="vcs-browser">https://github.com/gurov/brevier</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>An article set in the reader's own measure, with its table of contents on
+        the shelf</caption>
+      <image>https://raw.githubusercontent.com/gurov/brevier/main/assets/screenshot-article.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Documentation read straight out of a git repository</caption>
+      <image>https://raw.githubusercontent.com/gurov/brevier/main/assets/screenshot-repository.png</image>
+    </screenshot>
+  </screenshots>
+
+  <!-- Тёплый ряд продукта: бумага цвета слоновой кости и её тёмный двойник. -->
+  <branding>
+    <color type="primary" scheme_preference="light">#faf5ea</color>
+    <color type="primary" scheme_preference="dark">#1d1b19</color>
+  </branding>
+
+  <categories>
+    <category>Network</category>
+    <category>WebBrowser</category>
+  </categories>
+
+  <keywords>
+    <keyword>browser</keyword>
+    <keyword>reader</keyword>
+    <keyword>markdown</keyword>
+    <keyword>article</keyword>
+    <keyword>typography</keyword>
+  </keywords>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-09-13" type="development">
+      <description>
+        <p>Early build, shared for testing: the window, the repository mode, tabs,
+          history, bookmarks and saving are there; packaged builds and screen-reader
+          support beyond Linux are not.</p>
+      </description>
+    </release>
+  </releases>
+</component>

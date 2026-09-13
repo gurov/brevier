@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brevier.svg" alt="" width="104">
+  <img src="assets/brevier.svg" alt="" width="122">
 </p>
 
 # Brevier
@@ -10,9 +10,9 @@ reads Markdown documentation straight out of git repositories.
 
 There is no JavaScript engine and no site CSS. What survives is the text.
 
-**Status: early.** The window runs on Linux and is built from source: there are no
-packaged builds yet, and screen readers are supported on Linux only — see
-[What it does not do](#what-it-does-not-do).
+**Status: early.** The window runs on Linux. Nothing is in a store yet — there is a
+Flatpak bundle you can build and hand to someone, a tarball, and the source — and screen
+readers are supported on Linux only; see [What it does not do](#what-it-does-not-do).
 
 ![An article in Brevier: text set on ivory paper in the reader's own measure, with the
 page's table of contents on the shelf at the right and the section being read marked in
@@ -25,6 +25,58 @@ pipeline is built from other people's crates (`dom_smoothie` for extraction, `ht
 conversion). The difference is what the Markdown is *for*. Converters make it data for a
 machine — food for a model, an index, an archive. Here it is an internal representation,
 and the product is the window: your measure, your leading, your type, on every site.
+
+## Install
+
+Nothing is in a store yet. What exists is two ways to hand someone a build, and the
+source.
+
+**A Flatpak bundle.** One file, one command, and the runtime brings GTK with it — so it
+does not care which distribution is underneath:
+
+```sh
+flatpak install --user ./brevier.flatpak      # the file you were handed
+flatpak run dev.brevier.Brevier https://example.com/article
+```
+
+The first install also pulls `org.gnome.Platform//49` from Flathub if it is not already
+there — around 400 MB, once for every Flatpak that uses it. After that Brevier is in the
+menu like any other application.
+
+To build that bundle yourself:
+
+```sh
+flatpak install --user flathub org.flatpak.Builder \
+    org.gnome.Platform//49 org.gnome.Sdk//49 org.freedesktop.Sdk.Extension.rust-stable//25.08
+flatpak run org.flatpak.Builder --force-clean --repo=packaging/repo \
+    packaging/build packaging/dev.brevier.Brevier.yml
+flatpak build-bundle packaging/repo brevier.flatpak dev.brevier.Brevier
+```
+
+The build runs without network access, the way Flathub builds: every crate is declared
+with its address and checksum in `packaging/cargo-sources.json`, which
+`packaging/cargo-sources.py` regenerates from `Cargo.lock`. Bump a dependency, regenerate
+that file.
+
+What the sandbox changes, stated rather than discovered later: history, bookmarks and
+settings live in `~/.var/app/dev.brevier.Brevier/`; saving an article goes through the
+file portal; a local `.md` path cannot be opened, because the sandbox is granted no
+filesystem access at all; and "Open in your browser" asks the portal, so the choice is
+the host's.
+
+**A tarball**, for a machine that already has GTK 4 and would rather not have a sandbox:
+
+```sh
+packaging/tarball.sh                  # → packaging/dist/brevier-<version>-x86_64-linux.tar.gz
+tar xf brevier-0.1.0-x86_64-linux.tar.gz && cd brevier-0.1.0-x86_64-linux && ./install.sh
+```
+
+`install.sh` puts the two binaries, the desktop entry, the icon and the licenses under
+`~/.local`, needs no root, and takes `--uninstall`. Two conditions come with it: GTK 4
+must be installed (`libgtk-4-1` on Debian and Ubuntu — the script says so if it is
+missing), and the binary needs a glibc no older than the one it was built against.
+
+**From source**, below.
 
 ## Build
 
@@ -69,7 +121,14 @@ want that, `xdg-settings set default-web-browser dev.brevier.Brevier.desktop` pl
 
 Making Brevier the default does not cost you the way out: `Ctrl+O` asks the system for the
 browsers registered for links and takes the first one that is not Brevier, so it still
-lands in your usual browser rather than in another Brevier tab.
+lands in your usual browser rather than in another Brevier tab. Inside a Flatpak there is
+no such list to ask — the sandbox sees its own applications, not the host's — so there
+`Ctrl+O` goes to the portal instead, and the host picks the browser.
+
+If the entry turns up in the menu without its icon, nothing is wrong with the install:
+the desktop shell builds its list of icon themes when it starts and does not notice a
+theme directory that appeared afterwards. Log out and back in, or restart the shell — on
+KDE Plasma, `systemctl --user restart plasma-plasmashell.service`.
 
 ## Use
 

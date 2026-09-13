@@ -39,6 +39,25 @@ jobs:
       # Ломается молча: окно просто останется без иконки в панели задач.
       - run: desktop-file-validate packaging/dev.brevier.Brevier.desktop
 
+  packaging:
+    name: packaging — metadata and the crate list
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y appstream
+      # Без карточки пакет не примут на Flathub, а в Discover он будет
+      # безымянной строкой.
+      - run: appstreamcli validate --no-net packaging/dev.brevier.Brevier.metainfo.xml
+      # Flatpak собирается без сети по списку крейтов. Список устаревает
+      # молча — при подъёме зависимостей его надо перегонять, и узнать
+      # об этом лучше здесь, а не на сборке пакета.
+      - name: The crate list matches Cargo.lock
+        run: |
+          python3 packaging/cargo-sources.py > /tmp/cargo-sources.json
+          diff -u packaging/cargo-sources.json /tmp/cargo-sources.json ||
+            { echo "run packaging/cargo-sources.py > packaging/cargo-sources.json" >&2; exit 1; }
+      - run: sh -n packaging/install.sh && sh -n packaging/tarball.sh
+
   tls:
     name: trust stays delegated to the OS
     runs-on: ubuntu-latest

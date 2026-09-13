@@ -9,3 +9,10 @@
 # рабочие заметки: в публичный репозиторий не едут
 /CLAUDE.md
 /TODO.md
+
+# упаковка: сборочные каталоги flatpak и готовые архивы
+/.flatpak-builder/
+/packaging/build/
+/packaging/repo/
+/packaging/dist/
+/*.flatpak
