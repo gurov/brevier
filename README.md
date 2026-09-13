@@ -303,8 +303,7 @@ permanent background of this kind of program, not a task that finishes.
   only: NVDA on Windows and VoiceOver on macOS will not see anything in this window.
   That is the price of the toolkit choice, stated plainly rather than by omission.
 - **A store listing** — not yet. A Flatpak bundle and a tarball are in Releases;
-  Flathub is the first item on the roadmap, and with it the updates a bundle cannot
-  deliver.
+  Flathub is on the roadmap, and with it the updates a bundle cannot deliver.
 - **Privacy** — not sold here. Sites may track a reader exactly as they always could.
 
 Known limitation: a table is drawn as a grid of widgets anchored in the text buffer, so
@@ -377,11 +376,11 @@ one owns the session — the second is "open me one more link", not "here are my
 
 ## On the network
 
-- **One page per request from a human.** Brevier does not crawl, does not prefetch and
-  does not fan out over a site. robots.txt addresses crawlers; this is not one. The
-  one exception is named: opening a repository probes a dozen well-known paths on
-  the hosting's CDN to find where its documentation starts — small requests, to a
-  CDN with no limit, never to the API.
+- **Not a crawler.** Brevier fetches the page you opened and what it takes to read
+  it — its images, an alternate Markdown copy when the site offers one, a dozen
+  probes on a repository's CDN for where its documentation starts. It does not walk
+  a site and does not fetch pages nobody asked to read. robots.txt addresses
+  crawlers; this is not one.
 - **The User-Agent is honest** — `Brevier/0.1`. Chosen by measurement, not by principle:
   on our corpus a browser-shaped UA lost 7:0, every case a 403 from an anti-bot.
 - **TLS trust is delegated to the operating system** (`rustls` +

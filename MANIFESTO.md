@@ -7,7 +7,8 @@ built for the first half and carry the second along as an afterthought: the text
 arrives wrapped in the site's type, the site's colours, the site's scripts and the
 site's advertising, and the reader takes what is given.
 
-Brevier is for the second half only. These are its commitments.
+Brevier is for the second half only. These are its commitments. Some of them are
+ahead of the code — the roadmap says which, and the README says what runs today.
 
 ## 1. The reader sets the type
 
@@ -16,10 +17,6 @@ same on every site. A site's stylesheet is an opinion about how its text should 
 Here it is not loaded. A page from a newspaper, a page from a wiki and a README out of
 a repository are set in the same type, because they are the same thing: text, being
 read.
-
-Today the choice is Brevier's defaults plus zoom and the theme; a settings page for
-face, size and measure is on the roadmap. The commitment is ahead of the code, and
-this sentence says so.
 
 ## 2. A page is a document, not a program
 
@@ -56,22 +53,21 @@ regression figures, and they say how they were relaxed. A page that is a list of
 links is shown as a list of links. What the program does not do is listed under its
 own heading, including the parts that hurt.
 
-## 7. One page per request from a human
+## 7. Not a crawler
 
-Brevier does not crawl, does not prefetch and does not fan out over a site. Every
-request is one person opening one page — the pattern the web was built for, and the
-one it now treats worst. The one exception is named: opening a repository probes a
-dozen well-known paths on the hosting's CDN to find where its documentation starts —
-a dozen small requests for one page, against a CDN with no limit, never against the
-site's API.
+Brevier fetches the page somebody opened, and what it takes to read that page well:
+its images, an alternate Markdown copy when the site offers one, a dozen probes on a
+repository's CDN for where its documentation starts. The measure is reason, not a
+count of requests. What it does not do is crawl: it does not walk a site, and it does
+not fetch pages nobody asked to read.
 
 ## 8. Not a replacement for your browser
 
 The other half of the web stays where it is. `Ctrl+O` hands any page to the browser
-you already have; a companion extension, when it exists, will hand one back, as that
-browser rendered it. The desktop entry does not make Brevier the default unless you
-ask it to. A reading instrument that tried to be a browser would be a worse browser
-and a worse instrument.
+you already have; the companion extension hands one back, as that browser rendered
+it. The desktop entry does not make Brevier the default unless you ask it to. A
+reading instrument that tried to be a browser would be a worse browser and a worse
+instrument.
 
 ## The web we ask for
 
@@ -92,15 +88,13 @@ or effort — it is a handful of habits.
 - **A client that identifies itself and runs no scripts is not a crawler.** Do not
   send it a 403.
 - **Serve Markdown to whoever asks for it.** Sites have begun doing this, for reasons
-  of their own. Brevier already accepts `text/markdown` and reads it
-  with no extraction in the way; asking for it first and following
-  `<link rel="alternate" type="text/markdown">` are on the roadmap. A site that
-  answers is read exactly.
+  of their own. Brevier asks — `Accept: text/markdown` — and follows
+  `<link rel="alternate" type="text/markdown">` when it is there. A site that answers
+  is read exactly, with no extraction in the way.
 
-`brevier --check <url>`, on the roadmap, will score a page against this list, 0 to
-100, and say what to change and what each thing cost. It is a ruler, not a rule: it
-measures what a reading client can measure, and it does not know whether the text is
-any good.
+`brevier --check <url>` scores a page against this list, 0 to 100, and says what to
+change and what each thing cost. It is a ruler, not a rule: it measures what a
+reading client can measure, and it does not know whether the text is any good.
 
 ## What this is not
 
