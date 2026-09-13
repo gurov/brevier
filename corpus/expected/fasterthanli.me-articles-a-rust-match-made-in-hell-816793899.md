@@ -18,8 +18,6 @@ Let’s start with a little Rust syntax refresher!
 
 Rust has `if` and `else`, like you’d expect from an imperative language:
 
-
-
 ```rust
 fn is_good() -> bool {
     true
@@ -34,16 +32,12 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 It is good
 ```
 
 They’re not statements though, they’re expressions! Which makes up for the lack of a ternary operator (`cond ? if_true : if_false`):
-
-
 
 ```rust
 fn is_good() -> bool {
@@ -61,8 +55,6 @@ fn main() {
 ```
 
 And because it’s an expression, it can be used anywhere:
-
-
 
 ```rust
 fn is_good() -> bool {
@@ -82,8 +74,6 @@ fn main() {
 ```
 
 But Rust also has `match`, which is sort of like a more powerful `switch`:
-
-
 
 ```rust
 fn is_good() -> bool {
@@ -106,8 +96,6 @@ It doesn’t *look* more powerful here.
 
 Sure! But you can match the “scrutinee” (`x` in `match x { ... }`) with various patterns, in various “arms” (`true => {}`, `false => {}` in the example above).
 
-
-
 ```rust
 use rand::Rng;
 
@@ -125,8 +113,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 Victory
@@ -143,8 +129,6 @@ And there’s more to `match`, as we’ll see later.
 Rust also has `enum` types. They’re not just a list of integer or string values, they’re actual sum types.
 
 Say we have a function called `process`, that can work securely or non-securely:
-
-
 
 ```rust
 fn process(secure: bool) {
@@ -165,8 +149,6 @@ It’s kinda hard to tell from the call site (`process(false)`) what that parame
 ![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/inlay-hint~86f45f2be4d3fd9e.jxl)
 
 But still, even with just two variants like that, I’d much rather have an enum:
-
-
 
 ```rust
 pub enum Protection {
@@ -198,8 +180,6 @@ And also, because `Protection::Secure` and `Protection::Insecure` are unique sym
 
 I can also, for example, mark it as deprecated, which will generate a warning wherever it’s used, without changing the type signature:
 
-
-
 ```rust
 pub enum Protection {
     Secure,
@@ -224,8 +204,6 @@ fn main() {
     process(Protection::Insecure)
 }
 ```
-
-
 
 ```shell
 $ cargo check
@@ -266,8 +244,6 @@ In a way! Although [rust-analyzer](https://rust-analyzer.github.io/) is getting 
 
 Enum variants can have associated data:
 
-
-
 ```rust
 pub enum Protection {
     Secure { version: u64 },
@@ -290,8 +266,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet                       
 Hacker-safe thanks to protocol v2
@@ -302,8 +276,6 @@ You can see that in the first match “arm”, we *destructure* the variant, to 
 ![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/type-hint-u64~099cddc1d53599c8.jxl)
 
 It’s unlikely we have [18 quintillion](https://www.wolframalpha.com/input/?i=2**64) versions of our security protocol, though - although we might want to use a fixed-size integer in our actual protocol, when we deal with it in code, we might want to list them out explicitly:
-
-
 
 ```rust
 pub enum Protection {
@@ -334,8 +306,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 Hacker-safe thanks to protocol V2_1
@@ -344,8 +314,6 @@ Hacker-safe thanks to protocol V2_1
 [## Clone and Copy](#clone-and-copy)
 
 Our `Protection` type, so far, is neither `Clone` nor `Copy`. Which means, when we pass it to `process`, it’s *moved* into it. And once a value is moved into something, we don’t have ownership of it anymore. So this doesn’t work, for example:
-
-
 
 ```rust
 // omitted: enum definitions
@@ -356,8 +324,6 @@ fn main() {
     process(prot);
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -379,8 +345,6 @@ Here, `Protection` is “plain old data”, so there’s no harm in doing a bit-
 
 So here, we can derive `Clone` and `Copy`, and instead of moving into `process`, we’ll be handing it copies:
 
-
-
 ```rust
 //        👇    👇
 #[derive(Clone, Copy)]
@@ -389,8 +353,6 @@ pub enum Protection {
     Insecure,
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -411,8 +373,6 @@ error: could not compile `lox` due to previous error
 
 Mhhh oh right, we also need `SecureVersion` to implement `Copy`, let’s do that now:
 
-
-
 ```rust
 #[derive(Clone, Copy)]
 pub enum Protection {
@@ -429,8 +389,6 @@ pub enum SecureVersion {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 Hacker-safe thanks to protocol V2_1
@@ -438,8 +396,6 @@ Hacker-safe thanks to protocol V2_1
 ```
 
 Deriving `Clone` and `Copy` actually makes perfect sense for these types, but just for learning’s sake, let’s not. Let’s go back to this:
-
-
 
 ```rust
 pub enum Protection {
@@ -474,8 +430,6 @@ fn main() {
 
 And this compile error:
 
-
-
 ```shell
 $ cargo run --quiet
 error[E0382]: use of moved value: `prot`
@@ -495,8 +449,6 @@ error: could not compile `lox` due to previous error
 How can we make it so we can pass the same `Protection` to `process` several times?
 
 Well, instead of sending it “by value” (either moving or copying it), we can pass it “by reference”:
-
-
 
 ```rust
 //              👇
@@ -520,8 +472,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 Hacker-safe thanks to protocol V2_1
@@ -531,8 +481,6 @@ Hacker-safe thanks to protocol V2_1
 That worked nicely!
 
 We had to change the function signature of `process`, but we didn’t have to change the `match` whatsoever: it’s still just this:
-
-
 
 ```rust
     match prot {
@@ -565,8 +513,6 @@ Rust doesn’t let you create more than one “mutable reference” to something
 
 For example, this doesn’t build:
 
-
-
 ```rust
 fn main() {
     let mut counter = 0_u64;
@@ -583,8 +529,6 @@ fn main() {
 ```
 
 Because we can’t have three threads mutate the same value willy-nilly.
-
-
 
 ```shell
 $ cargo run --quiet
@@ -609,8 +553,6 @@ error: could not compile `lox` due to previous error
 
 One way to solve is with a `Mutex`. And in Rust, mutexes typically own the “protected” data, so the type we want here is `Mutex<u64>`:
 
-
-
 ```rust
 use parking_lot::Mutex;
 
@@ -634,8 +576,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet                                              
 final count: 300000
@@ -658,8 +598,6 @@ And `MutexGuard`, in turn, implements the [Deref](https://doc.rust-lang.org/stab
 
 In other words, with tedious type annotations, it lets us do this:
 
-
-
 ```rust
 use parking_lot::Mutex;
 
@@ -678,16 +616,12 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 [src/main.rs:13] immutable_ref = 42
 ```
 
 Another thing Rust protects us against is dangling references! Here, the lifetime of the guard is bound to the lifetime of the Mutex itself, so, for example, that code doesn’t compile:
-
-
 
 ```rust
 use parking_lot::Mutex;
@@ -704,8 +638,6 @@ fn main() {
     dbg!(*guard);
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -729,8 +661,6 @@ As you may have noticed, the Rust compiler says “to borrow” instead of “to
 
 Which brings us to our next question: sure, the mutex is locked when `Mutex::lock` is called. But when is it unlocked? Well, when the `MutexGuard` drops!
 
-
-
 ```rust
 fn main() {
     let nd = NoisyDrop;
@@ -748,8 +678,6 @@ impl Drop for NoisyDrop {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 before drop...
@@ -762,8 +690,6 @@ after drop!
 `fn drop<T>(t: T) {}`
 
 Values also drop at the end of a scope: we can achieve the same output with this program:
-
-
 
 ```rust
 fn main() {
@@ -779,8 +705,6 @@ fn main() {
 And now it’s time for… a quiz!
 
 Does this work?
-
-
 
 ```rust
 fn main() {
@@ -798,8 +722,6 @@ Yes it does!
 
 Does this?
 
-
-
 ```rust
 fn main() {
     let mut x = 42;
@@ -816,8 +738,6 @@ Also yes!
 
 Does this?
 
-
-
 ```rust
 fn main() {
     let mut x = 42;
@@ -833,8 +753,6 @@ fn main() {
 ```
 
 No!
-
-
 
 ```shell
 $ cargo run --quiet
@@ -856,8 +774,6 @@ error: could not compile `lox` due to previous error
 
 How about this?
 
-
-
 ```rust
 #[derive(Debug)]
 struct Fahrenheit<'a, T>(&'a mut T);
@@ -873,8 +789,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 a = Fahrenheit(451)
@@ -882,8 +796,6 @@ b = Fahrenheit(451)
 ```
 
 What if our type has a `Drop` impl?
-
-
 
 ```rust
 #[derive(Debug)]
@@ -909,8 +821,6 @@ fn main() {
 
 Then it doesn’t work anymore!
 
-
-
 ```shell
 $ cargo run --quiet
 error[E0499]: cannot borrow `x` as mutable more than once at a time
@@ -933,8 +843,6 @@ The diagnostic explains exactly why, so I don’t have to do it.
 
 In a previous version of the article, there was code like this, which worked, and seemed a little confusing:
 
-
-
 ```rust
 fn main() {
     let mut x = 98;
@@ -949,8 +857,6 @@ fn main() {
 
 The short explanation is `dbg!(a)` drops `a`. The slightly longer explanation is it it prints the expression and *then* evaluates to that expression, so that it can be used in places where values are being moved, like this:
 
-
-
 ```rust
 // this is a String 👇, an owned type
 do_thing(dbg!(s.to_string()));
@@ -958,8 +864,6 @@ do_thing(dbg!(s.to_string()));
 ```
 
 In other words, the code above is more or less equivalent to this:
-
-
 
 ```rust
 fn main() {
@@ -978,8 +882,6 @@ fn main() {
 Where `a;` and `b;` are the statements that *actually* drop `a` and `b`.
 
 clippy actually warns about naked “path statements” like these:
-
-
 
 ```shell
 $ cargo clippy
@@ -1002,8 +904,6 @@ Now let’s talk about methods!
 
 You can define methods on types you own in `impl` blocks.
 
-
-
 ```rust
 #[derive(Debug)]
 struct Foobar(i64);
@@ -1023,8 +923,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 Foobar(72)
@@ -1034,8 +932,6 @@ Foobar(72)
 That method we just defined has `self` as a receiver: it takes ownership of `Foobar`.
 
 What we wrote here:
-
-
 
 ```rust
 impl Foobar {
@@ -1047,8 +943,6 @@ impl Foobar {
 
 Is the short version of this:
 
-
-
 ```rust
 impl Foobar {
     fn negated(self: Self) -> i64 {
@@ -1059,8 +953,6 @@ impl Foobar {
 
 Which is itself the short version of this:
 
-
-
 ```rust
 impl Foobar {
     fn negated(self: Foobar) -> i64 {
@@ -1070,8 +962,6 @@ impl Foobar {
 ```
 
 And `Foobar` is not `Copy`, which means calling `f.negated()` *moves `f`* elsewhere, and so, we can’t call it twice.
-
-
 
 ```rust
 #[derive(Debug)]
@@ -1094,8 +984,6 @@ fn main() {
     println!("{b}");
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -1123,8 +1011,6 @@ error: could not compile `lox` due to previous error
 
 Instead, we can take `&self`, the short version of `self: &Self`:
 
-
-
 ```rust
 impl Foobar {
     fn negated(&self) -> i64 {
@@ -1135,8 +1021,6 @@ impl Foobar {
 
 And now, we can call it twice:
 
-
-
 ```shell
 $ cargo run --quiet
 Foobar(72)
@@ -1145,8 +1029,6 @@ Foobar(72)
 ```
 
 But here’s something interesting we can do:
-
-
 
 ```rust
 #[derive(Debug)]
@@ -1166,8 +1048,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 a = 134
@@ -1176,8 +1056,6 @@ a = 134
 And that’s very, *very* interesting.
 
 Because one might think that this ought not to work:
-
-
 
 ```rust
     fn get(&self) -> &i64 {
@@ -1190,8 +1068,6 @@ One might argue that `&i64` can only live for as long as `&self`, and so, once w
 Which is true… except the trick is simply to extend the lifetime of `&self` to however long the return value is used.
 
 See, we can’t drop `f` before we’re done with `a`: because it’s still borrowed.
-
-
 
 ```rust
 #[derive(Debug)]
@@ -1210,8 +1086,6 @@ fn main() {
     println!("a = {a}");
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -1233,8 +1107,6 @@ And this is called a “borrow-through”.
 
 It’s even more visible with mutable borrows:
 
-
-
 ```rust
 #[derive(Debug)]
 struct Foobar(i64);
@@ -1253,8 +1125,6 @@ fn main() {
     println!("a = {a}");
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -1278,8 +1148,6 @@ Let’s get back to mutexes.
 
 If we try to acquire locks on a mutex twice in a row, our program gets stuck:
 
-
-
 ```rust
 use parking_lot::Mutex;
 
@@ -1296,8 +1164,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 acquiring a...
@@ -1309,8 +1175,6 @@ acquiring b...
 The second lock is waiting for the first lock to release, which will never happen since we’re holding onto it.
 
 That deadlock was pretty easy to spot. Sometimes it’s not as easy, like in this case:
-
-
 
 ```rust
 use parking_lot::Mutex;
@@ -1345,8 +1209,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 entering foo
@@ -1357,8 +1219,6 @@ entering bar
 That one’s a little more subtle. Especially if you imagine that the real `foo` and `bar` are much larger.
 
 Still, it’s not that bad, looking at a stack trace in GDB:
-
-
 
 ```shell
 $ rust-gdb --quiet --args ./target/debug/lox
@@ -1405,8 +1265,6 @@ It’s even better with colors!
 
 A good way to get rid of that particular deadlock is to push the mutex outside of our type, so that methods are defined on the already-locked version:
 
-
-
 ```rust
 use parking_lot::Mutex;
 
@@ -1441,8 +1299,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 exiting foo, value = 4
@@ -1459,8 +1315,6 @@ With the added bonus that now, if `State` is not shared across multiple threads,
 Let’s put everything we’ve learned together and look at some more code!
 
 Does this code run?
-
-
 
 ```rust
 use parking_lot::Mutex;
@@ -1491,8 +1345,6 @@ fn main() {
 
 Yeah! Of course it does!
 
-
-
 ```shell
 $ cargo run --quiet
 [src/main.rs:23] &s.lock() = State {
@@ -1503,8 +1355,6 @@ $ cargo run --quiet
 Because by the time we call `increment()`, we’ve already released the lock we had when we called `is_even()`.
 
 What about this code? Does this run?
-
-
 
 ```rust
 fn main() {
@@ -1520,8 +1370,6 @@ fn main() {
 
 Yeah! Same deal!
 
-
-
 ```shell
 $ cargo run --quiet
 [src/main.rs:25] &s.lock() = State {
@@ -1530,8 +1378,6 @@ $ cargo run --quiet
 ```
 
 What about this?
-
-
 
 ```rust
 fn main() {
@@ -1552,8 +1398,6 @@ fn main() {
 
 Of course it does! Why wouldn’t it?
 
-
-
 ```shell
 $ cargo run --quiet
 [src/main.rs:30] &s.lock() = State {
@@ -1562,8 +1406,6 @@ $ cargo run --quiet
 ```
 
 And what about that one?
-
-
 
 ```rust
 fn main() {
@@ -1580,8 +1422,6 @@ fn main() {
     dbg!(&s.lock());
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -1603,8 +1443,6 @@ That one… does not spark joy.
 See, the thing with `match` is, it lets you do pattern matching. As opposed to `if`, which just does equality comparison.
 
 That means with `match`, we can do something like this:
-
-
 
 ```rust
 enum Node<T> {
@@ -1637,8 +1475,6 @@ fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 non-zero
@@ -1648,8 +1484,6 @@ non-zero
 That’s fine - just a little “borrow-through”, we’ve seen that before. `Node::get` returns a value that borrows from `&self`.
 
 But we can also do *this*:
-
-
 
 ```rust
 fn main() {
@@ -1672,8 +1506,6 @@ And that gets… even more interesting.
 
 Because, for example, we cannot do this:
 
-
-
 ```rust
 fn main() {
     let a = Mutex::new(Node::Left(23));
@@ -1691,8 +1523,6 @@ fn main() {
     inspect(&b);
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -1717,8 +1547,6 @@ And yet, when the `match` expression, also called a “scrutinee”, as I’ve r
 So here’s the very good reason: because `match` allows borrow-throughs, and matching against references, it extends the lifetime of temporaries to the whole match.
 
 In other words, it does this transformation:
-
-
 
 ```rust
 fn main() {
@@ -1751,8 +1579,6 @@ But in my case, things were even worse!
 
 Let’s talk about async Rust. It’s really neat! It lets you do multiple things concurrently, even on a single thread:
 
-
-
 ```rust
 use std::{
     io::{stdout, Write},
@@ -1778,16 +1604,12 @@ async fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 abcabcabcabcabc
 ```
 
 I pinky-promise there’s just one thread here! We can ask our buddy `strace` to confirm:
-
-
 
 ```shell
 $ cargo build --quiet && strace -ff -e write ./target/debug/lox 2>&1 | grep -v '\0'
@@ -1812,8 +1634,6 @@ write(1, "\n", 1
 
 Here’s how it would look if there were multiple threads:
 
-
-
 ```rust
 //             👇
 #[tokio::main(worker_threads = 2)]
@@ -1821,8 +1641,6 @@ async fn main() {
     // (cut)
 }
 ```
-
-
 
 ```shell
 $ cargo build --quiet && strace -ff -e write ./target/debug/lox 2>&1 | grep -v '\0'
@@ -1852,8 +1670,6 @@ We can see our main thread, `47`, and our two worker threads: `48` and `49`.
 
 But let’s go back to our single-threaded example, and actually wait until all our futures are done, instead of sleeping some arbitrary amount of time:
 
-
-
 ```rust
 use futures::future::join_all;
 use std::{
@@ -1877,16 +1693,12 @@ async fn main() {
 
 Still works fine:
 
-
-
 ```shell
 $ cargo run --quiet
 abcabcabcabcabc
 ```
 
 Now let’s add a lock! So we can collect the output in a `String` instead:
-
-
 
 ```rust
 use futures::future::join_all;
@@ -1906,8 +1718,6 @@ async fn main() {
     .await;
 }
 ```
-
-
 
 ```shell
 $ cargo run --quiet
@@ -1944,8 +1754,6 @@ Well, that’s because our async block is `async move`, and it’s that way beca
 
 We can’t really have a middleground between `async {}` and `async move {}`, but what we can do… is move a *reference* to `res` inside the block instead, with this neat little trick:
 
-
-
 ```rust
 use futures::future::join_all;
 use parking_lot::Mutex;
@@ -1971,16 +1779,12 @@ async fn main() {
 
 And boom, it works:
 
-
-
 ```shell
 $ cargo run --quiet
 res = abcabcabcabcabc
 ```
 
 And now for something completely innocent: let’s move some things around!
-
-
 
 ```rust
 use futures::future::join_all;
@@ -2006,8 +1810,6 @@ async fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo run --quiet
 ^C
@@ -2028,8 +1830,6 @@ At this point, we’re deadlocked. future 2 will never be able to acquire the lo
 Of course, it doesn’t have to be this way! Instead of having locks that *block*, we could have locks that yield, and “wake” the future (so it gets polled again) when they’re ready to be acquired.
 
 That’s exactly what `tokio::sync::Mutex` does:
-
-
 
 ```rust
 use futures::future::join_all;
@@ -2058,8 +1858,6 @@ async fn main() {
 
 And that version of the code works again:
 
-
-
 ```shell
 $ cargo run --quiet
 res = abcabcabcabcabc
@@ -2074,8 +1872,6 @@ Since “holding a sync mutex guard across an await point” is a correctness is
 Unfortunately, there’s several issues with it.
 
 First off, you currently have to opt into it:
-
-
 
 ```rust
 // 👇 here's the opt-in
@@ -2092,8 +1888,6 @@ async fn main() {
     *lock += 1;
 }
 ```
-
-
 
 ```shell
 $ cargo clippy
@@ -2126,8 +1920,6 @@ It wasn’t always that way: that lint used to be in the [`correctness` category
 
 But because it can generate false positives, it’s now in the `pedantic` category. Here’s one example of false positive:
 
-
-
 ```rust
 #![warn(clippy::await_holding_lock)]
 
@@ -2143,8 +1935,6 @@ async fn main() {
     sleep(Duration::from_millis(10)).await;
 }
 ```
-
-
 
 ```shell
 $ cargo clippy
@@ -2176,8 +1966,6 @@ warning: `lox` (bin "lox") generated 1 warning
 
 I actually remember hitting this. The workaround isn’t that bad, you can just scope your lock instead of dropping it explicitly. This doesn’t work everywhere, but it’s often easy enough:
 
-
-
 ```rust
 #![warn(clippy::await_holding_lock)]
 
@@ -2197,8 +1985,6 @@ async fn main() {
 
 The second unfortunate thing with this lint is that… it currently doesn’t work with `parking_lot::Mutex`:
 
-
-
 ```rust
 #![warn(clippy::await_holding_lock)]
 
@@ -2216,8 +2002,6 @@ async fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo clippy
     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
@@ -2226,8 +2010,6 @@ $ cargo clippy
 Which is confusing as heck, because the [original PR](https://github.com/rust-lang/rust-clippy/pull/5439/files#diff-9bf10c866fff21dd6600e5f3f5c7148c22885a027c8dffce244be3593a6a6c45R75-R77) explicitly mentions `parking_lot`.
 
 And thirdly, although it does catch a case like this:
-
-
 
 ```rust
 #![deny(clippy::await_holding_lock)]
@@ -2258,8 +2040,6 @@ async fn do_stuff(name: char, res: &Mutex<String>) {
 }
 ```
 
-
-
 ```shell
 $ cargo clippy
     Checking lox v0.1.0 (/home/amos/bearcove/lox)
@@ -2289,8 +2069,6 @@ error: could not compile `lox` due to previous error
 
 It cannot catch a case like that:
 
-
-
 ```rust
 #![deny(clippy::await_holding_lock)]
 
@@ -2316,8 +2094,6 @@ async fn main() {
 }
 ```
 
-
-
 ```shell
 $ cargo clippy
     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
@@ -2330,8 +2106,6 @@ And that’s *fairly* disappointing.
 The bug I actually lost a week and a half to (well, I did refactor a bunch of things, which ended up making the codebase a lot nicer, so, no regrets) was a perfect storm of *all of the above*, plus `RwLock` instead of `Mutex`, making the deadlock even more subtle.
 
 My code looked like this:
-
-
 
 ```rust
 use std::{sync::Arc, time::Duration};
@@ -2391,8 +2165,6 @@ async fn main() {
 
 It doesn’t always deadlock! Sometimes it works fine:
 
-
-
 ```shell
 $ cargo run
     Finished dev [unoptimized + debuginfo] target(s) in 0.02s
@@ -2431,8 +2203,6 @@ okay done
 
 Here’s a case where it deadlocks:
 
-
-
 ```shell
 $ cargo run
     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
@@ -2451,8 +2221,6 @@ updating...
 ```
 
 And here’s a heavily shortened version of the traces GDB shows:
-
-
 
 ```shell
 $ rust-gdb --quiet -p $(pidof lox)
@@ -2483,8 +2251,6 @@ Thread 1 (Thread 0x7f5d4a446d00 (LWP 2907949) "lox"):
 ```
 
 Which points to these two places:
-
-
 
 ```rust
 async fn main() {
@@ -2539,14 +2305,10 @@ You can even combine it with `-i`, so `cargo tree -i parking_lot -e features` an
 
 Had I been able to use that feature, I would’ve done this:
 
-
-
 ```toml
 [dependencies]
 parking_lot = { version = "0.12.0", features = ["deadlock_detection"] }
 ```
-
-
 
 ```rust
 use std::{sync::Arc, time::Duration};
@@ -2632,8 +2394,6 @@ async fn main() {
 
 And… that wouldn’t have helped either:
 
-
-
 ```shell
 $ cargo run
    Compiling lox v0.1.0 (/home/amos/bearcove/lox)
@@ -2650,8 +2410,6 @@ I waited for a whole minute, and no prints. Maybe I’m holding it wrong, maybe 
 In the end, I fixed it the good old-fashioned way: by reading and reading and reading the code again, and refactoring it until the most suspicious part was the `match`, and I came up with a small repro that clarified my understanding of the semantics.
 
 Then I fixed it, like this:
-
-
 
 ```rust
     for _ in 0..10 {
@@ -2678,8 +2436,6 @@ And that was it. No more deadlocks.
 As soon as I [brought this up on Twitter](https://twitter.com/fasterthanlime/status/1491803585385877519), a bunch of things happened.
 
 Mostly, everyone agreed that the fact that this code deadlocks:
-
-
 
 ```rust
 match mutex.lock().foo() {
@@ -2713,8 +2469,6 @@ For me, even “just” having the clippy “await\_while\_holding\_lock” lint
 Or maybe this shouldn’t be a clippy lint at all? Since it’s correctness-related. There’s work around a [`#[must_not_suspend]`](https://github.com/rust-lang/rust/issues/83310) attribute that would bring that check directly into rustc. (It’s not stabilized yet at the time of this writing)>
 
 With it, this is a compile error:
-
-
 
 ```rust
 #![feature(must_not_suspend)]

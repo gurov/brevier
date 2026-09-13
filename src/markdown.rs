@@ -615,6 +615,9 @@ fn is_chrome(line: &str, numbering: bool) -> bool {
     if numbering && is_bare_number(line.trim()) {
         return false;
     }
+    if is_leftover(line.trim()) {
+        return true;
+    }
     let line = strip_leading_image(line.trim());
     let line = line.trim().trim_start_matches('#').trim();
     let line = line.trim_matches('*').trim();
@@ -650,6 +653,33 @@ fn strip_leading_image(line: &str) -> &str {
         Some((_, tail)) => tail,
         None => line,
     }
+}
+
+/// Строка, в которой не осталось ничего читаемого.
+///
+/// Два случая, и оба по форме. Первый — огрызок разделителя: у opennet
+/// «[+]/[–]» после снятия кнопок оставляет одинокую косую черту. Список
+/// разделителей именно список, а не «всё, что не буква»: строка из одной
+/// скобки это код (у википедии блоки кода набраны абзацами, и правило
+/// «знак без буквы» съедало у них каждую закрывающую скобку).
+///
+/// Второй — знак из области частного использования (U+E000–U+F8FF).
+/// Значения у такого знака нет: он рисуется только своим иконочным
+/// шрифтом, которого у нас нет и не будет, — у fasterthanli.me таких
+/// строк в статье сто двадцать. Целой строкой, а не по знакам: внутри
+/// текста такой знак бывает предметом разговора (tonsky про Nerd Fonts).
+fn is_leftover(line: &str) -> bool {
+    const SEPARATORS: &str = "/|·•,;";
+
+    if line.is_empty() {
+        return false;
+    }
+    let separators = line.chars().count() <= 3 && line.chars().all(|c| SEPARATORS.contains(c));
+    let private = line
+        .chars()
+        .all(|c| matches!(c, '\u{e000}'..='\u{f8ff}') || c.is_whitespace());
+
+    separators || private
 }
 
 /// Строка из одних цифр и ничего больше.
@@ -1628,6 +1658,23 @@ mod tests {
     fn a_lone_bare_number_is_still_a_counter() {
         let md = "# Статья\n\nТекст статьи.\n\n20\n";
         assert_eq!(strip_chrome(md), "# Статья\n\nТекст статьи.\n");
+    }
+
+    /// Строка, в которой не осталось ничего читаемого: огрызок разделителя
+    /// и знак из области частного использования — тот самый, что рисуется
+    /// только иконочным шрифтом сайта.
+    #[test]
+    fn a_line_with_nothing_left_to_read_is_dropped() {
+        let md = "# Статья\n\n/\n\n\u{e68b}\n\nТекст статьи.\n";
+        assert_eq!(strip_chrome(md), "# Статья\n\nТекст статьи.\n");
+    }
+
+    /// Но строка из одной скобки — это код: у википедии блоки кода набраны
+    /// абзацами, и правило «знак без буквы» съедало каждую закрывающую.
+    #[test]
+    fn a_lone_brace_is_code_and_stays() {
+        let md = "fn main() {\n\n    println!(\"hi\");\n\n}\n";
+        assert_eq!(strip_chrome(md), md);
     }
 
     /// Ссылка, обнявшая карточку целиком, инлайновой разметкой не выражается:

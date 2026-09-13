@@ -126,6 +126,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     keep_lang(&doc);
     unglue(&doc);
     unprint(&doc);
+    unbutton(&doc);
     unpermalink(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.
@@ -289,6 +290,97 @@ fn unprint(doc: &Document) {
     for node in doc.select(PRINT_HIDDEN).nodes() {
         node.remove_from_parent();
     }
+}
+
+/// Кнопка, притворившаяся ссылкой, — не ссылка.
+///
+/// `href="#"` и `href="javascript:…"` означают одно: нажатие обрабатывает
+/// скрипт, а сам адрес не ведёт никуда. Без JS такая ссылка не делает
+/// ничего, и предлагать её читателю — обманывать. Особенно густо их вокруг
+/// комментариев: у opennet каждая реплика несёт «[+]/[–]», «свернуть ветку»
+/// и «к родителю», и в тексте это шесть управляющих ссылок на реплику.
+///
+/// Текст оставляем: он бывает осмысленным («Показать ещё»), и решать
+/// его судьбу — работа правил про обвязку, а не наша. Но если от кнопки
+/// остался один значок, читать в нём нечего.
+fn unbutton(doc: &Document) {
+    const GLYPH_CHARS: usize = 3;
+
+    for link in doc.select("a[href]").nodes() {
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
+        let href = href.trim();
+        let dead = href == "#" || href.to_lowercase().starts_with("javascript:");
+        let text = squeeze(&link.text());
+        // Значок вместо текста у ссылки внутрь страницы — та же кнопка,
+        // только доехавшая до места: «^» к родителю, «^^» на уровень выше,
+        // «···» свернуть ветку. Читать в ней нечего, а в треде их по три
+        // на реплику.
+        let glyph = text.chars().filter(|c| !c.is_whitespace()).count() <= GLYPH_CHARS
+            && !text.chars().any(|c| c.is_alphanumeric());
+        if !dead && !(href.starts_with('#') && glyph) {
+            continue;
+        }
+        if glyph {
+            unbracket(link);
+            unseparate(link);
+            link.remove_from_parent();
+        } else {
+            link.remove_attr("href");
+        }
+    }
+}
+
+/// Скобки, в которые кнопка была одета.
+///
+/// Старая школа пишет управляющие ссылки в квадратных скобках: `\[^\]`,
+/// `\[ответить\]`, `\[править\]`. Скобки лежат текстом рядом с ссылкой,
+/// и, убрав кнопку, мы оставляли читателю пустую пару — у opennet по три
+/// на каждую реплику.
+/// Разделитель, который разделять перестал.
+///
+/// Кнопки ставят в ряд через косую черту или точку — «[+]/[–]», «[править] ·
+/// [удалить]». Убрав кнопки, мы оставляли читателю строку из одних
+/// разделителей.
+fn unseparate(link: &NodeRef) {
+    const SEPARATORS: &str = "/|·•,;–—-";
+
+    for side in [link.prev_sibling(), link.next_sibling()]
+        .into_iter()
+        .flatten()
+    {
+        if !side.is_text() {
+            continue;
+        }
+        let text = side.text();
+        let bare = text.trim();
+        if !bare.is_empty() && bare.chars().all(|c| SEPARATORS.contains(c)) {
+            side.remove_from_parent();
+        }
+    }
+}
+
+fn unbracket(link: &NodeRef) {
+    let Some(left) = link.prev_sibling() else {
+        return;
+    };
+    let Some(right) = link.next_sibling() else {
+        return;
+    };
+    if !left.is_text() || !right.is_text() {
+        return;
+    }
+    let before = left.text();
+    let after = right.text();
+    let Some(before) = before.strip_suffix('[') else {
+        return;
+    };
+    let Some(after) = after.strip_prefix(']') else {
+        return;
+    };
+    left.set_text(before);
+    right.set_text(after);
 }
 
 /// Признаки подписи автора — те же, по которым её ищет Readability
@@ -1855,6 +1947,30 @@ mod tests {
         assert!(!shot("#teaser"));
         assert!(!shot("#under"));
         assert!(!shot("#badge"));
+    }
+
+    /// Ссылка, которая без JS не делает ничего, — кнопка, а не ссылка.
+    /// Вокруг комментариев их особенно густо: у opennet каждая реплика
+    /// несёт «[+]/[–]», «свернуть ветку» и «к родителю».
+    #[test]
+    fn a_link_that_leads_nowhere_is_a_button() {
+        let doc = Document::from(
+            r##"<html><body><p id="p">оценка [<a href="#">+</a>/<a href="#">–</a>]
+               [<a href="#1">^</a>] <a href="javascript:more()">Показать ещё</a>
+               <a href="https://e.com/reply">ответить</a></p></body></html>"##
+                .to_string(),
+        );
+        unbutton(&doc);
+        let html = doc.select("#p").inner_html().to_string();
+        // Значок исчезает вместе со скобками и разделителем.
+        assert!(!html.contains('+'), "{html}");
+        assert!(!html.contains('^'), "{html}");
+        assert!(!html.contains("[]"), "{html}");
+        // Осмысленный текст остаётся, но уже не притворяется ссылкой.
+        assert!(html.contains("Показать ещё"), "{html}");
+        assert!(!html.contains("javascript:"), "{html}");
+        // Настоящая ссылка не тронута.
+        assert!(html.contains(r##"href="https://e.com/reply""##), "{html}");
     }
 
     /// Заглавную картинку берём из карточки Open Graph — но только если

@@ -14,10 +14,6 @@ M&A is back, the S&P XBI is rising again, a biotech pulled off an IPO and positi
 
 October 22, 2025
 
- ·
-
- ·
-
 The financing window for biotech has remained open, bringing more venture capital into the sector. Indeed, a flurry of fundraising announcements have arrived as the summer tips toward fall.
 
 “We believe 1H26’s momentum sets the stage for a constructive 2H26, driven by continued patent cliff-induced dealmaking, improving access to capital, and a supportive regulatory backdrop,” Truist wrote.
@@ -33,10 +29,6 @@ IPOs have also picked up dramatically, with $5.9 billion worth executed across 2
 Twenty-five biotechs have used the IPO route to go public this year—with five of those debuts occurring this month alone. It’s the most IPOs since 2021, when the industry recorded 78 during the height of the COVID-19 pandemic.
 
 August 25, 2026
-
- ·
-
- ·
 
 The number of companies trading below cash—when a company’s total market capitalization is less than net cash holdings—has fallen to 15% from 22% in the second half of 2025, Truist noted.
 
@@ -55,10 +47,6 @@ And there’s more excitement to come in the second half. Truist pointed to the 
 Pharma is definitely interested in making more deals. But what biotechs will come under the magnifying glass? *BioSpace* takes a look at companies that analysts see as near-term targets for buyouts.
 
 August 5, 2026
-
- ·
-
- ·
 
 The surveyed leaders were also asked about the potential for a mega-deal and were split on that outcome, although a “slim majority” leaned toward yes, Truist said.
 
