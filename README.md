@@ -319,6 +319,11 @@ same representation serves both modes, which is what makes saving nearly free; t
 is what it cannot carry: tables nested in lists, definition lists, footnotes, sub/sup,
 ruby. That loss is also the noise removal this program is for.
 
+A site that serves Markdown is read exactly, with no extraction in the way. Brevier asks
+for it — `Accept: text/markdown` comes first on every request — and follows a
+`<link rel="alternate" type="text/markdown">` when the first answer was HTML. Either way
+the status line says the text is the author's own, not a reconstruction.
+
 GitHub alerts (`> [!NOTE]`) are read as alerts: a quote that says what it is, not a quote
 whose first line reads "[!NOTE]". No coloured box — the colour would be the site's
 typography, the label is the meaning.

@@ -260,11 +260,21 @@ fn run(args: &Args) -> Result<String, Error> {
                 document.markdown
             }
             None => {
-                let page = fetch::fetch(&args.url, args.ua)?;
+                // Плоский тракт чтения идёт за markdown-двойником; интроспекция
+                // (`--raw`, `--html`, `--links`, `--nav`) спрашивает про сам HTML.
+                let page = if args.raw || args.html || args.links || args.nav {
+                    fetch::fetch(&args.url, args.ua)?
+                } else {
+                    fetch::readable(&args.url, args.ua)?
+                };
 
                 match page.kind {
-                    // Родной формат: конвертировать нечего, трогать текст автора — тем более.
-                    ContentKind::Markdown => page.body,
+                    // Родной формат: конвертировать нечего, трогать текст автора —
+                    // тем более. Сайт отдал его сам — скажем об этом, не пачкая stdout.
+                    ContentKind::Markdown => {
+                        eprintln!("brevier: served as Markdown by the site");
+                        page.body
+                    }
                     // Простой текст markdown-ом не является — отдаём как есть.
                     ContentKind::Text => page.body,
                     ContentKind::Html => page_text(&page.body, &page.url, args)?,

@@ -218,6 +218,12 @@ pub fn documentation(repo: &Repo, ua: UserAgent) -> Vec<Documentation> {
     for path in PLAIN {
         wanted.push(("Documentation".to_owned(), path.to_owned()));
     }
+    // `llms.txt` — задуман как индекс текста сайта для моделей, но это ровно
+    // оглавление в нашем формате: markdown со ссылками. Читателю он такая же
+    // точка входа, поэтому едет на полку своей строкой. В корне и в `docs/`.
+    for path in ["llms.txt", "docs/llms.txt"] {
+        wanted.push(("llms.txt".to_owned(), path.to_owned()));
+    }
     // Обвязка идёт после документации: читатель пришёл читать проект,
     // а не правила участия в нём.
     for (title, name, hidden) in BOILERPLATE {

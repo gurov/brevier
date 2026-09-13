@@ -29,8 +29,12 @@ const MAX_META_REFRESH: u8 = 3;
 /// обновится через полминуты».
 const META_REFRESH_MAX_DELAY: f64 = 5.0;
 
+/// Markdown просим первым. Сайт, отдающий текст в markdown, отдаёт его точным
+/// и без вёрстки вокруг — читать это лучше, чем извлекать из HTML. HTML идёт
+/// следом, `q=0.9`: у кого markdown-двойника нет (почти у всех), тот вернёт
+/// HTML как и прежде.
 const ACCEPT: &str =
-    "text/html, application/xhtml+xml, text/markdown;q=0.9, text/plain;q=0.8, */*;q=0.1";
+    "text/markdown, text/html;q=0.9, application/xhtml+xml;q=0.9, text/plain;q=0.8, */*;q=0.1";
 
 /// Какой User-Agent отправляем — открытый вопрос из TODO, и он прямо двигает
 /// число на гейте M0. Поэтому оба варианта живут в коде: корпус гоняется дважды,
@@ -119,6 +123,33 @@ pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
             // Бюджет кончился или редиректа нет — отдаём что есть.
             _ => return Ok(page),
         }
+    }
+}
+
+/// Читаемое представление страницы: то же, что [`fetch`], но если пришёл HTML,
+/// объявивший markdown-двойника (`<link rel="alternate" type="text/markdown">`),
+/// берём двойника — точный текст автора, которому извлечение уже не нужно.
+/// Второй запрос ради этого — оправданный размен: решение «Запросы меряются
+/// разумом, а не счётчиком».
+///
+/// Адрес остаётся исходный: читатель открывал эту страницу, а не файл рядом
+/// с ней. `--check`, `--raw`, `--html`, `--links` и `--nav` сюда не ходят —
+/// им нужен сам HTML, а не его замена.
+pub fn readable(url: &str, ua: UserAgent) -> Result<Page, Error> {
+    let page = fetch(url, ua)?;
+    let Some(alternate) = alternate_markdown(&page) else {
+        return Ok(page);
+    };
+
+    match fetch(&alternate, ua) {
+        // Двойник обязан быть markdown; вернул сервер иное — остаёмся при HTML
+        // и извлекаем как обычно.
+        Ok(md) if md.kind == ContentKind::Markdown => Ok(Page {
+            url: page.url,
+            kind: md.kind,
+            body: md.body,
+        }),
+        _ => Ok(page),
     }
 }
 
@@ -216,6 +247,39 @@ fn meta_refresh(page: &Page) -> Option<String> {
     None
 }
 
+/// markdown-двойник страницы: `<link rel="alternate" type="text/markdown" href>`
+/// в шапке. Сайты начали отдавать точный текст в markdown, и это ровно то,
+/// о чём просит манифест; если ссылка есть, [`readable`] по ней и идёт.
+fn alternate_markdown(page: &Page) -> Option<String> {
+    if page.kind != ContentKind::Html || !contains_ignore_case(&page.body, "alternate") {
+        return None;
+    }
+
+    let document = Document::from(page.body.as_str());
+    let base = Url::parse(&page.url).ok()?;
+
+    for node in document.select("link[rel][type][href]").nodes() {
+        let rel = node.attr("rel").unwrap_or_default();
+        if !rel
+            .split_whitespace()
+            .any(|token| token.eq_ignore_ascii_case("alternate"))
+        {
+            continue;
+        }
+        let mime = node.attr("type").unwrap_or_default();
+        if !mime.trim().eq_ignore_ascii_case("text/markdown") {
+            continue;
+        }
+        let Some(href) = node.attr("href") else {
+            continue;
+        };
+        if let Ok(absolute) = base.join(href.trim()) {
+            return Some(absolute.to_string());
+        }
+    }
+    None
+}
+
 /// `0; url=/new/place` → `/new/place`. Задержку длиннее
 /// [`META_REFRESH_MAX_DELAY`] игнорируем: это не переезд, а автолистание.
 fn parse_refresh(content: &str) -> Option<&str> {
@@ -303,6 +367,22 @@ mod tests {
     fn other_meta_tags_are_left_alone() {
         let page = html_page(r#"<meta http-equiv="content-type" content="text/html"><p>текст</p>"#);
         assert_eq!(meta_refresh(&page), None);
+    }
+
+    #[test]
+    fn alternate_markdown_link_is_found_and_resolved() {
+        let page = html_page(r#"<link rel="alternate" type="text/markdown" href="page.md">"#);
+        assert_eq!(
+            alternate_markdown(&page).as_deref(),
+            Some("https://e.com/old/page.md")
+        );
+    }
+
+    #[test]
+    fn a_non_markdown_alternate_is_ignored() {
+        // Фид — тоже `alternate`, но не наш формат.
+        let page = html_page(r#"<link rel="alternate" type="application/rss+xml" href="/f.xml">"#);
+        assert_eq!(alternate_markdown(&page), None);
     }
 
     #[test]

@@ -56,6 +56,11 @@ pub struct Document {
     /// Статья или список ссылок. Знать это нужно интерфейсу: список ссылок
     /// читатель открывает не для чтения, а чтобы уйти дальше.
     pub kind: Kind,
+    /// Сайт отдал текст markdown-ом сам — прямо по `Accept` или по ссылке
+    /// `<link rel="alternate" type="text/markdown">`. Тогда извлечения не было
+    /// вовсе, и интерфейс говорит об этом строкой: читатель получил точный
+    /// текст автора, а не нашу реконструкцию.
+    pub served: bool,
     /// Навигация самого сайта — его меню и подвал. В текст статьи это
     /// не идёт (меню посреди прозы — дефект), но и терять его нельзя:
     /// без JS страница остаётся набором ссылок, и с главной иначе некуда
@@ -94,21 +99,25 @@ fn open_internal(page: Internal) -> Document {
         // Ссылок тут список, но это не лента: читатель открыл историю
         // намеренно, и говорить ему «это список ссылок» незачем.
         kind: Kind::Article,
+        served: false,
         site: Vec::new(),
     }
 }
 
 fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
-    let page = fetch::fetch(url, ua)?;
+    // `readable`, а не `fetch`: если страница объявила markdown-двойника,
+    // читателю достаётся он — точный текст без извлечения.
+    let page = fetch::readable(url, ua)?;
     let address = Address::Web(page.url.clone());
 
     match page.kind {
         // Родной формат и простой текст отдаём как есть: переписывать текст
-        // автора незачем.
+        // автора незачем. Markdown сайт отдал сам — об этом скажет интерфейс.
         ContentKind::Markdown | ContentKind::Text => Ok(Document {
             title: heading_of(&page.body).unwrap_or_else(|| page.url.clone()),
             markdown: page.body,
             kind: Kind::Article,
+            served: page.kind == ContentKind::Markdown,
             site: Vec::new(),
             address,
         }),
@@ -128,6 +137,9 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
     Ok(Document {
         markdown: reading.markdown,
         kind: reading.kind,
+        // HTML на руках всегда проходит извлечение: markdown-двойника ищет
+        // тракт из сети (`fetch::readable`), а не этот путь.
+        served: false,
         site,
         title: if title.trim().is_empty() {
             url.to_owned()
@@ -166,6 +178,9 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         // Каталог без README приезжает списком ссылок, а не статьёй:
         // читатель открыл его, чтобы выбрать, куда идти дальше.
         kind: loaded.kind,
+        // Режим репозитория — свой тракт, а не «сайт отдал markdown»:
+        // об этом читатель и так знает по адресу.
+        served: false,
         // У репозитория своя навигация — точки входа в документацию,
         // и их ищет окно отдельно (`seek_entries`).
         site: Vec::new(),
@@ -187,6 +202,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         title,
         markdown: body,
         kind: Kind::Article,
+        served: false,
         site: Vec::new(),
     })
 }

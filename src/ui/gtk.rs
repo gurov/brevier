@@ -82,6 +82,7 @@ const OPEN_ACTION: &str = "open-address";
 const LOADING_DOTS: usize = 10;
 /// Что говорим на странице, оказавшейся списком ссылок, а не статьёй.
 const LISTING: &str = "A list of links, not an article — pick one to read.";
+const SERVED_MARKDOWN: &str = "Served as Markdown by the site — the author's exact text.";
 /// Чем и как отмечена страница, приехавшая по `http://`.
 const INSECURE_ICON: &str = "channel-insecure-symbolic";
 const INSECURE: &str =
@@ -2061,6 +2062,9 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 // читатель пришёл на главную блога не читать, а выбирать.
                 if document.kind == brevier::Kind::Listing {
                     notice(&ui, LISTING);
+                } else if document.served {
+                    // Сайт отдал markdown сам — извлечения не было, текст точный.
+                    notice(&ui, SERVED_MARKDOWN);
                 }
                 let mut borrowed = state.borrow_mut();
                 // В историю идёт то, что открылось, и адрес итоговый —
@@ -2930,6 +2934,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         title: brevier::intro::TITLE.to_owned(),
         markdown: brevier::intro::MARKDOWN.to_owned(),
         kind: brevier::Kind::Article,
+        served: false,
         site: Vec::new(),
     };
     dress(state, view, &document.address);
