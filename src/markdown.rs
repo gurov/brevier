@@ -1815,6 +1815,7 @@ mod tests {
             thumbs: HashMap::new(),
             listing_html: None,
             notes: Default::default(),
+            site: Vec::new(),
         };
 
         let reading = from_article(&article).unwrap();
@@ -1854,6 +1855,7 @@ mod tests {
             thumbs,
             listing_html: None,
             notes: Default::default(),
+            site: Vec::new(),
         };
 
         let reading = from_article(&article).unwrap();
@@ -1888,6 +1890,7 @@ mod tests {
             thumbs,
             listing_html: None,
             notes: Default::default(),
+            site: Vec::new(),
         };
 
         let reading = from_article(&article).unwrap();
@@ -1908,6 +1911,7 @@ mod tests {
             thumbs: HashMap::new(),
             listing_html: None,
             notes: Default::default(),
+            site: Vec::new(),
         };
 
         let reading = from_article(&article).unwrap();

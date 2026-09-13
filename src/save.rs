@@ -255,6 +255,7 @@ mod tests {
             title: "Как это работает".to_owned(),
             markdown: "# Как это работает\n\n![схема](img/chart.png)\n".to_owned(),
             kind: crate::Kind::Article,
+            site: Vec::new(),
         };
         assert_eq!(suggested_name(&document), "Как-это-работает.zip");
 
@@ -289,6 +290,7 @@ mod tests {
             title: "Plain".to_owned(),
             markdown: "# Plain\n\nтекст\n".to_owned(),
             kind: crate::Kind::Article,
+            site: Vec::new(),
         };
         assert_eq!(suggested_name(&document), "Plain.md");
 

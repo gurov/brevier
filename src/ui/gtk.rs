@@ -314,6 +314,9 @@ struct Tab {
     anchors: Vec<(String, i32)>,
     /// Места картинок в тексте.
     shots: Vec<Shot>,
+    /// Навигация сайта: его меню и подвал. Свойство страницы, а не вкладки,
+    /// — у каждого сайта своё.
+    site: Vec<Entry>,
     /// Точки входа в документацию проекта. Свойство репозитория, а не файла:
     /// при переходе между файлами одного проекта заново не ищутся.
     entries: Vec<Entry>,
@@ -1313,6 +1316,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             marks: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
+            site: Vec::new(),
             entries: Vec::new(),
             entries_for: None,
             document: None,
@@ -2047,6 +2051,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                     tab.marks = page.marks;
                     tab.anchors = page.anchors;
                     tab.shots = page.shots.clone();
+                    tab.site = site_rows(&document.site);
                     tab.document = Some(document.clone());
                 }
                 drop(borrowed);
@@ -2118,7 +2123,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
     let Some(index) = index else { return };
 
-    let (address, here, can_back, can_forward, marks, entries, title, kept) = {
+    let (address, here, can_back, can_forward, marks, entries, site, title, kept) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.get(index) else {
             return;
@@ -2139,6 +2144,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             tab.history.can_go_forward(),
             tab.marks.clone(),
             tab.entries.clone(),
+            tab.site.clone(),
             tab.label.text().to_string(),
             kept,
         )
@@ -2168,7 +2174,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         format!("{title} — Brevier")
     }));
 
-    let shelf = fill_contents(&ui.contents, &marks, &entries, here.as_ref());
+    let shelf = fill_contents(&ui.contents, &marks, &entries, here.as_ref(), &site);
     let empty = shelf.is_empty();
     state.borrow_mut().shelf = shelf;
     ui.show_contents.set_sensitive(!empty);
@@ -2880,6 +2886,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         title: brevier::intro::TITLE.to_owned(),
         markdown: brevier::intro::MARKDOWN.to_owned(),
         kind: brevier::Kind::Article,
+        site: Vec::new(),
     };
     dress(state, view, &document.address);
     let page = render(view, &document, None);
@@ -3329,6 +3336,7 @@ fn fill_contents(
     marks: &[Mark],
     entries: &[Entry],
     here: Option<&Entry>,
+    site: &[Entry],
 ) -> Vec<Row> {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -3364,7 +3372,39 @@ fn fill_contents(
         shelf.push(Row::Jump(mark.offset));
     }
 
+    // Навигация сайта идёт последней и всегда подписана: её строки уводят
+    // со страницы, и знать об этом читатель должен до нажатия. Ниже
+    // оглавления потому, что оглавление — про то, что читают сейчас,
+    // а меню — про то, куда пойти потом.
+    if !site.is_empty() {
+        list.append(&group("On this site"));
+        shelf.push(Row::Header);
+    }
+    for entry in site {
+        let (row, label) = shelf_row(&entry.title, 0);
+        label.add_css_class("dim-label");
+        label.set_tooltip_text(Some(&entry.address.display()));
+        list.append(&row);
+        shelf.push(Row::Open(entry.address.clone()));
+    }
+
     shelf
+}
+
+/// Навигация сайта строками полки.
+///
+/// Адрес разбираем нашим же разбором: ссылка на github из меню должна
+/// открыться режимом репозитория, а не сырой страницей хостинга, — ровно
+/// как ссылка из текста.
+fn site_rows(site: &[brevier::Link]) -> Vec<Entry> {
+    site.iter()
+        .filter_map(|link| {
+            address::parse(&link.address).ok().map(|address| Entry {
+                title: link.title.clone(),
+                address,
+            })
+        })
+        .collect()
 }
 
 /// Строка «а что ещё лежит рядом» — дверь к файлам каталога.

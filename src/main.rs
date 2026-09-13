@@ -22,6 +22,7 @@ Options:
       --raw                  skip extraction, convert the whole page
       --html                 print the extracted HTML instead of Markdown
       --links                print the article's outgoing links, one per line
+      --nav                  print the site's own navigation, one link per line
       --docs                 for a repository: entry points into its
                              documentation, one per line
       --save                 write the article to a file instead of stdout;
@@ -45,6 +46,8 @@ struct Args {
     raw: bool,
     html: bool,
     links: bool,
+    /// Навигация сайта — его меню и подвал, а не текст статьи.
+    nav: bool,
     docs: bool,
     /// Статья ложится на диск, а не в stdout.
     save: bool,
@@ -228,6 +231,15 @@ fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
     if args.html {
         return Ok(article.content_html);
     }
+    // Навигация сайта в статью не идёт и печатается отдельно: спрашивают
+    // про неё другой вопрос.
+    if args.nav {
+        let mut out = String::new();
+        for link in &article.site {
+            out.push_str(&format!("{}\t{}\n", link.address, link.title));
+        }
+        return Ok(out);
+    }
 
     let reading = markdown::from_article(&article)?;
     // Сказать, что это не статья, надо так, чтобы не испортить `| less`
@@ -276,6 +288,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut raw = false;
     let mut html = false;
     let mut links = false;
+    let mut nav = false;
     let mut docs = false;
     let mut save = false;
     let mut output: Option<String> = None;
@@ -291,6 +304,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             "--raw" => raw = true,
             "--html" => html = true,
             "--links" => links = true,
+            "--nav" => nav = true,
             "--docs" => docs = true,
             "--save" => save = true,
             "-o" | "--output" => match args.next() {
@@ -327,9 +341,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     // Сохранение отдаёт статью, а эти флаги спрашивают про другое — что
     // внутри страницы до конвертации, куда она ведёт, что в репозитории.
     // Молча предпочесть одно другому нельзя.
-    if save && (raw || html || links || docs) {
+    if save && (raw || html || links || nav || docs) {
         return Parsed::Usage(
-            "--save writes the article; --raw, --html, --links and --docs ask other questions"
+            "--save writes the article; --raw, --html, --links, --nav and --docs ask other questions"
                 .to_owned(),
         );
     }
@@ -349,6 +363,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             raw,
             html,
             links,
+            nav,
             docs,
             save,
             output,

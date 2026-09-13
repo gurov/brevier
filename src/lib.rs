@@ -34,6 +34,7 @@ use std::path::Path;
 
 pub use address::Address;
 pub use error::Error;
+pub use extract::Link;
 pub use fetch::UserAgent;
 pub use history::History;
 pub use markdown::Kind;
@@ -52,6 +53,11 @@ pub struct Document {
     /// Статья или список ссылок. Знать это нужно интерфейсу: список ссылок
     /// читатель открывает не для чтения, а чтобы уйти дальше.
     pub kind: Kind,
+    /// Навигация самого сайта — его меню и подвал. В текст статьи это
+    /// не идёт (меню посреди прозы — дефект), но и терять его нельзя:
+    /// без JS страница остаётся набором ссылок, и с главной иначе некуда
+    /// пойти. Показывать решает интерфейс.
+    pub site: Vec<Link>,
 }
 
 /// Установить провайдер шифров. `rustls` собран без встроенного, выбираем явно;
@@ -85,6 +91,7 @@ fn open_internal(page: Internal) -> Document {
         // Ссылок тут список, но это не лента: читатель открыл историю
         // намеренно, и говорить ему «это список ссылок» незачем.
         kind: Kind::Article,
+        site: Vec::new(),
     }
 }
 
@@ -99,6 +106,7 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             title: heading_of(&page.body).unwrap_or_else(|| page.url.clone()),
             markdown: page.body,
             kind: Kind::Article,
+            site: Vec::new(),
             address,
         }),
         ContentKind::Html => from_html(&page.body, &page.url),
@@ -111,11 +119,13 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
 pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
     let article = extract::extract(html, url)?;
     let title = article.title.clone();
+    let site = article.site.clone();
     let reading = markdown::from_article(&article)?;
 
     Ok(Document {
         markdown: reading.markdown,
         kind: reading.kind,
+        site,
         title: if title.trim().is_empty() {
             url.to_owned()
         } else {
@@ -153,6 +163,9 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         // Каталог без README приезжает списком ссылок, а не статьёй:
         // читатель открыл его, чтобы выбрать, куда идти дальше.
         kind: loaded.kind,
+        // У репозитория своя навигация — точки входа в документацию,
+        // и их ищет окно отдельно (`seek_entries`).
+        site: Vec::new(),
         address,
     })
 }
@@ -171,6 +184,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         title,
         markdown: body,
         kind: Kind::Article,
+        site: Vec::new(),
     })
 }
 

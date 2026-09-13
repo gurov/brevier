@@ -81,6 +81,7 @@ brevier gh:rust-lang/book/src/          # …or what the directory holds, listed
 brevier gl:owner/repo                   # the same for GitLab
 brevier --docs gh:rust-lang/book        # entry points into its documentation
 brevier --links <url>                   # the article's outgoing links, one per line
+brevier --nav <url>                     # the site's own navigation: menu and footer
 brevier --raw <url>                     # no extraction, the whole page
 brevier --html <url>                    # the extracted HTML, before conversion
 brevier --stdin <url> < page.html       # HTML you already have; the url is

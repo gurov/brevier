@@ -27,6 +27,16 @@ pub struct Article {
     pub listing_html: Option<String>,
     /// Сноски статьи, снятые с дерева до конвертации, — см. [`notes`].
     pub notes: Notes,
+    /// Навигация самого сайта: то, что лежит в его шапке, меню и подвале.
+    /// Не текст статьи и в него не идёт — см. [`site`].
+    pub site: Vec<Link>,
+}
+
+/// Строка навигации: подпись и адрес.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub title: String,
+    pub address: String,
 }
 
 /// Сноски статьи в едином виде.
@@ -131,6 +141,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
+    let navigation = site(&doc, url);
     let listing = listing(&doc, url);
     // Копия — под сверку с извлечённым: `Readability` документ забирает себе
     // и чистит на месте, а сироты ищутся в исходном дереве (см. `restore`).
@@ -180,7 +191,116 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         thumbs,
         listing_html,
         notes,
+        site: navigation,
     })
+}
+
+/// Где лежит навигация сайта.
+///
+/// Тега `<nav>` мало: он моложе половины живого веба, и у 4pda, tonsky
+/// и opennet меню свёрстано списком без него вовсе. Поэтому к тегам
+/// добавлено имя — `menu` или `nav` в классе или в `id`. Это такое же
+/// соглашение, как `language-*` у блоков кода или `noprint` у печати:
+/// не правило под сайт, а способ, которым веб называет эту вещь.
+const NAV_TAGS: &str = "nav a[href], footer a[href], [role=\"navigation\"] a[href], \
+[class*=\"menu\" i] a[href], [class*=\"nav\" i] a[href], [id*=\"menu\" i] a[href], \
+[id*=\"nav\" i] a[href], [class*=\"footer\" i] a[href], [id*=\"footer\" i] a[href]";
+
+/// Подпись пункта меню.
+///
+/// Пункт бывает в два этажа — название и пояснение под ним
+/// (`<a><div>Смартфоны</div><div>Новости, анонсы…</div></a>` у 4pda), —
+/// и текстом это одна слипшаяся строка: пробела в разметке нет, разводит
+/// их CSS. В меню нужен первый этаж: он и есть название раздела.
+fn label(link: &NodeRef) -> String {
+    let first = link
+        .children_it(false)
+        .find(|child| child.is_element())
+        .map(|child| squeeze(&child.text()))
+        .filter(|text| !text.is_empty());
+
+    match first {
+        Some(text) => text,
+        None => squeeze(&link.text()),
+    }
+}
+
+/// Навигация сайта — та, что у него в меню и в подвале.
+///
+/// Без JS страница остаётся тем, чем была, — набором ссылок, — и лишать
+/// читателя этого набора значит отнимать у него сайт: с главной некуда
+/// пойти, из статьи не подняться в раздел. Именно этим и берут текстовые
+/// браузеры, у которых меню сайта видно всегда.
+///
+/// В текст статьи это не идёт и идти не должно: меню посреди прозы — дефект
+/// по рубрике, и справедливо. Поэтому навигация едет рядом с документом
+/// отдельным списком, а показывать ли её и где — дело интерфейса.
+///
+/// Что считается навигацией, решает форма: `<nav>`, `role="navigation"`,
+/// подвал. Шапка целиком не годится — в ней у половины сайтов лежит
+/// заголовок статьи и подпись автора, поэтому из неё берём только меню.
+///
+/// Дальше три отсева, и каждый нужен:
+///
+/// - **свой хост**: «мы в телеграме» и «сделано в студии» уводят с сайта,
+///   а навигация — это про то, где ещё побывать здесь;
+/// - **подпись короткая и не пустая**: ссылка-значок подписи не несёт,
+///   а ссылка в абзац длиной — это не пункт меню, а текст, случайно
+///   оказавшийся в подвале;
+/// - **один адрес — одна строка**: меню на странице лежит дважды, для
+///   широкого экрана и для узкого, и оба раза целиком.
+fn site(doc: &Document, url: &str) -> Vec<Link> {
+    const MAX_TITLE: usize = 40;
+    const MAX_ROWS: usize = 60;
+
+    let base = Url::parse(url).ok();
+    let host = base
+        .as_ref()
+        .and_then(|url| url.host_str())
+        .map(str::to_owned);
+    let here = base.as_ref().map(|url| {
+        let mut url = url.clone();
+        url.set_fragment(None);
+        url.to_string()
+    });
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut rows: Vec<Link> = Vec::new();
+
+    for link in doc.select(NAV_TAGS).nodes() {
+        if rows.len() >= MAX_ROWS {
+            break;
+        }
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
+        let Some(address) = absolute(base.as_ref(), &href) else {
+            continue;
+        };
+        let Ok(parsed) = Url::parse(&address) else {
+            continue;
+        };
+        if !matches!(parsed.scheme(), "http" | "https") {
+            continue;
+        }
+        if host.as_deref() != parsed.host_str() {
+            continue;
+        }
+        // Ссылка на страницу, на которой читатель и стоит, никуда не ведёт.
+        if here.as_deref() == Some(address.trim_end_matches('#')) {
+            continue;
+        }
+        let title = label(link);
+        if title.is_empty() || title.chars().count() > MAX_TITLE {
+            continue;
+        }
+        if !seen.insert(address.clone()) {
+            continue;
+        }
+        rows.push(Link { title, address });
+    }
+
+    rows
 }
 
 impl Listing {
@@ -1947,6 +2067,39 @@ mod tests {
         assert!(!shot("#teaser"));
         assert!(!shot("#under"));
         assert!(!shot("#badge"));
+    }
+
+    /// Навигацию берём из меню и подвала, а отсеиваем по трём признакам:
+    /// чужой хост, пустая или слишком длинная подпись, повтор адреса.
+    /// Подпись в два этажа сводим к первому — это название раздела.
+    #[test]
+    fn site_navigation_is_menu_and_footer_only() {
+        let page = "<html><body>\
+             <div class=\"menu\"><a href=\"/news/\"><div>Новости</div><div>анонсы и слухи</div></a>\
+             <a href=\"/news/\">Новости</a>\
+             <a href=\"https://t.me/example\">Мы в телеграме</a></div>\
+             <p><a href=\"/article/other\">ссылка из текста</a></p>\
+             <footer><a href=\"/about\">О проекте</a>\
+             <a href=\"/legal\">Этот текст слишком длинный, чтобы быть пунктом меню сайта</a>\
+             <a href=\"/here\"><img src=\"/i.png\"></a></footer>\
+             </body></html>";
+        let doc = Document::from(page.to_string());
+        let rows = site(&doc, "https://example.org/article/one");
+        let titles: Vec<&str> = rows.iter().map(|link| link.title.as_str()).collect();
+        assert_eq!(titles, vec!["Новости", "О проекте"]);
+        assert_eq!(rows[0].address, "https://example.org/news/");
+    }
+
+    /// Ссылка на страницу, на которой читатель и стоит, никуда не ведёт.
+    #[test]
+    fn site_navigation_skips_the_page_we_are_on() {
+        let page = "<html><body><nav>\
+             <a href=\"/here\">Эта страница</a><a href=\"/there\">Другая</a>\
+             </nav></body></html>";
+        let doc = Document::from(page.to_string());
+        let rows = site(&doc, "https://example.org/here");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "Другая");
     }
 
     /// Ссылка, которая без JS не делает ничего, — кнопка, а не ссылка.
