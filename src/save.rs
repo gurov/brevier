@@ -257,6 +257,7 @@ mod tests {
             kind: crate::Kind::Article,
             served: false,
             site: Vec::new(),
+            lang: None,
         };
         assert_eq!(suggested_name(&document), "Как-это-работает.zip");
 
@@ -293,6 +294,7 @@ mod tests {
             kind: crate::Kind::Article,
             served: false,
             site: Vec::new(),
+            lang: None,
         };
         assert_eq!(suggested_name(&document), "Plain.md");
 

@@ -31,20 +31,44 @@ const SOFT_HYPHEN: char = '\u{00AD}';
 /// Неразрывный пробел: разрыва строки здесь не будет.
 const NBSP: char = '\u{00A0}';
 
-/// Расставить типографику по языку страницы. Порядок такой: сперва клеим
-/// однобуквенные предлоги (по обычному пробелу), потом переносим слова —
-/// перенос неразрывный пробел не трогает, он не буква.
-pub fn typeset(text: &str, lang: &str) -> String {
-    let glued = if glues(lang) {
-        keep_together(text)
-    } else {
-        text.to_owned()
-    };
+/// Готовый к работе набор правил для одного языка. Словарь переносов
+/// загружается один раз — при создании, — а не на каждое слово: в окне
+/// `shape` зовётся на каждый прозаический кусок абзаца, и десериализовать
+/// словарь столько же раз было бы расточительством.
+pub struct Typesetter {
+    dict: Option<Standard>,
+    glue: bool,
+}
 
-    match dictionary(lang) {
-        Some(dict) => hyphenate(&glued, &dict),
-        None => glued,
+impl Typesetter {
+    /// Набор для языка страницы. `None`, если делать нечего вовсе — нет ни
+    /// словаря, ни правила про предлоги: тогда окно и не зовёт `shape`.
+    pub fn for_language(lang: &str) -> Option<Self> {
+        let dict = dictionary(lang);
+        let glue = glues(lang);
+        (dict.is_some() || glue).then_some(Typesetter { dict, glue })
     }
+
+    /// Расставить типографику в куске прозы. Сперва клеим однобуквенные
+    /// предлоги (по обычному пробелу), потом переносим слова — перенос
+    /// неразрывный пробел не трогает, он не буква.
+    pub fn shape(&self, text: &str) -> String {
+        let glued = if self.glue {
+            keep_together(text)
+        } else {
+            text.to_owned()
+        };
+        match &self.dict {
+            Some(dict) => hyphenate(&glued, dict),
+            None => glued,
+        }
+    }
+}
+
+/// Расставить типографику по языку страницы разом. Словарь при этом грузится
+/// заново — для окна есть [`Typesetter`], который держит его между вызовами.
+pub fn typeset(text: &str, lang: &str) -> String {
+    Typesetter::for_language(lang).map_or_else(|| text.to_owned(), |ts| ts.shape(text))
 }
 
 /// Снять типографские знаки обратно: мягкие переносы — вон, неразрывный

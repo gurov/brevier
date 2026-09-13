@@ -1488,6 +1488,26 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
     }
     view.add_controller(wheel);
 
+    // Копирование снимает типографские знаки: в буфере лежат мягкие переносы
+    // и неразрывные пробелы, а читателю в буфер обмена нужен чистый текст.
+    // После штатного копирования переписываем буфер обмена очищенным текстом
+    // (`copy-clipboard`, обработчик — после умолчания). Ctrl+C и «Копировать»
+    // из контекстного меню идут через тот же сигнал.
+    view.connect_closure(
+        "copy-clipboard",
+        true,
+        glib::closure_local!(move |view: gtk::TextView| {
+            let buffer = view.buffer();
+            if let Some((start, end)) = buffer.selection_bounds() {
+                let selected = buffer.text(&start, &end, false).to_string();
+                if brevier::typeset::marked(&selected) {
+                    view.clipboard()
+                        .set_text(&brevier::typeset::plain(&selected));
+                }
+            }
+        }),
+    );
+
     if let Some(address) = address {
         open(ui, state, id, address, true);
     } else {
@@ -2936,6 +2956,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         kind: brevier::Kind::Article,
         served: false,
         site: Vec::new(),
+        lang: None,
     };
     dress(state, view, &document.address);
     let page = render(view, &document, None);
@@ -3167,6 +3188,13 @@ struct Page {
     cells: Vec<gtk::Label>,
 }
 
+/// Заголовок ли это по набору тегов. Типографику в заголовки не пускаем:
+/// их текст в буфере — источник якорей и оглавления.
+fn is_heading(tags: &[&str]) -> bool {
+    tags.iter()
+        .any(|tag| matches!(*tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6"))
+}
+
 fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Page {
     use comrak::{Arena, parse_document};
 
@@ -3181,6 +3209,12 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
     let mut anchors = Vec::new();
     let mut shots = Vec::new();
     let mut cells = Vec::new();
+    // Словарь переносов грузим один раз на страницу, не на слово. `None` —
+    // язык неизвестен или ему нечего делать: тогда текст идёт как есть.
+    let typesetter = document
+        .lang
+        .as_deref()
+        .and_then(brevier::typeset::Typesetter::for_language);
     let mut writer = Writer {
         buffer: &buffer,
         view,
@@ -3192,6 +3226,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Pa
         cells: &mut cells,
         depth: 0,
         quotes: 0,
+        typeset: typesetter.as_ref(),
     };
 
     for node in root.children() {
@@ -3628,6 +3663,11 @@ struct Writer<'a> {
     depth: i32,
     /// Глубина вложенности цитаты: от неё отступ и место линейки.
     quotes: i32,
+    /// Типографика по языку страницы, если он известен. Расставляет мягкие
+    /// переносы и клеит однобуквенные предлоги — только в прозе, не в коде
+    /// и не в заголовках (иначе поехали бы якоря, что считаются по тексту
+    /// буфера). Словарь загружен один раз, на всю отрисовку.
+    typeset: Option<&'a brevier::typeset::Typesetter>,
 }
 
 impl Writer<'_> {
@@ -3789,7 +3829,10 @@ impl Writer<'_> {
                 tags.push("body");
                 let start = self.offset();
                 self.inlines(node, &tags);
-                let text = self.text_since(start);
+                // Веха берётся по чистому тексту: в буфере проза уже с мягкими
+                // переносами, а они и раздули бы длину, и попали бы в подпись
+                // вехи на полке.
+                let text = brevier::typeset::plain(&self.text_since(start));
                 // Вехой может быть только настоящий абзац: у короткой
                 // строки начало ничего не говорит.
                 if text.chars().count() >= 120 {
@@ -3965,7 +4008,16 @@ impl Writer<'_> {
     fn inlines<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, tags: &[&str]) {
         for child in node.children() {
             match &child.data.borrow().value {
-                NodeValue::Text(text) => self.put(text, tags),
+                NodeValue::Text(text) => match self.typeset {
+                    // Проза: переносы и неразрывные пробелы. Заголовки мимо —
+                    // по их тексту в буфере считаются якоря и оглавление,
+                    // и мягкий перенос сломал бы совпадение якоря.
+                    Some(ts) if !is_heading(tags) => {
+                        let shaped = ts.shape(text);
+                        self.put(&shaped, tags);
+                    }
+                    _ => self.put(text, tags),
+                },
                 NodeValue::Code(code) => {
                     let mut with = tags.to_vec();
                     with.push("code");
@@ -4489,20 +4541,68 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
 }
 
 fn hits_of(buffer: &gtk::TextBuffer, needle: &str) -> Vec<(i32, i32)> {
-    // Регистр не важен: читатель ищет слово, а не написание. `TEXT_ONLY`
-    // велит не спотыкаться о картинки — на их месте в буфере стоит якорь.
-    let flags = gtk::TextSearchFlags::CASE_INSENSITIVE | gtk::TextSearchFlags::TEXT_ONLY;
-    let mut hits = Vec::new();
-    let mut from = buffer.start_iter();
+    let (start, end) = buffer.bounds();
+    let full = buffer.text(&start, &end, true);
+    plain_hits(&full, needle)
+}
 
-    while let Some((start, end)) = from.forward_search(needle, flags, None) {
-        hits.push((start.offset(), end.offset()));
-        if hits.len() >= MAX_HITS {
-            break;
+/// Совпадения по «чистому» тексту буфера: без мягких переносов и с обычным
+/// пробелом вместо неразрывного, — иначе «в лесу» не нашлось бы в
+/// «в\u{a0}ле\u{ad}су». Ведём карту «индекс чистого символа → смещение
+/// в буфере», чтобы вернуть найденное на место. Регистр не важен, как и
+/// раньше. Отдельной чистой функцией — чтобы проверять без живого буфера.
+fn plain_hits(full: &str, needle: &str) -> Vec<(i32, i32)> {
+    let wanted: Vec<char> = brevier::typeset::plain(needle)
+        .chars()
+        .map(lower1)
+        .collect();
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+
+    let mut plain: Vec<char> = Vec::with_capacity(full.len());
+    let mut map: Vec<i32> = Vec::with_capacity(full.len());
+    for (offset, ch) in full.chars().enumerate() {
+        match ch {
+            // Мягкий перенос и якорь виджета в поиске не участвуют — так же,
+            // как их пропускал прежний TEXT_ONLY.
+            '\u{00AD}' | '\u{FFFC}' => {}
+            '\u{00A0}' => {
+                plain.push(' ');
+                map.push(offset as i32);
+            }
+            _ => {
+                plain.push(lower1(ch));
+                map.push(offset as i32);
+            }
         }
-        from = end;
+    }
+
+    let mut hits = Vec::new();
+    let mut i = 0;
+    while i + wanted.len() <= plain.len() {
+        if plain[i..i + wanted.len()] == wanted[..] {
+            // Конец — сразу за последним совпавшим символом буфера: так
+            // подсветка накрывает и мягкий перенос внутри слова, если он там.
+            let from = map[i];
+            let to = map[i + wanted.len() - 1] + 1;
+            hits.push((from, to));
+            if hits.len() >= MAX_HITS {
+                break;
+            }
+            i += wanted.len();
+        } else {
+            i += 1;
+        }
     }
     hits
+}
+
+/// Первый символ нижнего регистра — для регистронезависимого поиска, один
+/// к одному, чтобы карта смещений не разъехалась. Расширяющиеся отображения
+/// (редкие) сводим к первому символу.
+fn lower1(ch: char) -> char {
+    ch.to_lowercase().next().unwrap_or(ch)
 }
 
 /// Первое совпадение, которое читатель уже видит или увидит ниже.
@@ -4606,6 +4706,24 @@ mod tests {
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn find_looks_through_soft_hyphens_and_nbsp() {
+        // Буфер с мягким переносом внутри слова и неразрывными пробелами
+        // после предлогов — ровно то, что кладёт в буфер типографика.
+        // Смещения (по символам): я=0 nbsp=1 и=2 д=3 у=4 ' '=5 в=6 nbsp=7
+        // л=8 е=9 shy=10 с=11 у=12.
+        let buffer = "я\u{00A0}иду в\u{00A0}ле\u{00AD}су";
+
+        // «в лесу» с обычным пробелом находит «в\u{a0}ле\u{ad}су»; подсветка
+        // (6..13) накрывает и неразрывный пробел, и мягкий перенос внутри.
+        assert_eq!(plain_hits(buffer, "в лесу"), vec![(6, 13)], "{buffer:?}");
+        // Регистр не важен, а перенос внутри слова поиску не мешает.
+        assert_eq!(plain_hits(buffer, "ЛЕСУ"), vec![(8, 13)]);
+        // Пустой запрос — пусто; чего нет — не находится.
+        assert!(plain_hits(buffer, "").is_empty());
+        assert!(plain_hits(buffer, "море").is_empty());
     }
 
     #[test]

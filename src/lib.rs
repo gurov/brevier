@@ -71,6 +71,9 @@ pub struct Document {
     /// без JS страница остаётся набором ссылок, и с главной иначе некуда
     /// пойти. Показывать решает интерфейс.
     pub site: Vec<Link>,
+    /// Язык страницы (`<html lang>`), если объявлен. Окно берёт по нему
+    /// переносы; без языка их нет.
+    pub lang: Option<String>,
 }
 
 /// Установить провайдер шифров. `rustls` собран без встроенного, выбираем явно;
@@ -106,6 +109,7 @@ fn open_internal(page: Internal) -> Document {
         kind: Kind::Article,
         served: false,
         site: Vec::new(),
+        lang: None,
     }
 }
 
@@ -124,6 +128,8 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             kind: Kind::Article,
             served: page.kind == ContentKind::Markdown,
             site: Vec::new(),
+            // Родной текст без HTML — языка мы не знаем.
+            lang: None,
             address,
         }),
         ContentKind::Html => from_html(&page.body, &page.url),
@@ -137,6 +143,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
     let article = extract::extract(html, url)?;
     let title = article.title.clone();
     let site = article.site.clone();
+    let lang = article.lang.clone();
     let reading = markdown::from_article(&article)?;
 
     Ok(Document {
@@ -146,6 +153,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
         // тракт из сети (`fetch::readable`), а не этот путь.
         served: false,
         site,
+        lang,
         title: if title.trim().is_empty() {
             url.to_owned()
         } else {
@@ -189,6 +197,8 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         // У репозитория своя навигация — точки входа в документацию,
         // и их ищет окно отдельно (`seek_entries`).
         site: Vec::new(),
+        // README — родной markdown, `<html lang>` в нём нет.
+        lang: None,
         address,
     })
 }
@@ -209,6 +219,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         kind: Kind::Article,
         served: false,
         site: Vec::new(),
+        lang: None,
     })
 }
 
