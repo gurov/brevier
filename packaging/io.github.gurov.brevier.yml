@@ -6,9 +6,9 @@
 #     flatpak install --user flathub org.gnome.Platform//49 org.gnome.Sdk//49 \
 #         org.freedesktop.Sdk.Extension.rust-stable//25.08
 #     flatpak run org.flatpak.Builder --force-clean --repo=packaging/repo \
-#         packaging/build packaging/dev.brevier.Brevier.yml
+#         packaging/build packaging/io.github.gurov.brevier.yml
 #     flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
-#         packaging/repo brevier.flatpak dev.brevier.Brevier
+#         packaging/repo brevier.flatpak io.github.gurov.brevier
 #
 # Ставится он потом одной строкой: `flatpak install --user ./brevier.flatpak`.
 # `--runtime-repo` там не для красоты: без него у того, кто рантайма
@@ -24,7 +24,7 @@
 # Для Flathub заменить источник `type: dir` на `type: git` с адресом
 # репозитория и тегом: там собирают из объявленного состояния, а не
 # из рабочего каталога.
-id: dev.brevier.Brevier
+id: io.github.gurov.brevier
 runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
@@ -58,18 +58,18 @@ modules:
       - cargo --offline build --release --locked --features ui
       - install -Dm755 target/release/brevier-ui /app/bin/brevier-ui
       - install -Dm755 target/release/brevier /app/bin/brevier
-      - install -Dm644 packaging/dev.brevier.Brevier.desktop
-        /app/share/applications/dev.brevier.Brevier.desktop
+      - install -Dm644 packaging/io.github.gurov.brevier.desktop
+        /app/share/applications/io.github.gurov.brevier.desktop
       - install -Dm644 assets/brevier.svg
-        /app/share/icons/hicolor/scalable/apps/dev.brevier.Brevier.svg
-      - install -Dm644 packaging/dev.brevier.Brevier.metainfo.xml
-        /app/share/metainfo/dev.brevier.Brevier.metainfo.xml
+        /app/share/icons/hicolor/scalable/apps/io.github.gurov.brevier.svg
+      - install -Dm644 packaging/io.github.gurov.brevier.metainfo.xml
+        /app/share/metainfo/io.github.gurov.brevier.metainfo.xml
       # Текст OFL обязан ехать с дистрибутивом — условие лицензии на
       # гарнитуры, отдельное от нашей MIT+Apache на код.
       - install -Dm644 assets/fonts/OFL-NotoSans.txt
-        /app/share/licenses/dev.brevier.Brevier/OFL-NotoSans.txt
-      - install -Dm644 LICENSE-MIT /app/share/licenses/dev.brevier.Brevier/LICENSE-MIT
-      - install -Dm644 LICENSE-APACHE /app/share/licenses/dev.brevier.Brevier/LICENSE-APACHE
+        /app/share/licenses/io.github.gurov.brevier/OFL-NotoSans.txt
+      - install -Dm644 LICENSE-MIT /app/share/licenses/io.github.gurov.brevier/LICENSE-MIT
+      - install -Dm644 LICENSE-APACHE /app/share/licenses/io.github.gurov.brevier/LICENSE-APACHE
     sources:
       - type: dir
         path: ..

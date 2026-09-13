@@ -3,7 +3,7 @@
      страница на Flathub. Без неё Flathub пакет не принимает, а KDE Discover
      показывает установленный flatpak безымянной строкой. -->
 <component type="desktop-application">
-  <id>dev.brevier.Brevier</id>
+  <id>io.github.gurov.brevier</id>
 
   <name>Brevier</name>
   <summary>Read the web without JavaScript</summary>
@@ -11,7 +11,7 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
 
-  <developer id="dev.brevier">
+  <developer id="io.github.gurov">
     <name>gurov</name>
   </developer>
 
@@ -45,7 +45,7 @@
     </p>
   </description>
 
-  <launchable type="desktop-id">dev.brevier.Brevier.desktop</launchable>
+  <launchable type="desktop-id">io.github.gurov.brevier.desktop</launchable>
 
   <url type="homepage">https://github.com/gurov/brevier</url>
   <url type="bugtracker">https://github.com/gurov/brevier/issues</url>

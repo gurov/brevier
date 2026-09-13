@@ -36,7 +36,7 @@ does not care which distribution is underneath:
 
 ```sh
 flatpak install --user ./brevier.flatpak      # the file you were handed
-flatpak run dev.brevier.Brevier https://example.com/article
+flatpak run io.github.gurov.brevier https://example.com/article
 ```
 
 The first install also pulls `org.gnome.Platform//49` from Flathub if it is not already
@@ -51,9 +51,9 @@ To build that bundle yourself:
 flatpak install --user flathub org.flatpak.Builder \
     org.gnome.Platform//49 org.gnome.Sdk//49 org.freedesktop.Sdk.Extension.rust-stable//25.08
 flatpak run org.flatpak.Builder --force-clean --repo=packaging/repo \
-    packaging/build packaging/dev.brevier.Brevier.yml
+    packaging/build packaging/io.github.gurov.brevier.yml
 flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
-    packaging/repo brevier.flatpak dev.brevier.Brevier
+    packaging/repo brevier.flatpak io.github.gurov.brevier
 ```
 
 The build runs without network access, the way Flathub builds: every crate is declared
@@ -62,7 +62,7 @@ with its address and checksum in `packaging/cargo-sources.json`, which
 that file.
 
 What the sandbox changes, stated rather than discovered later: history, bookmarks and
-settings live in `~/.var/app/dev.brevier.Brevier/`; saving an article goes through the
+settings live in `~/.var/app/io.github.gurov.brevier/`; saving an article goes through the
 file portal; a local `.md` path cannot be opened, because the sandbox is granted no
 filesystem access at all; and "Open in your browser" asks the portal, so the choice is
 the host's.
@@ -109,17 +109,22 @@ desktop entry and the application id, not by the program. To install both for yo
 
 ```sh
 cargo install --path . --features ui
-install -Dm644 packaging/dev.brevier.Brevier.desktop \
-        ~/.local/share/applications/dev.brevier.Brevier.desktop
+install -Dm644 packaging/io.github.gurov.brevier.desktop \
+        ~/.local/share/applications/io.github.gurov.brevier.desktop
 install -Dm644 assets/brevier.svg \
-        ~/.local/share/icons/hicolor/scalable/apps/dev.brevier.Brevier.svg
+        ~/.local/share/icons/hicolor/scalable/apps/io.github.gurov.brevier.svg
 update-desktop-database ~/.local/share/applications
 ```
 
+The application id is `io.github.gurov.brevier`, after the repository that holds the code.
+Flathub wants an id built on a domain its owner controls, and `brevier.dev` is not one of
+ours yet; `io.github.<user>.<repo>` is the form their rules give to a project that lives on
+GitHub, and it is what their linter accepts.
+
 The entry declares `http`, `https` and `text/markdown`, so Brevier appears in "Open with"
 and can be chosen as the browser for a link. It does not make itself the default; if you
-want that, `xdg-settings set default-web-browser dev.brevier.Brevier.desktop` plus
-`xdg-mime default dev.brevier.Brevier.desktop x-scheme-handler/http x-scheme-handler/https`
+want that, `xdg-settings set default-web-browser io.github.gurov.brevier.desktop` plus
+`xdg-mime default io.github.gurov.brevier.desktop x-scheme-handler/http x-scheme-handler/https`
 — the first sets it for KDE, the second for everything that goes through `xdg-open`.
 
 Making Brevier the default does not cost you the way out: `Ctrl+O` asks the system for the

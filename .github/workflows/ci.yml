@@ -37,7 +37,7 @@ jobs:
           sudo apt-get install -y libgtk-4-dev desktop-file-utils
       - run: cargo clippy --all-targets --features ui -- -D warnings
       # Ломается молча: окно просто останется без иконки в панели задач.
-      - run: desktop-file-validate packaging/dev.brevier.Brevier.desktop
+      - run: desktop-file-validate packaging/io.github.gurov.brevier.desktop
 
   packaging:
     name: packaging — metadata and the crate list
@@ -47,7 +47,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y appstream
       # Без карточки пакет не примут на Flathub, а в Discover он будет
       # безымянной строкой.
-      - run: appstreamcli validate --no-net packaging/dev.brevier.Brevier.metainfo.xml
+      - run: appstreamcli validate --no-net packaging/io.github.gurov.brevier.metainfo.xml
       # Flatpak собирается без сети по списку крейтов. Список устаревает
       # молча — при подъёме зависимостей его надо перегонять, и узнать
       # об этом лучше здесь, а не на сборке пакета.

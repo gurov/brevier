@@ -39,7 +39,7 @@ use brevier::save;
 use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
-const APP_ID: &str = "dev.brevier.Brevier";
+const APP_ID: &str = "io.github.gurov.brevier";
 const BODY_FAMILY: &str = "Noto Sans";
 const MONO_FAMILY: &str = "Noto Sans Mono";
 /// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
@@ -2780,7 +2780,7 @@ const LOGO: &[u8] = include_bytes!("../../assets/brevier.svg");
 ///
 /// Иконку окно берёт не из файла, а из темы значков — по имени, и имя это
 /// идентификатор программы. Поэтому свою кладём в тему: выкладываем в кэш
-/// (`icons/hicolor/scalable/apps/dev.brevier.Brevier.svg`) и добавляем этот
+/// (`icons/hicolor/scalable/apps/io.github.gurov.brevier.svg`) и добавляем этот
 /// каталог в поиск темы. Приём тот же, что и с гарнитурами, и причина та же:
 /// своё добро приложение раскладывает у себя, а не в системных каталогах.
 ///

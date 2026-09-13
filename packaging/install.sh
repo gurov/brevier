@@ -15,13 +15,13 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}"
 apps="$data/applications"
 icons="$data/icons/hicolor/scalable/apps"
 meta="$data/metainfo"
-docs="$data/licenses/dev.brevier.Brevier"
+docs="$data/licenses/io.github.gurov.brevier"
 
 if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$bin/brevier" "$bin/brevier-ui" \
-          "$apps/dev.brevier.Brevier.desktop" \
-          "$icons/dev.brevier.Brevier.svg" \
-          "$meta/dev.brevier.Brevier.metainfo.xml"
+          "$apps/io.github.gurov.brevier.desktop" \
+          "$icons/io.github.gurov.brevier.svg" \
+          "$meta/io.github.gurov.brevier.metainfo.xml"
     rm -rf "$docs"
     command -v update-desktop-database >/dev/null 2>&1 &&
         update-desktop-database "$apps" 2>/dev/null || true
@@ -32,9 +32,12 @@ fi
 
 install -Dm755 "$here/brevier"    "$bin/brevier"
 install -Dm755 "$here/brevier-ui" "$bin/brevier-ui"
-install -Dm644 "$here/dev.brevier.Brevier.desktop"      "$apps/dev.brevier.Brevier.desktop"
-install -Dm644 "$here/brevier.svg"                      "$icons/dev.brevier.Brevier.svg"
-install -Dm644 "$here/dev.brevier.Brevier.metainfo.xml" "$meta/dev.brevier.Brevier.metainfo.xml"
+install -Dm644 "$here/io.github.gurov.brevier.desktop" \
+    "$apps/io.github.gurov.brevier.desktop"
+install -Dm644 "$here/brevier.svg" \
+    "$icons/io.github.gurov.brevier.svg"
+install -Dm644 "$here/io.github.gurov.brevier.metainfo.xml" \
+    "$meta/io.github.gurov.brevier.metainfo.xml"
 # Текст OFL обязан ехать с дистрибутивом: гарнитуры вшиты в бинарник,
 # и это условие их лицензии, отдельное от нашей MIT+Apache на код.
 install -Dm644 "$here/OFL-NotoSans.txt" "$docs/OFL-NotoSans.txt"
