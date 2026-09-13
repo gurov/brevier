@@ -6,6 +6,9 @@
 //! должна стоить «переписать вид», а не «переписать всё».
 
 pub mod address;
+/// Проверка страницы на пригодность к чтению: `brevier --check <url>`.
+/// Гоняет обычный тракт и печатает отчёт со счётом.
+pub mod check;
 pub mod code;
 pub mod error;
 pub mod extract;

@@ -25,6 +25,11 @@ Options:
       --nav                  print the site's own navigation, one link per line
       --docs                 for a repository: entry points into its
                              documentation, one per line
+      --check                score the page for a scriptless reader, 0..100,
+                             and say what to change; with --stdin, check HTML
+                             that is not deployed yet
+      --min <0..100>         with --check, the pass mark: exit non-zero below
+                             it (default 80), so the check can sit in CI
       --save                 write the article to a file instead of stdout;
                              `.md` is the text, `.zip` the text plus its
                              images (needs the `save` feature)
@@ -35,6 +40,7 @@ Options:
 
 Exit codes: 1 bad url, 2 network, 3 http status,
             4 content type, 5 nothing extracted, 6 conversion
+With --check the exit code follows the score: 0 at or above --min, 1 below it.
 ";
 
 struct Args {
@@ -49,6 +55,10 @@ struct Args {
     /// Навигация сайта — его меню и подвал, а не текст статьи.
     nav: bool,
     docs: bool,
+    /// Проверка страницы вместо чтения: отчёт со счётом 0..100.
+    check: bool,
+    /// Порог для `--check`: ниже него выходим с ненулём. По умолчанию 80.
+    min: u8,
     /// Статья ложится на диск, а не в stdout.
     save: bool,
     /// Куда именно. Выбор читателя старше нашего предложения — и здесь,
@@ -78,6 +88,10 @@ fn main() -> ExitCode {
 
     brevier::init_crypto();
 
+    if args.check {
+        return check_page(&args);
+    }
+
     if args.save {
         return save_page(&args);
     }
@@ -87,6 +101,54 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("brevier: {e}");
             ExitCode::from(e.exit_code())
+        }
+    }
+}
+
+/// `--check`: вместо чтения — отчёт о том, что стоит между страницей и чтением.
+/// Отказ доступа (403, сертификат) не роняет процесс, а становится находкой
+/// со счётом 0: об этом и спрашивали. Код возврата идёт по порогу `--min`,
+/// чтобы проверку можно было поставить в CI рядом с линтером.
+fn check_page(args: &Args) -> ExitCode {
+    use brevier::check;
+
+    let report = if args.stdin {
+        let mut html = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut html) {
+            eprintln!("brevier: {}", Error::Convert(e));
+            return ExitCode::from(6);
+        }
+        check::check_html(&html, &args.url)
+    } else {
+        match check::check(&args.url, args.ua) {
+            Ok(report) => report,
+            // Осталось только то, что не даёт даже начать: адрес не разобран,
+            // схема чужая. Это ошибка ввода, а не оценка страницы.
+            Err(e) => {
+                eprintln!("brevier: {e}");
+                return ExitCode::from(e.exit_code());
+            }
+        }
+    };
+
+    let code = if report.score < u32::from(args.min) {
+        1
+    } else {
+        0
+    };
+
+    // Отчёт — в stdout, чтобы `brevier --check url | less` и запись в файл
+    // работали как у всякого вывода. Код возврата отражает порог, не печать.
+    let mut stdout = io::stdout();
+    match stdout
+        .write_all(report.to_markdown().as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => ExitCode::from(code),
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::from(code),
+        Err(e) => {
+            eprintln!("brevier: {e}");
+            ExitCode::from(7)
         }
     }
 }
@@ -282,6 +344,15 @@ fn out(text: &str) -> ExitCode {
     }
 }
 
+/// `--min` принимает число 0..100. Всё прочее — недоразумение, о котором надо
+/// сказать, а не молча взять восемьдесят.
+fn parse_min(value: &str) -> Result<u8, String> {
+    match value.trim().parse::<u16>() {
+        Ok(n) if n <= 100 => Ok(n as u8),
+        _ => Err(format!("--min takes a number 0..100, got `{value}`")),
+    }
+}
+
 fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut url: Option<String> = None;
     let mut ua = UserAgent::default();
@@ -291,6 +362,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut links = false;
     let mut nav = false;
     let mut docs = false;
+    let mut check = false;
+    let mut min: u8 = 80;
+    let mut min_set = false;
     let mut save = false;
     let mut output: Option<String> = None;
 
@@ -307,6 +381,22 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             "--links" => links = true,
             "--nav" => nav = true,
             "--docs" => docs = true,
+            "--check" => check = true,
+            "--min" => match args.next().as_deref().map(parse_min) {
+                Some(Ok(value)) => {
+                    min = value;
+                    min_set = true;
+                }
+                Some(Err(message)) => return Parsed::Usage(message),
+                None => return Parsed::Usage("--min needs a number 0..100".to_owned()),
+            },
+            _ if arg.starts_with("--min=") => match parse_min(&arg["--min=".len()..]) {
+                Ok(value) => {
+                    min = value;
+                    min_set = true;
+                }
+                Err(message) => return Parsed::Usage(message),
+            },
             "--save" => save = true,
             "-o" | "--output" => match args.next() {
                 Some(path) => output = Some(path),
@@ -353,6 +443,18 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             "-o says where to write, but nothing is being written: add --save".to_owned(),
         );
     }
+    // Проверка спрашивает «читается ли эта страница», а эти флаги — что внутри
+    // неё, куда она ведёт, что в репозитории, куда её сохранить. Не смешиваем.
+    if check && (raw || html || links || nav || docs || save) {
+        return Parsed::Usage(
+            "--check scores the page; --raw, --html, --links, --nav, --docs and --save ask other questions"
+                .to_owned(),
+        );
+    }
+    // Порог без проверки ничего не значит.
+    if min_set && !check {
+        return Parsed::Usage("--min is the pass mark for --check; add --check".to_owned());
+    }
 
     match url {
         // Адрес обязателен и при `--stdin`: сеть он не трогает, но без него
@@ -366,6 +468,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             links,
             nav,
             docs,
+            check,
+            min,
             save,
             output,
         })),
@@ -459,6 +563,49 @@ mod tests {
         assert!(matches!(parse(&["--raw"]), Parsed::Usage(_)));
         assert!(matches!(
             parse(&["--ua=nonsense", "https://e.com"]),
+            Parsed::Usage(_)
+        ));
+    }
+
+    #[test]
+    fn check_takes_a_threshold_and_reads_stdin() {
+        let Parsed::Run(args) = parse(&["--check", "--min", "70", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert!(args.check);
+        assert_eq!(args.min, 70);
+
+        // Порог по умолчанию восемьдесят.
+        let Parsed::Run(args) = parse(&["--check", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert_eq!(args.min, 80);
+
+        // `--check --stdin` — проверка ещё не выложенного HTML.
+        let Parsed::Run(args) = parse(&["--check", "--stdin", "https://e.com/a"]) else {
+            panic!("не разобралось");
+        };
+        assert!(args.check && args.stdin);
+    }
+
+    #[test]
+    fn check_answers_a_different_question_than_the_other_flags() {
+        assert!(matches!(
+            parse(&["--check", "--html", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+        assert!(matches!(
+            parse(&["--check", "--save", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+        // Порог без проверки — недоразумение.
+        assert!(matches!(
+            parse(&["--min", "70", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+        // И число должно быть числом 0..100.
+        assert!(matches!(
+            parse(&["--check", "--min", "200", "https://e.com/a"]),
             Parsed::Usage(_)
         ));
     }

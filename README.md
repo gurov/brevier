@@ -155,6 +155,8 @@ brevier gh:rust-lang/book/src           # the README of a directory inside it
 brevier gh:rust-lang/book/src/          # …or what the directory holds, listed
 brevier gl:owner/repo                   # the same for GitLab
 brevier --docs gh:rust-lang/book        # entry points into its documentation
+brevier --check <url>                   # score the page for a scriptless reader
+brevier --check --stdin <url> < page.html   # …check HTML not deployed yet
 brevier --links <url>                   # the article's outgoing links, one per line
 brevier --nav <url>                     # the site's own navigation: menu and footer
 brevier --raw <url>                     # no extraction, the whole page
