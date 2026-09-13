@@ -10,6 +10,10 @@ reads Markdown documentation straight out of git repositories.
 
 There is no JavaScript engine and no site CSS. What survives is the text.
 
+Why it is built this way is in the [manifesto](MANIFESTO.md); what comes next, and
+what has been decided, is in the [roadmap](ROADMAP.md) — every near-term item there
+is an open issue labelled `roadmap`.
+
 **Status: early.** The window runs on Linux. Nothing is in a store yet — there is a
 Flatpak bundle you can build and hand to someone, a tarball, and the source — and screen
 readers are supported on Linux only; see [What it does not do](#what-it-does-not-do).
@@ -211,9 +215,11 @@ menu come from GTK.
 
 ## In the window
 
-- **Typography is fixed by the reader, not the site:** 16.5pt, a measure of 36 ems
-  (about 65 characters), 1.55 leading, and headings that are *lighter* than the text
-  rather than bolder — at a large size weight shouts instead of leading.
+- **Typography is fixed on the reader's side, not the site's.** Today that means
+  Brevier's own defaults — 16.5pt, a measure of 36 ems (about 65 characters), 1.55
+  leading, and headings that are *lighter* than the text rather than bolder, because
+  at a large size weight shouts instead of leading — plus zoom and the theme. A
+  settings page for face, size and measure is on the roadmap.
 - **Ivory paper** (`#faf5ea`) instead of white, which glows on a screen; a warm dark
   theme is one switch away, behind the gear.
 - **Page zoom on the browser's own ladder** (67…200%), and it scales the whole
@@ -296,7 +302,9 @@ permanent background of this kind of program, not a task that finishes.
 - **Accessibility outside Linux** — GTK4 speaks AT-SPI, so screen readers work on Linux
   only: NVDA on Windows and VoiceOver on macOS will not see anything in this window.
   That is the price of the toolkit choice, stated plainly rather than by omission.
-- **Packaged builds** — not yet.
+- **A store listing** — not yet. A Flatpak bundle and a tarball are in Releases;
+  Flathub is the first item on the roadmap, and with it the updates a bundle cannot
+  deliver.
 - **Privacy** — not sold here. Sites may track a reader exactly as they always could.
 
 Known limitation: a table is drawn as a grid of widgets anchored in the text buffer, so
@@ -370,7 +378,10 @@ one owns the session — the second is "open me one more link", not "here are my
 ## On the network
 
 - **One page per request from a human.** Brevier does not crawl, does not prefetch and
-  does not fan out over a site. robots.txt addresses crawlers; this is not one.
+  does not fan out over a site. robots.txt addresses crawlers; this is not one. The
+  one exception is named: opening a repository probes a dozen well-known paths on
+  the hosting's CDN to find where its documentation starts — small requests, to a
+  CDN with no limit, never to the API.
 - **The User-Agent is honest** — `Brevier/0.1`. Chosen by measurement, not by principle:
   on our corpus a browser-shaped UA lost 7:0, every case a 403 from an anti-bot.
 - **TLS trust is delegated to the operating system** (`rustls` +
@@ -380,7 +391,9 @@ one owns the session — the second is "open me one more link", not "here are my
 
 ## Contributing
 
-Patches and bug reports are welcome. `cargo test` and
+Patches and bug reports are welcome. What is planned is in [ROADMAP.md](ROADMAP.md)
+and in the issues labelled `roadmap`; the smaller open items carry `bug` or
+`enhancement`. `cargo test` and
 `cargo clippy --all-targets --features ui` should be clean, and any change to extraction
 or conversion needs a corpus run diffed against `corpus/expected/` before it is
 committed: those files exist to catch regressions, and they have already caught two.
