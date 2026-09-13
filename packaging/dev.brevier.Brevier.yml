@@ -7,9 +7,14 @@
 #         org.freedesktop.Sdk.Extension.rust-stable//25.08
 #     flatpak run org.flatpak.Builder --force-clean --repo=packaging/repo \
 #         packaging/build packaging/dev.brevier.Brevier.yml
-#     flatpak build-bundle packaging/repo brevier.flatpak dev.brevier.Brevier
+#     flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+#         packaging/repo brevier.flatpak dev.brevier.Brevier
 #
 # Ставится он потом одной строкой: `flatpak install --user ./brevier.flatpak`.
+# `--runtime-repo` там не для красоты: без него у того, кто рантайма
+# не держит, установка кончается словами «требует org.gnome.Platform,
+# которую не удалось найти», а с ним flatpak сам предлагает добавить
+# Flathub и забрать рантайм оттуда.
 #
 # Сборка идёт без сети — так требует Flathub, и так же собирается здесь.
 # Значит каждый крейт объявлен адресом и суммой: список делает

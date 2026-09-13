@@ -40,8 +40,10 @@ flatpak run dev.brevier.Brevier https://example.com/article
 ```
 
 The first install also pulls `org.gnome.Platform//49` from Flathub if it is not already
-there — around 400 MB, once for every Flatpak that uses it. After that Brevier is in the
-menu like any other application.
+there — around 400 MB, once for every Flatpak that uses it; that is what `--runtime-repo`
+in the build below is for, and without it the install ends at "requires the runtime
+org.gnome.Platform, which was not found". After that Brevier is in the menu like any
+other application.
 
 To build that bundle yourself:
 
@@ -50,7 +52,8 @@ flatpak install --user flathub org.flatpak.Builder \
     org.gnome.Platform//49 org.gnome.Sdk//49 org.freedesktop.Sdk.Extension.rust-stable//25.08
 flatpak run org.flatpak.Builder --force-clean --repo=packaging/repo \
     packaging/build packaging/dev.brevier.Brevier.yml
-flatpak build-bundle packaging/repo brevier.flatpak dev.brevier.Brevier
+flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+    packaging/repo brevier.flatpak dev.brevier.Brevier
 ```
 
 The build runs without network access, the way Flathub builds: every crate is declared
