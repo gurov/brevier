@@ -14,7 +14,7 @@ But the landscape is shifting, perhaps more quickly than we might like. Mobile b
 
 In recent years, I’ve been meeting with more companies that request “an iPhone website” as part of their project. It’s an interesting phrase: At face value, of course, it speaks to mobile WebKit’s quality as a browser, as well as a powerful business case for thinking beyond the desktop. But as designers, I think we often take comfort in such explicit requirements, as they allow us to compartmentalize the problems before us. We can quarantine the mobile experience on [separate](http://webkit.dailykos.com/) [subdomains](http://m.nytimes.com/), spaces distinct and separate from “the non-iPhone website.” But what’s next? An iPad website? An N90 website? Can we really continue to commit to supporting each new user agent with its own bespoke experience? At some point, this starts to feel like a zero sum game. But how can we—and our designs—adapt?
 
-## A flexible foundation[#section2](#section2)
+## A flexible foundation
 
 Let’s consider an [example design](https://alistapart.github.io/code-samples/responsive-web-design/ex/ex-site-flexible.html). I’ve built a simple page for a hypothetical magazine; it’s a straightforward two-column layout built on a [fluid grid](http://www.alistapart.com/articles/fluidgrids/), with not a few [flexible images](http://unstoppablerobotninja.com/entry/fluid-images) peppered throughout. As a long-time proponent of non-fixed layouts, I’ve long felt they were more “future proof” simply because they were layout agnostic. And to a certain extent, that’s true: flexible designs make no assumptions about a browser window’s width, and adapt beautifully to devices that have portrait and landscape modes.
 
@@ -26,7 +26,7 @@ But no design, fixed or fluid, scales seamlessly beyond the context for which it
 
 In short, our flexible design works well enough in the desktop-centric context for which it was designed, but isn’t optimized to extend far beyond that.
 
-## Becoming responsive[#section3](#section3)
+## Becoming responsive
 
 Recently, an emergent discipline called “responsive architecture” has begun asking how physical spaces can *respond* to the presence of people passing through them. Through a combination of embedded robotics and tensile materials, architects are experimenting with [art installations](
 http://www.robotecture.com/bubbles-417/) and [wall structures](http://vimeo.com/4661618) that bend, flex, and expand as crowds approach them. Motion sensors can be paired with climate control systems to adjust a room’s temperature and ambient lighting as it fills with people. Companies have already produced [“smart glass technology” that can automatically become opaque](http://www.smartglassinternational.com/) when a room’s occupants reach a certain density threshold, giving them an additional layer of privacy.
@@ -35,7 +35,7 @@ In their book Interactive Architecture, Michael Fox and Miles Kemp described thi
 
 This is our way forward. Rather than tailoring disconnected designs to each of an ever-increasing number of web devices, we can treat them as facets of the same experience. We can design for an optimal viewing experience, but embed standards-based technologies into our designs to make them not only more flexible, but more adaptive to the media that renders them. In short, we need to practice *responsive web design*. But how?
 
-## Meet the media query[#section4](#section4)
+## Meet the media query
 
 Since the days of CSS 2.1, our style sheets have enjoyed some measure of device awareness through [media types](http://www.w3.org/TR/CSS21/media.html). If you’ve ever written [a print style sheet](http://www.alistapart.com/articles/goingtoprint/), you’re already familiar with the concept:
 
@@ -89,7 +89,7 @@ Or as part of an `@import` directive:
 
 But in each case, the effect is the same: If the device passes the test put forth by our media query, the relevant CSS is applied to our markup. Media queries are, in short, [conditional comments](http://msdn.microsoft.com/en-us/library/ms537512\(VS.85\).aspx) for the rest of us. Rather than targeting a specific version of a specific browser, we can surgically correct issues in our layout as it scales beyond its initial, ideal resolution.
 
-## Adapt, respond, and overcome[#section5](#section5)
+## Adapt, respond, and overcome
 
 Let’s turn our attention to the images at the base of our page. In their default layout, the relevant CSS currently looks like this:
 
@@ -167,7 +167,7 @@ By designing responsively, we can not only linearize our content on smaller devi
 
 But a responsive design isn’t limited to layout changes. Media queries allow us to practice some incredibly precise fine-tuning as our pages reshape themselves: we can increase the target area on links for smaller screens, better complying with [Fitts’ Law](http://en.wikipedia.org/wiki/Fitts'_law) on touch devices; selectively show or hide elements that might enhance a page’s navigation; we can even practice [responsive typesetting](https://alistapart.github.io/code-samples/responsive-web-design/ex/ex-article.html) to gradually alter the size and leading of our text, optimizing the reading experience for the display providing it.
 
-### A few technical notes[#section6](#section6)
+### A few technical notes
 
 It should be noted that media queries enjoy incredibly robust support among modern browsers. Desktop browsers such as Safari 3+, Chrome, Firefox 3.5+, and Opera 7+ all natively parse media queries, as do more recent mobile browsers such as Opera Mobile and mobile WebKit. Of course, older versions of those desktop browsers don’t support media queries. And while Microsoft has committed to [media query support in IE9](http://ie.microsoft.com/testdrive/HTML5/85CSS3_MediaQueries/Default.html "Internet Explorer version 9"), Internet Explorer currently doesn’t offer a native implementation.
 
@@ -178,7 +178,7 @@ However, if you’re interested in implementing legacy browser support for media
 
 But if using JavaScript doesn’t appeal, that’s perfectly understandable. However, that strengthens the case for building your layout atop a [flexible grid](http://www.alistapart.com/articles/fluidgrids/), ensuring your design enjoys some measure of flexibility in media query-blind browsers and devices.
 
-## The way forward[#section7](#section7)
+## The way forward
 
 Fluid grids, flexible images, and media queries are the three technical ingredients for responsive web design, but it also requires a different way of thinking. Rather than quarantining our content into disparate, device-specific experiences, we can use media queries to progressively enhance our work within different viewing contexts. That’s not to say there isn’t a business case for separate sites geared toward specific devices; for example, if the user goals for your mobile site are more limited in scope than its desktop equivalent, then serving different content to each might be the best approach.
 

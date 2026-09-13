@@ -4,7 +4,7 @@ Mar 26, 2023
 
 This post will be a bit all over the place. Several months ago, I wrote [*Hard Mode Rust*](https://matklad.github.io/2022/10/06/hard-mode-rust.html), exploring an allocation-conscious style of programming. In the ensuing discussion, [@jamii](https://github.com/Jamii) name-dropped [TigerBeetle](https://tigerbeetle.com), a reliable, distributed, fast, and small database written in Zig in a similar style, and, well, I now find myself writing Zig full-time, after more than seven years of Rust. This post is a hand-wavy answer to the “why?” question. It is emphatically *not* a balanced and thorough comparison of the two languages. I haven’t yet written my [100k lines of Zig](https://matklad.github.io/2021/09/05/Rust100k.html) to do that. (if you are looking for a more general “what the heck is Zig”, I can recommend [@jamii’s post](https://www.scattered-thoughts.net/writing/assorted-thoughts-on-zig-and-rust/)). In fact, this post is going to be less about languages, and more about styles of writing software (but pre-existing knowledge of Rust and Zig would be very helpful). Without further caveats, let’s get started.
 
-## [Reliable Software](#Reliable-Software)
+## Reliable Software
 
 To the first approximation, we all strive to write bug-free programs. But I think a closer look reveals that we don’t actually care about programs being correct 100% of the time, at least in the majority of the domains. Empirically, almost every program has bugs, and yet it somehow works out OK. To pick one specific example, most programs use stack, but almost no programs understand what their stack usage is exactly, and how far they can go. When we call `malloc`, we just hope that we have enough stack space for it, we almost never check. Similarly, all Rust programs abort on OOM, and can’t state their memory requirements up-front. Certainly good enough, but not perfect.
 
@@ -16,7 +16,7 @@ The second approximation is that we strive to balance program usefulness with th
 
 rust-analyzer and TigerBeetle are perfect specimens of the two approaches, let me describe them.
 
-## [rust-analyzer](#rust-analyzer)
+## rust-analyzer
 
 [rust-analyzer](https://rust-analyzer.github.io) is an LSP server for the Rust programming language. By its nature, it’s expansive. Great developer tools usually have a feature for every niche use-case. It also is a fast-moving open source project which has to play catch-up with the `rustc` compiler. Finally, the nature of IDE dev tooling makes availability significantly more important than correctness. An erroneous completion option would cause a smirk (if it is noticed at all), while the server crashing and all syntax highlighting turning off will be noticed immediately.
 
@@ -26,7 +26,7 @@ Development process *itself* is informed by this calculus. For example, PRs with
 
 Overall, the philosophy is to maximize provided value by focusing on the common case. Edge cases become eventually correct over time.
 
-## [TigerBeetle](#TigerBeetle)
+## TigerBeetle
 
 TigerBeetle is the opposite of that.
 
@@ -56,7 +56,7 @@ With all that strictness and explicitness about resources, of course we also ful
 
 What I am getting at is that TigerBeetle isn’t really a normal “program” program. It strictly is a finite state machine, explicitly coded as such.
 
-## [Back From The Weeds](#Back-From-The-Weeds)
+## Back From The Weeds
 
 Oh, right, Rust and Zig, the topic of the post!
 
@@ -89,7 +89,7 @@ Zig strongly prefers explicit resource management. A lot of Rust programs are we
 
 Similarly, the standard library is very conscious about allocation, more so than Rust’s. Collections are *not* parameterized by an allocator, like in C++ or (future) Rust. Rather, an allocator is passed in explicitly to every method which actually needs to allocate. This is [*Call Site Dependency Injection*](https://matklad.github.io/2020/12/28/csdi.html), and it is more flexible. For example, in TigerBeetle we need a couple of hash maps. These maps are sized at a startup time to hold just the right number of elements, and are never resized. So we pass an allocator to [`init`](https://github.com/tigerbeetledb/tigerbeetle/blob/53092098d69cc8facf94a2472bc79ca9d525a605/src/vsr/replica.zig#L540) method, but we don’t pass it to the [event loop](https://github.com/tigerbeetledb/tigerbeetle/blob/53092098d69cc8facf94a2472bc79ca9d525a605/src/vsr/replica.zig#L758). We get to both use the standard hash-map, and to feel confident that there’s no way we can allocate in the actual event loop, because it doesn’t have access to an allocator.
 
-## [Wishlist](#Wishlist)
+## Wishlist
 
 Finally, my wishlist for Zig.
 

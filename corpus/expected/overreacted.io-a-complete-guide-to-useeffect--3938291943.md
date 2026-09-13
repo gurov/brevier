@@ -30,7 +30,7 @@ To *see* the answers, we need to take a step back. The goal of this article isn�
 
 * * *
 
-## [TLDR](#tldr)
+## TLDR
 
 Here’s a quick TLDR if you don’t want to read the whole thing. If some parts don’t make sense, you can scroll down until you find something related.
 
@@ -62,7 +62,7 @@ I hope this TLDR was helpful! Otherwise, let’s go.
 
 * * *
 
-## [Each Render Has Its Own Props and State](#each-render-has-its-own-props-and-state)
+## Each Render Has Its Own Props and State
 
 Before we can talk about effects, we need to talk about rendering.
 
@@ -136,7 +136,7 @@ The key takeaway is that the `count` constant inside any particular render doesn
 
 *(For an in-depth overview of this process, check out my post [React as a UI Runtime](https://overreacted.io/react-as-a-ui-runtime/).)*
 
-## [Each Render Has Its Own Event Handlers](#each-render-has-its-own-event-handlers)
+## Each Render Has Its Own Event Handlers
 
 So far so good. What about event handlers?
 
@@ -307,7 +307,7 @@ This is why [in this demo](https://codesandbox.io/s/w2wxl3yo0l) event handlers �
 
 *Side note: I inlined concrete `count` values right into `handleAlertClick` functions above. This mental substitution is safe because `count` can’t possibly change within a particular render. It’s declared as a `const` and is a number. It would be safe to think the same way about other values like objects too, but only if we agree to avoid mutating state. Calling `setSomething(newObj)` with a newly created object instead of mutating it is fine because state belonging to previous renders is intact.*
 
-## [Each Render Has Its Own Effects](#each-render-has-its-own-effects)
+## Each Render Has Its Own Effects
 
 This was supposed to be a post about effects but we still haven’t talked about effects yet! We’ll rectify this now. Turns out, effects aren’t really any different.
 
@@ -419,7 +419,7 @@ Now let’s recap what happens after we click:
 
 * * *
 
-## [Each Render Has Its Own… Everything](#each-render-has-its-own-everything)
+## Each Render Has Its Own… Everything
 
 **We know now that effects run after every render, are conceptually a part of the component output, and “see” the props and state from that particular render.**
 
@@ -478,7 +478,7 @@ I think it’s ironic that Hooks rely so much on JavaScript closures, and yet it
 
 **Closures are great when the values you close over never change. That makes them easy to think about because you’re essentially referring to constants.** And as we discussed, props and state never change within a particular render. By the way, we can fix the class version… by [using a closure](https://codesandbox.io/s/w7vjo07055).
 
-## [Swimming Against the Tide](#swimming-against-the-tide)
+## Swimming Against the Tide
 
 At this point it’s important that we call it out explicitly: **every** function inside the component render (including event handlers, effects, timeouts or API calls inside them) captures the props and state of the render call that defined it.
 
@@ -535,7 +535,7 @@ function Example() {
 
 It might seem quirky to mutate something in React. However, this is exactly how React itself reassigns `this.state` in classes. Unlike with captured props and state, you don’t have any guarantees that reading `latestCount.current` would give you the same value in any particular callback. By definition, you can mutate it any time. This is why it’s not a default, and you have to opt into that.
 
-## [So What About Cleanup?](#so-what-about-cleanup)
+## So What About Cleanup?
 
 As [the docs explain](https://reactjs.org/docs/hooks-effect.html#effects-with-cleanup), some effects might have a cleanup phase. Essentially, its purpose is to “undo” an effect for cases like subscriptions.
 
@@ -617,7 +617,7 @@ Kingdoms will rise and turn into ashes, the Sun will shed its outer layers to be
 
 That’s what allows React to deal with effects right after painting — and make your apps faster by default. The old props are still there if our code needs them.
 
-## [Synchronization, Not Lifecycle](#synchronization-not-lifecycle)
+## Synchronization, Not Lifecycle
 
 One of my favorite things about React is that it unifies describing the initial render result and the updates. This [reduces the entropy](https://overreacted.io/the-bug-o-notation/) of your program.
 
@@ -662,7 +662,7 @@ Still, of course running all effects on *every* render might not be efficient. (
 
 So how can we fix this?
 
-## [Teaching React to Diff Your Effects](#teaching-react-to-diff-your-effects)
+## Teaching React to Diff Your Effects
 
 We’ve already learned that lesson with the DOM itself. Instead of touching it on every re-render, React only updates the parts of the DOM that actually change.
 
@@ -756,7 +756,7 @@ const newDeps = ['Dan'];
 
 If even one of the values in the dependency array is different between renders, we know running the effect can’t be skipped. Synchronize all the things!
 
-## [Don’t Lie to React About Dependencies](#dont-lie-to-react-about-dependencies)
+## Don’t Lie to React About Dependencies
 
 Lying to React about dependencies has bad consequences. Intuitively, this makes sense, but I’ve seen pretty much everyone who tries `useEffect` with a mental model from classes try to cheat the rules. (And I did that too at first!)
 
@@ -782,7 +782,7 @@ Sometimes when you do that, it causes a problem. For example, maybe you see an i
 
 But before we jump to solutions, let’s understand the problem better.
 
-## [What Happens When Dependencies Lie](#what-happens-when-dependencies-lie)
+## What Happens When Dependencies Lie
 
 If deps contain every value used by the effect, React knows when to re-run it:
 
@@ -893,7 +893,7 @@ Therefore, specifying `[]` as a dependency will create a bug. React will compare
 
 Issues like this are difficult to think about. Therefore, I encourage you to adopt it as a hard rule to always be honest about the effect dependencies, and specify them all. (We provide a [lint rule](https://github.com/facebook/react/issues/14920) if you want to enforce this on your team.)
 
-## [Two Ways to Be Honest About Dependencies](#two-ways-to-be-honest-about-dependencies)
+## Two Ways to Be Honest About Dependencies
 
 There are two strategies to be honest about dependencies. You should generally start with the first one, and then apply the second one if needed.
 
@@ -958,7 +958,7 @@ Let’s look at a few common techniques for removing dependencies.
 
 * * *
 
-## [Making Effects Self-Sufficient](#making-effects-self-sufficient)
+## Making Effects Self-Sufficient
 
 We want to get rid of the `count` dependency in our effect.
 
@@ -996,7 +996,7 @@ You can try it [here](https://codesandbox.io/s/q3181xz1pj).
 
 Even though this effect only runs once, the interval callback that belongs to the first render is perfectly capable of sending the `c => c + 1` update instruction every time the interval fires. It doesn’t need to know the current `counter` state anymore. React already knows it.
 
-## [Functional Updates and Google Docs](#functional-updates-and-google-docs)
+## Functional Updates and Google Docs
 
 Remember how we talked about synchronization being the mental model for effects? An interesting aspect of synchronization is that you often want to keep the “messages” between the systems untangled from their state. For example, editing a document in Google Docs doesn’t actually send the *whole* page to the server. That would be very inefficient. Instead, it sends a representation of what the user tried to do.
 
@@ -1006,7 +1006,7 @@ Encoding the *intent* (rather than the result) is similar to how Google Docs [so
 
 **However, even `setCount(c => c + 1)` isn’t that great.** It looks a bit weird and it’s very limited in what it can do. For example, if we had two state variables whose values depend on each other, or if we needed to calculate the next state based on a prop, it wouldn’t help us. Luckily, `setCount(c => c + 1)` has a more powerful sister pattern. Its name is `useReducer`.
 
-## [Decoupling Updates from Actions](#decoupling-updates-from-actions)
+## Decoupling Updates from Actions
 
 Let’s modify the previous example to have two state variables: `count` and `step`. Our interval will increment the count by the value of the `step` input:
 
@@ -1087,7 +1087,7 @@ function reducer(state, action) {
 
 (Here’s a [demo](https://codesandbox.io/s/xzr480k0np) if you missed it earlier).
 
-## [Why useReducer Is the Cheat Mode of Hooks](#why-usereducer-is-the-cheat-mode-of-hooks)
+## Why useReducer Is the Cheat Mode of Hooks
 
 We’ve seen how to remove dependencies when an effect needs to set state based on previous state, or on another state variable. **But what if we need *props* to calculate the next state?** For example, maybe our API is `<Counter step={1} />`. Surely, in this case we can’t avoid specifying `props.step` as a dependency?
 
@@ -1124,7 +1124,7 @@ You may be wondering: how can this possibly work? How can the reducer “know”
 
 **This is why I like to think of `useReducer` as the “cheat mode” of Hooks. It lets me decouple the update logic from describing what happened. This, in turn, helps me remove unnecessary dependencies from my effects and avoid re-running them more often than necessary.**
 
-## [Moving Functions Inside Effects](#moving-functions-inside-effects)
+## Moving Functions Inside Effects
 
 A common mistake is to think functions shouldn’t be dependencies. For example, this seems like it could work:
 
@@ -1259,7 +1259,7 @@ Thanks to the `exhaustive-deps` lint rule from the `eslint-plugin-react-hooks` p
 
 Pretty sweet.
 
-## [But I Can’t Put This Function Inside an Effect](#but-i-cant-put-this-function-inside-an-effect)
+## But I Can’t Put This Function Inside an Effect
 
 Sometimes you might not want to move a function *inside* an effect. For example, several effects in the same component may call the same function, and you don’t want to copy and paste its logic. Or maybe it’s a prop.
 
@@ -1430,7 +1430,7 @@ function Child({ fetchData }) {
 
 Since `fetchData` only changes inside `Parent` when its `query` state changes, our `Child` won’t refetch the data until it’s actually necessary for the app.
 
-## [Are Functions Part of the Data Flow?](#are-functions-part-of-the-data-flow)
+## Are Functions Part of the Data Flow?
 
 Interestingly, this pattern is broken with classes in a way that really shows the difference between the effect and lifecycle paradigms. Consider this translation:
 
@@ -1557,7 +1557,7 @@ function ColorPicker() {
 
 In the above examples, I’d much prefer if `fetchData` was either inside my effect (which itself could be extracted to a custom Hook) or a top-level import. I want to keep the effects simple, and callbacks in them don’t help that. (“What if some `props.onComplete` callback changes while the request was in flight?”) You can [simulate the class behavior](#swimming-against-the-tide) but that doesn’t solve race conditions.
 
-## [Speaking of Race Conditions](#speaking-of-race-conditions)
+## Speaking of Race Conditions
 
 A classic data fetching example with classes might look like this:
 
@@ -1637,7 +1637,7 @@ function Article({ id }) {
 
 [This article](https://www.robinwieruch.de/react-hooks-fetch-data/) goes into more detail about how you can handle errors and loading states, as well as extract that logic into a custom Hook. I recommend you to check it out if you’re interested to learn more about data fetching with Hooks.
 
-## [Raising the Bar](#raising-the-bar)
+## Raising the Bar
 
 With the class lifecycle mindset, side effects behave differently from the render output. Rendering the UI is driven by props and state, and is guaranteed to be consistent with them, but side effects are not. This is a common source of bugs.
 
@@ -1655,7 +1655,7 @@ In the longer term, [Suspense for Data Fetching](https://reactjs.org/blog/2018/1
 
 As Suspense gradually covers more data fetching use cases, I anticipate that `useEffect` will fade into background as a power user tool for cases when you actually want to synchronize props and state to some side effect. Unlike data fetching, it handles this case naturally because it was designed for it. But until then, custom Hooks like [shown here](https://www.robinwieruch.de/react-hooks-fetch-data/) are a good way to reuse data fetching logic.
 
-## [In Closing](#in-closing)
+## In Closing
 
 Now that you know pretty much everything I know about using effects, check out the [TLDR](#tldr) in the beginning. Does it make sense? Did I miss something? (I haven’t run out of paper yet!)
 

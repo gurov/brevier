@@ -2,6 +2,8 @@
 
 Naval
 
+![](https://i0.wp.com/nav.al/wp-content/uploads/2019/12/Navatar.png?fit=1080%2C1080&ssl=1)
+
 *A collection of all my interviews about my ‘How to Get Rich’ [tweetstorm](https://twitter.com/naval/status/1002103360646823936).*
 
 ## Seek Wealth, Not Money or Status

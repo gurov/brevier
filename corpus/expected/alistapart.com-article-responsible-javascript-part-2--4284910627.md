@@ -14,7 +14,7 @@ Unlike the aftermath of most copious boozings, the agony didn’t start the morn
 
 Everyone was happy. Now *no* one is happy. Welcome to your first JavaScript hangover.
 
-## It’s not your fault[#section2](#section2)
+## It’s not your fault
 
 When you’re grappling with a vicious hangover, “I told you so” would be a well-deserved, if fight-provoking, rebuke—assuming you could even fight in so sorry a state.
 
@@ -22,11 +22,11 @@ When it comes to JavaScript hangovers, there’s plenty of blame to dole out. Po
 
 Web development isn’t easy. It’s a long slog we rarely get right on the first try. The best part of working on the web, however, is that we don’t *have* to get it perfect at the start. We can make improvements after the fact, and that’s just what the second installment of [this series](https://alistapart.com/article/responsible-javascript-part-1/) is here for. Perfection is a long ways off. For now, let’s take the edge off of that JavaScript hangover by improving your site’s, er, *scriptuation* in the short term.
 
-## Round up the usual suspects[#section3](#section3)
+## Round up the usual suspects
 
 It might seem rote, but it’s worth going through the list of basic optimizations. It’s not uncommon for large development teams—particularly those that work across many repositories or don’t use optimized boilerplate—to overlook them.
 
-### Shake those trees[#section4](#section4)
+### Shake those trees
 
 First, make sure your toolchain is configured to perform [*tree shaking*](https://developer.mozilla.org/en-US/docs/Glossary/Tree_shaking). If tree shaking is new to you, I wrote [a guide on it last year](https://developers.google.com/web/fundamentals/performance/optimizing-javascript/tree-shaking/) you can consult. The short of it is that tree shaking is a process in which unused exports in your codebase don’t get packaged up in your production bundles.
 
@@ -39,7 +39,7 @@ For tree shaking to be effective, the following must be true:
 
 On the off chance tree shaking isn’t occurring during your build, getting it to work may help. Of course, its effectiveness varies on a case-by-case basis. It also depends on whether the modules you import introduce [side effects](https://en.wikipedia.org/wiki/Side_effect_\(computer_science\)), which may influence a bundler’s ability to shake unused exports.
 
-### Split that code[#section5](#section5)
+### Split that code
 
 Chances are good that you’re employing some form of [code splitting](https://developers.google.com/web/fundamentals/performance/optimizing-javascript/code-splitting/), but it’s worth re-evaluating how you’re doing it. No matter *how* you’re splitting code, there are two questions that are always worth asking yourself:
 
@@ -56,7 +56,7 @@ Where lazy loading is concerned, it can be a bit difficult to know where to star
 
 Of course, loading scripts on demand brings the possibility that interactivity could be noticeably delayed, as the script necessary for the interaction must be downloaded first. If data usage is not a concern, consider using the [`rel=prefetch` resource hint](https://www.w3.org/TR/resource-hints/#prefetch) to load such scripts at a low priority that won’t contend for bandwidth against critical resources. [Support for`rel=prefetch`](https://caniuse.com/#feat=link-rel-prefetch) is good, but nothing will break if it’s unsupported, as such browsers will ignore markup they doesn’t understand.
 
-### Externalize third-party hosted code[#section6](#section6)
+### Externalize third-party hosted code
 
 Ideally, you should self-host as many of your site’s dependencies as possible. If for some reason you *must* load dependencies from a third party, [mark them as externals](https://webpack.js.org/configuration/externals/) in your bundler’s configuration. Failing to do so could mean your website’s visitors will download both locally hosted code *and* the same code from a third party.
 
@@ -66,7 +66,7 @@ This may *seem* like common knowledge if you know your way around bundlers, but 
 
 If you aren’t convinced to self-host your third-party dependencies, then consider adding [`dns-prefetch`](https://css-tricks.com/prefetching-preloading-prebrowsing/#article-header-id-0), [`preconnect`](https://css-tricks.com/prefetching-preloading-prebrowsing/#article-header-id-1), or possibly even [`preload`](https://www.smashingmagazine.com/2016/02/preload-what-is-it-good-for/) hints for them. Doing so can lower your site’s [Time to Interactive](https://developers.google.com/web/tools/lighthouse/audits/time-to-interactive) and—if JavaScript is critical to rendering content—your site’s [Speed Index](https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/metrics/speed-index).
 
-## Smaller alternatives for less overhead[#section7](#section7)
+## Smaller alternatives for less overhead
 
 [Userland JavaScript](https://nodejs.org/en/knowledge/getting-started/what-is-node-core-verus-userland/) is like an obscenely massive candy store, and we as developers are awed by the sheer amount of open source offerings. Frameworks and libraries allow us to extend our applications to quickly do all sorts of stuff that would otherwise take loads of time and effort.
 
@@ -78,7 +78,7 @@ Libraries such as [Lodash](https://lodash.com/) offer many useful methods. Yet, 
 
 Whatever your preferred tools are, the idea is the same: do some research to see if there are smaller alternatives, or if native language features can do the trick. You may be surprised at how little effort it may take you to seriously reduce your app’s overhead.
 
-## Differentially serve your scripts[#section8](#section8)
+## Differentially serve your scripts
 
 There’s a good chance you’re using Babel in your toolchain to transform your ES6 source into code that can run on older browsers. Does this mean we’re doomed to serve giant bundles even to browsers that don’t need them, until the older browsers disappear altogether? [Of course not](https://philipwalton.com/articles/deploying-es2015-code-in-production-today/)! Differential serving helps us get around this by generating two different builds of your ES6 source:
 
@@ -123,7 +123,7 @@ document.body.appendChild(scriptEl);
 
 This script infers that if a browser supports [the `nomodule` attribute](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script#attr-nomodule) in the `script` element, it understands `type="module"`. This ensures that legacy browsers only get legacy scripts and modern browsers only get modern ones. Be warned, though, that dynamically injected scripts load asynchronously by default, so set the `[async](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script#attr-async)` attribute to `false` if dependency order is crucial.
 
-## Transpile less[#section9](#section9)
+## Transpile less
 
 I’m not here to trash Babel. It’s indispensable, but lordy, it adds a *lot* of extra stuff without your ever knowing. It pays to peek under the hood to see what it’s up to. Some minor changes in your coding habits can have a positive impact on what Babel spits out.
 
@@ -193,7 +193,7 @@ If you don’t want to avoid these features altogether, you have a couple ways o
 
 This is solely my opinion, but I believe the best choice is to avoid transpilation altogether in bundles generated for modern browsers. That’s not always possible, especially if you use [JSX](https://reactjs.org/docs/introducing-jsx.html), which must be transformed for *all* browsers, or if you’re using bleeding edge language features that aren’t widely supported. In the latter case, it might be worth asking if those features are really necessary to deliver a good user experience (they rarely are). If you arrive at the conclusion that Babel must be a part of your toolchain, then it’s worth peeking under the hood from time to time to catch suboptimal stuff Babel might be doing that you can improve on.
 
-## Improvement is not a race[#section10](#section10)
+## Improvement is not a race
 
 As you massage your temples wondering when this horrid JavaScript hangover is going to lift, understand that it’s precisely when we rush to get something out there as fast as we possibly can that the user experience can suffer. As the web development community obsesses on iterating faster in the name of competition, it’s worth your time to [*slow down a little bit*](https://en.wikipedia.org/wiki/Thinking,_Fast_and_Slow). You’ll find that by doing so, you may not be iterating as fast as your competitors, but *your product* will be *faster* than theirs.
 

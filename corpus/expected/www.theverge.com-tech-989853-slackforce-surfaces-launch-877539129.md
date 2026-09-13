@@ -2,6 +2,8 @@
 
 Emma Roth
 
+![IMG_2464](https://platform.theverge.com/wp-content/uploads/sites/2/2026/09/IMG_2464.png?quality=90&strip=all&crop=0%2C9.8234763765205%2C100%2C80.353047246959&w=1200)
+
 A new feature coming to Slack will allow you to build interactive reports, polls, dashboards, presentations, microsites, and other tools directly inside a chat. With [Slackforce Surfaces](https://www.salesforce.com/slack/slack-surfaces-transforms-enterprise-data/), you can describe to Slackbot what you need, and it will use AI to gather information from relevant conversations and connected apps, like Google Drive or Salesforce, to create it.
 
 Once Slackbot creates a Surface, you can share it with colleagues and pin it to channels, allowing other people to view it, interact with it, and leave comments. In one example shared by Slack, a user asks Slackbot for help creating an arcade-themed visualization of AI token usage. The AI assistant then generates an interactive dashboard showing token usage across different divisions, such as sales, design, and engineering.

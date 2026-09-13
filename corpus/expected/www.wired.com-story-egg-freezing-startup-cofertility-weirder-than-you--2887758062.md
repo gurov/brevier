@@ -159,4 +159,4 @@ But she does eventually sign Cofertility’s second rider, and the second batch 
 * * *
 
 ***What Say You?***
-*Let us know what you think about this article in the comments below. Alternatively, you can submit a letter to the editor at* *[\[email protected\]](https://www.wired.com/cdn-cgi/l/email-protection#761b171f1a36011f0413125815191b).*
+*Let us know what you think about this article in the comments below. Alternatively, you can submit a letter to the editor at* *[\[email protected\]](https://www.wired.com/cdn-cgi/l/email-protection#4c212d25200c3b253e2928622f2321).*

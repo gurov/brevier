@@ -66,11 +66,11 @@ Classic network effects theory still holds, I’m not discarding it. Instead, le
 
 Actually, I tend to use three axes to dissect social networks.
 
-The three axes on which I evaluate social network strength
+![The three axes on which I evaluate social network strength](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550964963097-R8W7Y323FRSA78N6E5H4/3-axis.png)
 
 For this post, though, I'm only going to look at two of them, utility and social capital, as the entertainment axis adds a whole lot of complexity which I'll perhaps explain another time.
 
-The basic two axis framework guiding much of the social network analysis in this piece
+![The basic two axis framework guiding much of the social network analysis in this piece](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550965028110-D9K3D080V4RT6LQ4ZA6G/2-axes.png)
 
 Utility doesn't require much explanation, though we often use the term very loosely and categorize too many things as utility when they aren't that useful (we generally confuse circuses for bread and not the reverse; Fox News, for example, is more entertainment than utility, as is common of many news outlets). A social network like Facebook allows me to reach lots of people I would otherwise have a harder time tracking down, and that is useful. A messaging app like WhatsApp allows me to communicate with people all over the world without paying texting or incremental data fees, which is useful. Quora and Reddit and Discord and most every social network offer some forms of utility.
 
@@ -136,11 +136,13 @@ The launch of these global tweet scoreboards reminds me of the moment in the now
 
 \*\*Now classic because Battle Royale has subsequently been ripped off, err, paid tribute to by The Hunger Games, Fortnite, Maze Runner, and just about every YA franchise out there because who understands barbarous status games better than teenagers?
 
+![Favstar.fm screenshot. Just seeing some of those old but familiar avatars makes me sentimental, perhaps like how early Burning Man devotees think back on its early years, before the moneyed class came in and ruined that utopia of drugs, nudity, and …](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550629328015-7TAEOBTWYYNEYUWLJJQR/favstar.png)
+
 Favstar.fm screenshot. Just seeing some of those old but familiar avatars makes me sentimental, perhaps like how early Burning Man devotees think back on its early years, before the moneyed class came in and ruined that utopia of drugs, nudity, and art.
 
-Chasing down old Favrd screenshots, I still laugh at the tweets surfaced.
+![Chasing down old Favrd screenshots, I still laugh at the tweets surfaced.](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550629512932-ASBYE0PTOMAGJ9BIQDOL/favrd.jpg)
 
-One more Favrd screenshot just for old time’s sake
+![One more Favrd screenshot just for old time’s sake](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550629598956-2X7MJB727QU6F2KXSFDW/favrd2.jpg)
 
 It's critical that not everyone can quip with such skill. This gave Twitter its own proof of work, and over time the overall quality of tweets improved as that feedback loop spun and tightened. The strategies that gained the most likes were fed in increasing volume into people's timelines as everyone learned from and competed with each other.
 
@@ -310,6 +312,8 @@ Facebook, with its explicit attachment to the real world graph and its enforceme
 
 It's useful to look at some of the common paths that social networks traverse over time using our two axis model. Not all of them took the same paths to prominence. Doing so also helps illuminate the most productive strategies for each to pursue future growth.
 
+![Come for the tool, stay for the network](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550965487802-SM01P8V7TV8SOZ0QX1H7/utility-then-social-capital.png)
+
 **First utility, then social capital**
 
 Come for the tool, stay for the network
@@ -317,6 +321,8 @@ Come for the tool, stay for the network
 This is the well-known “come for the tool, stay for the network” path. Instagram is a good example here given its growth from filter-driven utility to social photo sharing behemoth. Today, I can't remember the last time I used an Instagram filter.
 
 In the end, I think most social networks, if they've made this journey, need to make a return to utility to be truly durable. Commerce is just one area where Instagram can add more utility for its users.
+
+![Lots of the internet’s great resources were built off people seeking a hit of fame and recognition](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550965519436-0DHCHPKVNY6OR4TFNEJ1/social-capital-then-utility.png)
 
 **First social capital, then utility**
 
@@ -328,6 +334,8 @@ Foursquare was this for me. In the beginning, I checked in to try to win mayorsh
 
 IMDb, Wikipedia, Reddit, and Quora are more prominent examples here. Users come for the status, and help to build a tool for the commons.
 
+![Plenty of huge social apps are almost entirely utilitarian, but it’s a brutally competitive quadrant](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550965664284-M3AE9VBQPEP7STIP140S/utility-only.png)
+
 **Utility, but no social capital**
 
 Plenty of huge social apps are almost entirely utilitarian, but it’s a brutally competitive quadrant
@@ -337,6 +345,8 @@ Some companies manage to create utility for a network but never succeed at build
 Most messaging apps fall into this category. They help me to reach people I already know, but they don't introduce me to too many new people, and they aren't really status games with likes and follows. Skype, Zoom, FaceTime, Google Hangouts, Viber, and Marco Polo are examples of video chat apps that fit this category as well. While some messaging apps are trying to add features like Stories that start to veer into the more performative realm of traditional social media, I’m skeptical they’ll ever see traction doing so when compared to apps that are more pure Status as a Service apps like Instagram.
 
 This bottom right quadrant is home to some businesses with over a billion users, but in minimizing social capital and competing purely on utility-derived network effects, this tends to be a brutally competitive battleground where even the slimmest moat is fought for with blood and sweat, especially in the digital world where useful features are trivial to copy.
+
+![When a social network loses heat before it has built utility, the fall can come as quickly as the rise](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550965769901-G80OH0YELQFWEPNXESCC/social-capital-only.png)
 
 **Social capital, but little utility**
 
@@ -456,13 +466,13 @@ Remember Snapchat's original Best Friends list? I'm going to guess many of my re
 
 ![I’m glad this didn’t exist when I was in high school, I really didn’t need metrics on how much of a loser I was](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550959149363-SJ0KLMM2XCYZVC19LDJV/snapchat-best-friends-score-early.png)
 
-You don’t want to know what the proof of work is to achieve Super BFF-dom
+![You don’t want to know what the proof of work is to achieve Super BFF-dom](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550960253371-B2R5B3XXKESPUV56CB82/snapchat-friend-emojis.jpeg)
 
 As with aggregate follower counts and likes, the Best Friends list was a mechanism for people to accumulate a very specific form of social capital. From a platform perspective, however, there's a big problem with this feature: each user could only have one best friend. It put an artificial ceiling on the amount of social capital one could compete for and accumulate.
 
 In a clever move to unbound social capital accumulation and to turn a zero-sum game into a positive sum game, broadening the number of users working hard or engaging, Snapchat deprecated the very popular Best Friends list and replaced it with streaks.
 
-If you’ve never seen those numbers and emojis on the right of your Snapchat contacts list, no one loves you. Just kidding, it just means you’re old.
+![If you’ve never seen those numbers and emojis on the right of your Snapchat contacts list, no one loves you. Just kidding, it just means you’re old.](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550959682967-1I2WL8RYLEICRGSYWWF5/snapchat-streaks.png)
 
 If you and a friend Snap back and forth for consecutive days, you build up a streak which is tracked in your friends list. Young people quickly threw their heart and souls into building and maintaining streaks with their friends. This was literally proof of work as proof of friendship, quantified and tracked.
 
@@ -651,6 +661,8 @@ From a user perspective, people are starting to talk more and more about the sou
 This piece is not my contribution to the well-trod genre of Medium thinkpieces counseling stoicism and Buddhism or transcendental meditation or deleting apps off of your phone to find inner peace. There is wisdom in all of those, but if I have anything to offer on that front, it’s this: if you want control of your own happiness, don’t tie it to someone else’s scoreboard.
 
 Recall the wisdom of Neil McCauley in the great film [Heat](https://amzn.to/2Et2ORU).
+
+![To get off the hedonic treadmill, heed the words of Robert DeNiro’s Neil McCauley in that classic film about status, Heat, “Don't let yourself get attached to any social capital you are not willing to walk out on in 30 seconds flat if you feel the h…](https://images.squarespace-cdn.com/content/v1/4ff36e51e4b0d277e953e394/1550961067310-5TYR7PPXHSV090DQKNTQ/Neil_McCauley.jpg)
 
 To get off the hedonic treadmill, heed the words of Robert DeNiro’s Neil McCauley in that classic film about status, Heat, “Don't let yourself get attached to any social capital you are not willing to walk out on in 30 seconds flat if you feel the heat around the corner.”
 

@@ -2,6 +2,8 @@
 
 Tim Ferriss
 
+![](https://tim.blog/wp-content/uploads/2020/09/socialmedia_timFerriss_200114_005.jpg)
+
 My head has been spinning after getting a spreadsheet roughly a week ago.
 
 Before we dive into my dirty laundry, let’s state the obvious: millions of people have a vague sense that AI is changing things. And LLMs sure are convenient for getting answers quickly. My team and I use Claude and other tools daily.
@@ -34,11 +36,19 @@ There’s trouble in paradise:
 
 **Year-Over-Year**
 
+2022
+
 *baseline*
+
+2023
 
 -5%
 
+2024
+
 -13%
+
+2025
 
 **-46%**
 

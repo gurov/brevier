@@ -551,6 +551,9 @@ const IMAGE_SUFFIXES: &[&str] = &[
     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".svg", ".bmp",
 ];
 
+/// Сколько голых чисел отдельными строками означают нумерацию, а не счётчик.
+const NUMBERING_RUN: usize = 3;
+
 /// Единицы, которые превращают число в счётчик: просмотры и время чтения.
 const COUNTER_UNITS: &[&str] = &[
     "",
@@ -580,11 +583,21 @@ fn strip_chrome(md: &str) -> String {
     let mut lines: Vec<&str> = Vec::new();
     let mut in_code = false;
 
+    // Голое число отдельной строкой это обычно счётчик — просмотры, голоса.
+    // Но им же набирают нумерацию пунктов («01», «02», … у «Ководства»),
+    // и тогда число это текст. Различает не строка, а документ: счётчик
+    // на странице один-два, нумерация идёт чередой.
+    let numbering = md
+        .lines()
+        .filter(|line| is_bare_number(line.trim()))
+        .count()
+        >= NUMBERING_RUN;
+
     for line in md.lines() {
         if line.trim_start().starts_with("```") {
             in_code = !in_code;
         }
-        if in_code || !is_chrome(line) {
+        if in_code || !is_chrome(line, numbering) {
             lines.push(line);
         }
     }
@@ -598,7 +611,10 @@ fn strip_chrome(md: &str) -> String {
     tidy(&lines.join("\n"))
 }
 
-fn is_chrome(line: &str) -> bool {
+fn is_chrome(line: &str, numbering: bool) -> bool {
+    if numbering && is_bare_number(line.trim()) {
+        return false;
+    }
     let line = strip_leading_image(line.trim());
     let line = line.trim().trim_start_matches('#').trim();
     let line = line.trim_matches('*').trim();
@@ -634,6 +650,11 @@ fn strip_leading_image(line: &str) -> &str {
         Some((_, tail)) => tail,
         None => line,
     }
+}
+
+/// Строка из одних цифр и ничего больше.
+fn is_bare_number(line: &str) -> bool {
+    !line.is_empty() && line.chars().all(|c| c.is_ascii_digit())
 }
 
 /// «20», «6.9K», «5 мин» — число со счётчиковой единицей и ничего больше.
@@ -961,7 +982,7 @@ fn sole_link_target(text: &str) -> Option<&str> {
     Some(url)
 }
 
-fn points_at_image(url: &str) -> bool {
+pub(crate) fn points_at_image(url: &str) -> bool {
     let path = url.split(['?', '#']).next().unwrap_or(url).to_lowercase();
     IMAGE_SUFFIXES.iter().any(|ext| path.ends_with(ext))
 }
@@ -1171,16 +1192,72 @@ fn span_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResu
 ///
 /// Такие оставляют якоря заголовков (github, fasterthanli.me): `[](#why-rust)`.
 /// Нажать не на что, читать нечего.
+///
+/// Обратный случай — ссылка без адреса: текст у неё есть, и он часть статьи.
+/// htmd такую выбрасывает вместе с содержимым, а адрес снимаем мы сами
+/// (`extract::unpermalink` — постоянная ссылка на свой же абзац,
+/// `extract::notes` — ссылка внутрь страницы из тела сноски). Терять
+/// на этом текст нельзя: номер пункта у «Ководства» набран именно так.
 fn anchor_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
-    if handlers
-        .walk_children(element.node)
-        .content
-        .trim()
-        .is_empty()
-    {
+    let content = handlers.walk_children(element.node).content;
+    if content.trim().is_empty() {
         return None;
     }
+    let href = element
+        .attrs
+        .iter()
+        .find(|attr| &attr.name.local == "href")
+        .map(|attr| attr.value.to_string());
+    let Some(href) = href else {
+        return Some(content.into());
+    };
+    if content.trim().contains('\n') {
+        return Some(card_link(content.trim(), &href).into());
+    }
     handlers.fallback(element)
+}
+
+/// Ссылка, обнявшая целую карточку, — заголовок-ссылка плюс обычные блоки.
+///
+/// Плитка ленты верстается одной ссылкой вокруг всего: заголовок, картинка,
+/// подводка, кнопка «Play ›» (whitehouse.gov/arcade). Инлайновой разметкой
+/// markdown это не выразить, и htmd честно печатает `[## Заголовок …](адрес)` —
+/// а читателю такая строка приезжает как есть: `](https://…)` посреди текста.
+///
+/// Кладём адрес на первую строку карточки — на заголовок, если он есть, —
+/// а остальное оставляем блоками. Нажать есть на что, читать есть что,
+/// и ничего не потеряно.
+fn card_link(content: &str, href: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Адрес кладём на подпись, а не на миниатюру: нажимают по названию,
+    // а с выключенными картинками от строки-картинки остаётся рамка.
+    // Если подписи нет вовсе — на первое, что есть.
+    let target = lines
+        .iter()
+        .position(|line| !line.trim().is_empty() && !is_lone_image(line))
+        .or_else(|| lines.iter().position(|line| !line.trim().is_empty()));
+
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        if Some(i) != target {
+            out.push((*line).to_string());
+            continue;
+        }
+        let text = line.trim();
+        let hashes: String = text.chars().take_while(|c| *c == '#').collect();
+        let title = text[hashes.len()..].trim();
+        let space = if hashes.is_empty() { "" } else { " " };
+        out.push(format!("{hashes}{space}[{title}]({href})"));
+    }
+
+    format!("\n\n{}\n\n", out.join("\n").trim())
+}
+
+/// Строка, в которой нет ничего, кроме картинки.
+fn is_lone_image(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("![") && line.ends_with(')') && line.contains("](")
 }
 
 /// Распорка — не картинка.
@@ -1535,6 +1612,70 @@ mod tests {
     fn counters_and_button_labels_are_dropped() {
         let md = "# Статья\n\nАвтор\n\n5 мин\n\n6.9K\n\nПоделиться:\n\nТекст статьи.\n\n20\n";
         assert_eq!(strip_chrome(md), "# Статья\n\nАвтор\n\nТекст статьи.\n");
+    }
+
+    /// Череда голых чисел — это нумерация пунктов, а не счётчики
+    /// просмотров: так набрано «Ководство», и так же приезжает столбец
+    /// годов из расплющенной таблицы.
+    #[test]
+    fn a_run_of_bare_numbers_is_a_numbering() {
+        let md = "# Статья\n\n01\n\nПервый пункт.\n\n02\n\nВторой пункт.\n\n03\n\nТретий пункт.\n";
+        assert_eq!(strip_chrome(md), md.trim_end().to_string() + "\n");
+    }
+
+    /// А одинокое число так и остаётся счётчиком.
+    #[test]
+    fn a_lone_bare_number_is_still_a_counter() {
+        let md = "# Статья\n\nТекст статьи.\n\n20\n";
+        assert_eq!(strip_chrome(md), "# Статья\n\nТекст статьи.\n");
+    }
+
+    /// Ссылка, обнявшая карточку целиком, инлайновой разметкой не выражается:
+    /// htmd печатает `[## Заголовок …](адрес)`, и читателю это приезжает
+    /// как есть. Адрес кладём на подпись, остальное оставляем блоками.
+    #[test]
+    fn a_link_around_a_whole_card_becomes_a_linked_title() {
+        let html = "<ul><li><a href=\"https://e.com/game\"><h2>Flappy Bill</h2>\
+                    <p><img src=\"https://e.com/shot.png\" alt=\"Flappy Bill\"></p>\
+                    <p>Fly the bald eagle down the Mall.</p></a></li></ul>";
+        let md = from_html(html).unwrap();
+        assert!(md.contains("## [Flappy Bill](https://e.com/game)"), "{md}");
+        assert!(md.contains("Fly the bald eagle down the Mall."), "{md}");
+        // Хвост ссылки посреди текста — та самая поломка, ради которой
+        // правило и написано.
+        assert!(!md.lines().any(|line| line.starts_with("](")), "{md}");
+    }
+
+    /// Адрес достаётся подписи, а не миниатюре: нажимают по названию,
+    /// а с выключенными картинками от строки-картинки остаётся рамка.
+    #[test]
+    fn a_card_links_its_caption_and_not_its_thumbnail() {
+        let html = "<a href=\"https://e.com/one\"><p><img src=\"https://e.com/a.jpg\" alt=\"\"></p>\
+                    <p>Подводка записи.</p></a>";
+        let md = from_html(html).unwrap();
+        assert!(md.contains("![](https://e.com/a.jpg)"), "{md}");
+        assert!(md.contains("[Подводка записи.](https://e.com/one)"), "{md}");
+    }
+
+    /// А если в карточке нет ничего, кроме миниатюры, адрес достаётся ей:
+    /// иначе нажать было бы не на что.
+    #[test]
+    fn a_card_of_one_picture_links_the_picture() {
+        let html = "<a href=\"https://e.com/one\"><p><img src=\"https://e.com/a.jpg\" alt=\"\"></p>\
+                    <p><img src=\"https://e.com/b.jpg\" alt=\"\"></p></a>";
+        let md = from_html(html).unwrap();
+        assert!(
+            md.contains("[![](https://e.com/a.jpg)](https://e.com/one)"),
+            "{md}"
+        );
+    }
+
+    /// Ссылка без адреса — это текст: адрес с неё снимает ядро
+    /// (постоянная ссылка на свой же абзац), и терять на этом слова нельзя.
+    #[test]
+    fn an_anchor_without_an_address_keeps_its_text() {
+        let md = from_html("<p>номер <a>01</a> пункта</p>").unwrap();
+        assert_eq!(md, "номер 01 пункта\n");
     }
 
     #[test]

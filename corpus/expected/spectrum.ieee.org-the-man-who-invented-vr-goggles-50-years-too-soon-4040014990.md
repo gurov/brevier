@@ -2,6 +2,8 @@
 
 Evan Ackerman
 
+![](https://spectrum.ieee.org/media-library/photo-of-hugo-gernsback.jpg?id=25582019&width=1200&height=600&coordinates=0%2C77%2C0%2C78)
+
 **[Science fiction](https://spectrum.ieee.org/tag/science-fiction) as we know it** would not exist without Hugo Gernsback. He coined the term “science fiction” as the editor and publisher of *Amazing Stories*, the first magazine devoted to the burgeoning genre, which he launched in 1926. The [Hugo Awards](https://www.thehugoawards.org/) for science fiction and fantasy are named after him.
 
 Gernsback was also an [inventor](https://laughingsquid.com/the-isolator-a-bizarre-helmet-invented-in-1925-used-to-help-increase-focus-and-concentration/) whose many ideas included a “[combined electric hair brush and comb](https://patft.uspto.gov/netacgi/nph-Parser?Sect2=PTO1&Sect2=HITOFF&p=1&u=/netahtml/PTO/search-bool.html&r=1&f=G&l=50&d=PALL&RefSrch=yes&Query=PN/1016138),” a [battery-powered handheld illuminated mirror](https://patft.uspto.gov/netacgi/nph-Parser?Sect2=PTO1&Sect2=HITOFF&p=1&u=/netahtml/PTO/search-bool.html&r=1&f=G&l=50&d=PALL&RefSrch=yes&Query=PN/1057820), and a [wax-impregnated fabric strip](https://patft.uspto.gov/netacgi/nph-Parser?Sect2=PTO1&Sect2=HITOFF&p=1&u=/netahtml/PTO/search-bool.html&r=1&f=G&l=50&d=PALL&RefSrch=yes&Query=PN/1620539) for removing excess hair. But his most arresting invention was probably his television eyeglasses \[above\]. A [*Life* magazine profile of Gernsback](https://books.google.com/books?id=JlIEAAAAMBAJ&lpg=PA62&dq=the%20amazing%20hugo%20gernsback%2C%20prophet%20of%20science&pg=PA68#v=onepage&q=the%20amazing%20hugo%20gernsback,%20prophet%20of%20science&f=false) in July 1963, when he was 78, described his “teleyeglasses”:

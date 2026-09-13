@@ -28,6 +28,11 @@ Summary:  Jakob Nielsen's 10 general principles for interaction design. They ar
 
 When users know the current system status, they learn the outcome of their prior interactions and determine next steps. Predictable interactions create trust in the product as well as the brand.
 
+![Usability Heuristic #1: Man beside “You Are Here” indicators on a mall maps to show him where he currently is.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-1-rbg-73.png)
+
+***Example of Usability Heuristic #1:***
+ You Are Here *indicators on mall maps show people where they currently are, to help them understand where to go next.*
+
 ## 2: Match Between the System and the Real World
 
 **The design should speak the users' language. Use words, phrases, and concepts familiar to the user, rather than internal jargon. Follow real-world conventions, making information appear in a natural and logical order.**
@@ -36,11 +41,21 @@ The way you should design depends very much on your specific users. Terms, conce
 
 When a design’s controls follow real-world conventions and correspond to desired outcomes (called [natural mapping](https://www.nngroup.com/articles/natural-mappings/)), it’s easier for users to learn and remember how the interface works. This helps to build an experience that feels intuitive.
 
+![Usability Heuristic #2: A stovetop that has controls that match the layout of the heating elements.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-74.png)
+
+***Example of Usability Heuristic #2:***
+ *When stovetop controls match the layout of heating elements, users can quickly understand which control maps to which heating element.*
+
 ## 3: User Control and Freedom
 
 **Users often perform actions by mistake. They need a clearly marked "emergency exit" to leave the unwanted action without having to go through an extended process.**
 
 When it's easy for people to back out of a process or undo an action, it fosters a sense of freedom and confidence. Exits allow users to remain in control of the system and avoid getting stuck and feeling frustrated.
+
+![Usability Heuristic #3: A door with a light-up emergency exit above it.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-75.png)
+
+***Example of Usability Heuristic #3:***
+ *Digital spaces need quick emergency exits, just like physical spaces do.*
 
 ## 4: Consistency and Standards
 
@@ -48,11 +63,21 @@ When it's easy for people to back out of a process or undo an action, it fosters
 
 [Jakob's Law](https://www.nngroup.com/videos/jakobs-law-internet-ux/) states that people spend most of their time using digital products *other than yours*. Users’ experiences with those other products set their expectations. Failing to maintain consistency may increase the users' [cognitive load](https://www.nngroup.com/articles/minimize-cognitive-load/) by forcing them to learn something new.
 
+![Usability Heuristic #4: A hotel check-in counter at that is always located at the front of a hotel.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-76.png)
+
+***Example of Usability Heuristic #4:***
+ *Checkin counters are usually located at the front of hotels. This consistency meets customers’ expectations.*
+
 ## 5: Error Prevention
 
 **Good error messages are important, but the best designs carefully prevent problems from occurring in the first place. Either eliminate error-prone conditions, or check for them and present users with a confirmation option before they commit to the action.**
 
 There are two types of errors: [slips and mistakes](https://www.nngroup.com/videos/slips-vs-mistakes/). Slips are unconscious errors caused by inattention. Mistakes are conscious errors based on a mismatch between the user’s mental model and the design.
+
+![Usability Heuristic #5: A highway that has guard rails so a driver can't drive off the side.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-77.png)
+
+***Example of Usability Heuristic #5:***
+ ​​​​*Guard rails on curvy mountain roads prevent drivers from falling off cliffs.*
 
 ## 6: Recognition Rather than Recall
 
@@ -82,11 +107,21 @@ Humans have limited short-term [memories](https://www.nngroup.com/articles/worki
 
 Flexible processes can be carried out in different ways, so that people can pick whichever method works for them.
 
+![Usability Heuristic #7: A picture of a map with 2 routes. The first is a regular route, the second is a shortcut.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-79.png)
+
+***Example of Usability Heuristic #7:***
+ *Regular routes are listed on maps, but locals with knowledge of the area can take shortcuts.*
+
 ## 8: Aesthetic and Minimalist Design
 
 **Interfaces should not contain information that is irrelevant or rarely needed. Every extra unit of information in an interface competes with the relevant units of information and diminishes their relative visibility.**
 
 This heuristic doesn't mean you have to use a [flat design](https://www.nngroup.com/articles/flat-design/) — it's about making sure you're keeping the content and visual design focused on the essentials. Ensure that the visual elements of the interface support the user's primary goals.
+
+![Usability Heuristic #8: Two teapots side by side. One basic and straightforward, the other ornate with a fancy handle and curvy spout.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-80.png)
+
+***Example of Usability Heuristic #8:***
+ ​​​​​​*An ornate teapot may have excessive decorative elements, like an uncomfortable handle or hard-to-wash nozzle, that can interfere with usability.*
 
 ## 9: Help Users Recognize, Diagnose, and Recover from Errors
 
@@ -94,15 +129,29 @@ This heuristic doesn't mean you have to use a [flat design](https://www.nngroup.
 
 These error messages should also be presented with visual treatments that will help users notice and recognize them.
 
+![Usability Heuristic #9: A picture of a road with a wrong way sign to the right that would warn drivers not to enter.](https://media.nngroup.com/media/editor/2020/11/05/heuristic-example-81.png)
+
+***Example of Usability Heuristic #9:***
+ Wrong way *signs on the road remind drivers that they are heading in the wrong direction and ask them to stop.*
+
 ## 10: Help and Documentation
 
 **It’s best if the system doesn’t need any additional explanation. However, it may be necessary to provide documentation to help users understand how to complete their tasks.**
 
 Help and documentation content should be easy to search and focused on the user's task. Keep it concise, and list concrete steps that need to be carried out.
 
+![Usability Heuristic #10: A woman at an airport klosk.](https://media.nngroup.com/media/editor/2020/11/06/heuristic-example-73-82.png)
+
+***Example of Usability Heuristic #10:***
+ *Information kiosks at airports are easily recognizable and solve customers’ problems in context and immediately.*
+
 ## Free 10 Heuristics Poster
 
 Download a [free summary poster](#poster) or [10 detailed posters](https://media.nngroup.com/media/articles/attachments/Jakob's10UsabilityHeuristics_AllPosters_5.zip) of the 10 Usability Heuristics, designed by [Kelley Gordon](https://www.nngroup.com/people/kelley-gordon/), [Kate Moran](https://www.nngroup.com/people/kate-moran/), and [Feifei Liu](https://www.nngroup.com/people/feifei-liu/).
+
+![Jakob's 10 Usability Heuristic Posters Hung on a Wall](https://media.nngroup.com/media/editor/2020/11/09/_dsc8383.png)
+
+Download and print our [free usability heuristic posters](https://media.nngroup.com/media/articles/attachments/Jakob's10UsabilityHeuristics_AllPosters_5.zip). Hang them at home, in your office, or gift them to a colleague.
 
 ### Note from Jakob
 

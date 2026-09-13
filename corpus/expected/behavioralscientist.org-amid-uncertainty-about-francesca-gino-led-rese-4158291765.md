@@ -2,6 +2,8 @@
 
 Evan Nesterak
 
+![](https://behavioralscientistorg.b-cdn.net/wp-content/uploads/2023/08/mca1-1.png)
+
 When the dust finally settled on the Diederik Stapel case in 2012, the investigating committee had reviewed all 137 of the social psychologist’s publications, finding fraud in 55 of them, indications of misconduct in 10 more, and that 10 dissertations he supervised contained fraudulent data he provided. In two of the dissertations, every chapter of the student’s work was based on data that Stapel had simply made up.
 
 In their [report](https://www.tilburguniversity.edu/sites/default/files/download/Final%20report%20Flawed%20Science_2.pdf), the committee noted two primary motivations for such an extensive review: correcting the scientific record, and protecting innocent scientists, especially those early in their careers.

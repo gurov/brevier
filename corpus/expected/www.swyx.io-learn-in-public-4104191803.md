@@ -2,6 +2,8 @@
 
 Shawn Wang
 
+![Public notebook card for Learn In Public](https://swyx.io/og/article/learn-in-public.png?v=2026-04-29T17%3A52%3A51.000Z-1)
+
 [← All writing](https://swyx.io/ideas)
 
 The fastest way to learn

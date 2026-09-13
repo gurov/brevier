@@ -2,6 +2,8 @@
 
 Antonio Regalado
 
+![](https://wp.technologyreview.com/wp-content/uploads/2026/08/733-MITtech-Ryan-RTF-0318.jpg?resize=1200,600)
+
 Yuancheng (Ryan) Lu is obsessed with aging. And with eyes. As he steps outside the Whitehead Institute in Cambridge, Massachusetts, his aviator glasses darken automatically in the sun. Age-related blindness runs in his family. A great-aunt in China, the story goes, was killed crossing a road because she couldn’t see oncoming traffic. And Lu’s own 23andMe test came back with a mutation for macular degeneration, a top cause of vision loss in old age. Exposure to bright sunlight is another risk factor—thus the shades. “They protect me,” he says. “Plus, they look cool.”
 
 Lu, 34, works on gene therapies to prevent age-related vision loss. “I think the eye is a really unique system to study aging and rejuvenation,” he says. “I could give a whole presentation.” Pushing up my reading glasses, I lean in to listen.

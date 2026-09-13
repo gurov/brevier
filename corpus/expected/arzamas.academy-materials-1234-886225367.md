@@ -4,85 +4,85 @@ Author Galina Yelshevskaya
 
 Материалы
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1237/preview_square_preview_picture-d37678c8-9f1c-430a-b2de-c8a7b8d2ab7f.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1237/preview_square_preview_picture-d37678c8-9f1c-430a-b2de-c8a7b8d2ab7f.jpg)
 
-Action Art: Performances, Actions, Happenings](https://arzamas.academy/materials/1237)
+[Action Art: Performances, Actions, Happenings](https://arzamas.academy/materials/1237)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1236/preview_square_preview_picture-062ee7ff-5abd-4c50-a339-088839ccc9c9.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1236/preview_square_preview_picture-062ee7ff-5abd-4c50-a339-088839ccc9c9.jpg)
 
-Objects, Installations and Ready-Mades](https://arzamas.academy/materials/1236)
+[Objects, Installations and Ready-Mades](https://arzamas.academy/materials/1236)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1235/preview_square_preview_picture-68c897ef-4ff6-45ca-a626-7a296c9069f2.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1235/preview_square_preview_picture-68c897ef-4ff6-45ca-a626-7a296c9069f2.jpg)
 
-Conceptualism and Sots Art](https://arzamas.academy/materials/1235)
+[Conceptualism and Sots Art](https://arzamas.academy/materials/1235)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1234/preview_square_preview_picture-795b3ae7-92db-4b7d-b7af-66f70f4734cc.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1234/preview_square_preview_picture-795b3ae7-92db-4b7d-b7af-66f70f4734cc.jpg)
 
-The Thaw and the 1960s. The Birth of the Underground](https://arzamas.academy/materials/1234)
+[The Thaw and the 1960s. The Birth of the Underground](https://arzamas.academy/materials/1234)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1233/preview_square_preview_picture-7042ee6a-75f8-45b6-a4d8-9f87bb6334e4.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1233/preview_square_preview_picture-7042ee6a-75f8-45b6-a4d8-9f87bb6334e4.jpg)
 
-Socialist Realism](https://arzamas.academy/materials/1233)
+[Socialist Realism](https://arzamas.academy/materials/1233)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1232/preview_square_preview_picture-2f343eeb-6fae-405e-b73b-ff97d426df2e.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1232/preview_square_preview_picture-2f343eeb-6fae-405e-b73b-ff97d426df2e.jpg)
 
-Artistic Life in the Soviet Union after the October Revolution of 1917](https://arzamas.academy/materials/1232)
+[Artistic Life in the Soviet Union after the October Revolution of 1917](https://arzamas.academy/materials/1232)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1231/preview_square_preview_picture-ed760f1e-6586-47ef-8073-1ab64dcce7f0.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1231/preview_square_preview_picture-ed760f1e-6586-47ef-8073-1ab64dcce7f0.jpg)
 
-Russian Avant-Garde](https://arzamas.academy/materials/1231)
+[Russian Avant-Garde](https://arzamas.academy/materials/1231)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1230/preview_square_preview_picture-39e68a31-51c6-4ea6-bbcd-cced7f512896.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1230/preview_square_preview_picture-39e68a31-51c6-4ea6-bbcd-cced7f512896.jpg)
 
-Russian Modern](https://arzamas.academy/materials/1230)
+[Russian Modern](https://arzamas.academy/materials/1230)
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1208/preview_square_preview_picture-43fcfd1c-99ef-482f-8d8f-bec63d38b9fc.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1208/preview_square_preview_picture-43fcfd1c-99ef-482f-8d8f-bec63d38b9fc.jpg)
 
-Акции, перформансы, хеппенинги
+[Акции, перформансы, хеппенинги](https://arzamas.academy/materials/1208)
 
-Искусство действия от футуристов до Павленского](https://arzamas.academy/materials/1208)
+Искусство действия от футуристов до Павленского
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1207/preview_square_preview_picture-ed2123f0-b2a2-4cf3-b821-546b96bf5c2b.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1207/preview_square_preview_picture-ed2123f0-b2a2-4cf3-b821-546b96bf5c2b.jpg)
 
-Объекты, инсталляции, реди-мейды
+[Объекты, инсталляции, реди-мейды](https://arzamas.academy/materials/1207)
 
-Почему искусством стали кучи мусора и меховые чашки](https://arzamas.academy/materials/1207)
+Почему искусством стали кучи мусора и меховые чашки
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1206/preview_square_preview_picture-dcafe769-a63e-469e-84b8-4397a34e5b44.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1206/preview_square_preview_picture-dcafe769-a63e-469e-84b8-4397a34e5b44.jpg)
 
-Концептуализм и соц‑арт
+[Концептуализм и соц‑арт](https://arzamas.academy/materials/1206)
 
-Всё про Илью Кабакова, Эрика Булатова и Комара с Меламидом](https://arzamas.academy/materials/1206)
+Всё про Илью Кабакова, Эрика Булатова и Комара с Меламидом
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1205/preview_square_preview_picture-f368ae8f-9743-413e-beed-418c826904d4.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1205/preview_square_preview_picture-f368ae8f-9743-413e-beed-418c826904d4.jpg)
 
-Оттепель и шестидесятые: рождение андеграунда
+[Оттепель и шестидесятые: рождение андеграунда](https://arzamas.academy/materials/1205)
 
-Как Хрущев дал жизнь неофициальному искусству](https://arzamas.academy/materials/1205)
+Как Хрущев дал жизнь неофициальному искусству
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1204/preview_square_preview_picture-a2879bff-42c7-446e-a75a-fde9e4e3a18e.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1204/preview_square_preview_picture-a2879bff-42c7-446e-a75a-fde9e4e3a18e.jpg)
 
-Соцреализм
+[Соцреализм](https://arzamas.academy/materials/1204)
 
-Какой стиль живописи создал Сталин](https://arzamas.academy/materials/1204)
+Какой стиль живописи создал Сталин
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1203/preview_square_preview_picture-feb95229-2d34-4a10-9f2a-c2180e31b0f5.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1203/preview_square_preview_picture-feb95229-2d34-4a10-9f2a-c2180e31b0f5.jpg)
 
-Искусство после революции: художник и власть
+[Искусство после революции: художник и власть](https://arzamas.academy/materials/1203)
 
-Как и когда появилось новое советское искусство](https://arzamas.academy/materials/1203)
+Как и когда появилось новое советское искусство
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1202/preview_square_preview_picture-1c0600eb-b7ed-49f9-8c1e-b606f552fbbb.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1202/preview_square_preview_picture-1c0600eb-b7ed-49f9-8c1e-b606f552fbbb.jpg)
 
-Русский авангард
+[Русский авангард](https://arzamas.academy/materials/1202)
 
-Что придумали Малевич, Кандинский, Татлин и «бубновые валеты»](https://arzamas.academy/materials/1202)
+Что придумали Малевич, Кандинский, Татлин и «бубновые валеты»
 
-[![](https://cdn-s-static.arzamas.academy/storage/material/1201/preview_square_preview_picture-f52b3aa4-c5d1-4d48-aa60-05edbfa13c02.jpg)
+![](https://cdn-s-static.arzamas.academy/storage/material/1201/preview_square_preview_picture-f52b3aa4-c5d1-4d48-aa60-05edbfa13c02.jpg)
 
-Русский модерн
+[Русский модерн](https://arzamas.academy/materials/1201)
 
-Как Дягилев, Бенуа и Бакст изменили русскую действительность](https://arzamas.academy/materials/1201)
+Как Дягилев, Бенуа и Бакст изменили русскую действительность
 
 How Khrushchev initially gave a breathing space to unofficial art and then personally drove it underground – and what that underground involved
 
@@ -244,23 +244,23 @@ The Conceptualists, on the other hand, sought no truth, and any claim to possess
 
 Despite the apparent opposition, the different conceptualism groups had much in common. It was Boris Groys’ seminal article *Moscow Romantic Conceptualism*, published in 1979, that pointed out the impossibility of creating an abstract painting in Russia without referencing the New Testament’s Light of Mount Tabor. And these metaphysical elements, such as alluding to emptiness, blankness and the *Tao*, would be very important for many conceptualists. We will discuss this in the next chapter.
 
-[Crash Course #1
+[Crash Course #1](https://arzamas.academy/likbez/russian-art-xx/en)
 
-Russian Art in the 20th Century](https://arzamas.academy/likbez/russian-art-xx/en)
+Russian Art in the 20th Century
 
 Lecture 5 of 8
 
-[Crash Course #1
+[Crash Course #1](https://arzamas.academy/likbez/russian-art-xx/en)
 
-Russian Art in the 20th Century](https://arzamas.academy/likbez/russian-art-xx/en)
+Russian Art in the 20th Century
 
-- [Предыдущий материал
+- [Предыдущий материал](https://arzamas.academy/materials/1235)
 
-  Conceptualism and Sots Art](https://arzamas.academy/materials/1235)
+  Conceptualism and Sots Art
 
-- [Следующий материал
+- [Следующий материал](https://arzamas.academy/materials/1233)
 
-  Socialist Realism](https://arzamas.academy/materials/1233)
+  Socialist Realism
 
 Хотите быть в курсе всего?
 

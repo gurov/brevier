@@ -2,6 +2,8 @@
 
 By Viola Zhou
 
+![A crowd of wooden mannequins seated at screens, creating a pattern with a digital glitch effect in the background](https://restofworld.org/wp-content/uploads/2026/09/illo_ai_pro_clones_sketch-1600x900.jpg)
+
 As a Shenzhen-based architect in her 40s, Cuicui has vast experience designing public stadiums, schools, and hospitals at an architecture firm. But over the past five years, declining government infrastructure spending caused a sharp drop in business. Her income halved.
 
 To keep paying her mortgage and cover her child’s extracurricular fees, Cuicui became a specialized AI trainer. At the end of her regular workday, she would log on to a data annotation platform called TalentsAI, and give an AI model step-by-step instructions on how to write up a building proposal or run profitability analyses.

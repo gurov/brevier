@@ -160,6 +160,13 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         content_html
     };
 
+    // Заглавная картинка — последней добавкой и только в статью без единой
+    // своей: в ленте карточки несут миниатюры сами.
+    let content_html = match &listing_html {
+        Some(_) => content_html,
+        None => with_cover(&source, content_html, url),
+    };
+
     // Сноски снимаем последними: к этому времени статья собрана целиком,
     // вместе с вернувшейся прозой, и ссылка со своей целью наконец лежат
     // в одном дереве.
@@ -405,18 +412,27 @@ fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<
         .filter_map(head_key)
         .collect();
 
-    let page: Vec<(NodeRef, Piece)> = source
-        .select(&format!("p, {HEAD_TAGS}"))
+    // Картинки статьи — по адресу: тем же ключом узнаётся потерянная.
+    let root = Url::parse(base).ok();
+    let mut shown: HashSet<String> = article
+        .select("img")
         .nodes()
         .iter()
-        .filter_map(|node| piece_of(node).map(|piece| (*node, piece)))
+        .filter_map(|node| shot_key(node, root.as_ref()))
+        .collect();
+
+    let page: Vec<(NodeRef, Piece)> = source
+        .select(&format!("p, img, {HEAD_TAGS}"))
+        .nodes()
+        .iter()
+        .filter_map(|node| piece_of(node, root.as_ref()).map(|piece| (*node, piece)))
         .collect();
 
     // Границы считаем по абзацам, как и считали: заголовок в шапке страницы
     // или в подвале границей статьи не является.
     let inside_article = |piece: &Piece| match piece {
         Piece::Para(key, _) => places.contains_key(key),
-        Piece::Head(_) => false,
+        Piece::Head(_) | Piece::Shot(_) => false,
     };
     let first = page.iter().position(|(_, piece)| inside_article(piece))?;
     let last = page.iter().rposition(|(_, piece)| inside_article(piece))?;
@@ -442,6 +458,21 @@ fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<
                 {
                     pending.push(fragment(&node.html(), base));
                     restored += 1;
+                }
+                continue;
+            }
+            // Иллюстрация, выпавшая внутри статьи, возвращается тем же
+            // приёмом, что и проза. Теряется она у Readability регулярно:
+            // галерея ixbt лежит в своём `<div>` без текста, и правило
+            // про долю ссылок выносит её целиком. Вместе с картинкой
+            // поднимаем её `<figure>` — там подпись.
+            Piece::Shot(src) => {
+                if worth_shot(node) && shown.insert(src.clone()) {
+                    let block = lost_shot(node);
+                    if blocks.insert(block.id) {
+                        pending.push(fragment(&block.html(), base));
+                        restored += 1;
+                    }
                 }
                 continue;
             }
@@ -557,14 +588,35 @@ fn place_after<'a>(anchor: &NodeRef<'a>) -> NodeRef<'a> {
 enum Piece {
     Para(String, usize),
     Head(String),
+    Shot(String),
 }
 
-fn piece_of(node: &NodeRef) -> Option<Piece> {
+fn piece_of(node: &NodeRef, base: Option<&Url>) -> Option<Piece> {
     let name = node.node_name()?;
     if name.as_ref() == "p" {
         return para_key(node).map(|(key, words)| Piece::Para(key, words));
     }
+    if name.as_ref() == "img" {
+        return shot_key(node, base).map(Piece::Shot);
+    }
     head_key(node).map(Piece::Head)
+}
+
+/// Чем узнаётся картинка — своим адресом. К этому времени ложную
+/// ленивость уже снял `unlazy`, поэтому в `src` стоит то же, что увидит
+/// читатель.
+///
+/// Адрес приводим к абсолютному: в извлечённом его уже развернул
+/// `Readability`, а на странице он лежит как написан. Сверяя как есть,
+/// мы не узнавали в относительном `threads.svg` ту самую картинку,
+/// которая в статье уже стоит, и возвращали её вторым экземпляром.
+fn shot_key(node: &NodeRef, base: Option<&Url>) -> Option<String> {
+    let src = node.attr("src")?;
+    let src = src.trim();
+    if src.is_empty() || src.starts_with("data:") {
+        return None;
+    }
+    Some(absolute(base, src).unwrap_or_else(|| src.to_string()))
 }
 
 fn head_key(node: &NodeRef) -> Option<String> {
@@ -597,6 +649,43 @@ fn unpermalink(doc: &Document) {
             node.remove_from_parent();
         }
     }
+
+    // Тот же жест, набранный иначе: ссылка на блок, внутри которого она
+    // же и лежит. Номер пункта у «Ководства» (`<a href="#01">01</a>`
+    // внутри `<div id="01">`), номер примечания у bizibah. Адрес такой
+    // ссылки ведёт в то место, где читатель уже стоит, — снимаем адрес,
+    // но оставляем текст: номер пункта это часть текста, по нему на него
+    // и ссылаются.
+    for link in doc.select("a[href^='#']").nodes() {
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
+        let Some(id) = href.strip_prefix('#') else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
+        let self_link = link
+            .ancestors_it(None)
+            .any(|up| up.attr("id").is_some_and(|own| own.as_ref() == id));
+        if !self_link {
+            continue;
+        }
+        // Если текст ссылки — сам якорь, набранный якорем («#section2»
+        // у alistapart), читать в нём нечего: это тот же значок «дай ссылку
+        // на раздел», только словами. Решётка тут и есть признак: без неё
+        // совпадение текста с якорем значит обратное — так набран сам
+        // заголовок (`<h2 id="rust-analyzer"><a href="#rust-analyzer">
+        // rust-analyzer</a></h2>` у matklad), и выбросить его значит
+        // потерять раздел.
+        let text = squeeze(&link.text());
+        if text.strip_prefix('#') == Some(id) {
+            link.remove_from_parent();
+        } else {
+            link.remove_attr("href");
+        }
+    }
 }
 
 /// Стоит ли возвращать выпавший заголовок.
@@ -622,6 +711,129 @@ fn worth_heading(node: &NodeRef, text: &str, title: &str) -> bool {
         up.node_name()
             .is_some_and(|name| ASIDE_TAGS.contains(&name.as_ref()) || name.as_ref() == "table")
     })
+}
+
+/// Стоит ли возвращать выпавшую картинку.
+///
+/// Значок сюда не попадёт — его снял `deicon` до извлечения, — но проверку
+/// повторяем: она дешёвая, а мелкая картинка в обвязке бывает и без ссылки.
+/// Остальное решают границы статьи и место: картинка в шапке, в подвале,
+/// в боковой колонке или в таблице иллюстрацией не является.
+fn worth_shot(node: &NodeRef) -> bool {
+    if is_icon(node) {
+        return false;
+    }
+    // `figure` из списка обвязки здесь исключён намеренно: для прозы
+    // врезка это обвязка, а для картинки `<figure>` — родное место.
+    let chrome = node.ancestors_it(None).any(|up| {
+        up.node_name().is_some_and(|name| {
+            let name = name.as_ref();
+            (ASIDE_TAGS.contains(&name) && name != "figure") || name == "table"
+        })
+    });
+    if chrome {
+        return false;
+    }
+    // Картинка в ссылке бывает двух разных вещей. Ссылка на файл картинки —
+    // это «открыть в полном размере», нормальная часть статьи. Ссылка
+    // на страницу — это анонс, карточка «читайте ещё», и возвращать её
+    // значит тащить в статью чужие заголовки.
+    node.ancestors_it(None)
+        .filter(|up| up.node_name().as_deref() == Some("a"))
+        .all(|link| {
+            link.attr("href")
+                .is_some_and(|href| crate::markdown::points_at_image(&href))
+        })
+}
+
+/// Заглавная картинка статьи — та, которую страница объявила своей.
+///
+/// Иллюстрация лида доезжает до читателя не всегда: у panorama.pub она
+/// вовсе не картинка, а фон блока (`data-bg-image-jpeg`), и `<img>` для
+/// неё на странице нет ни одного. Разбирать чужой CSS мы не станем, но
+/// то же самое страница объявляет о себе стандартом — Open Graph, той
+/// самой карточкой, которую показывают мессенджеры.
+///
+/// Правило узкое с двух сторон: страница объявила себя статьёй
+/// (`og:type`), и в статье не нашлось **ни одной** своей картинки —
+/// иначе заглавная приехала бы вторым экземпляром того, что уже стоит
+/// первым абзацем. Цена записана честно: у личного блога в этой карточке
+/// лежит портрет автора (nav.al, joelonsoftware), и он встанет над
+/// статьёй. Замер по корпусу 13 сентября 2026: тринадцать страниц без
+/// картинки объявляют себя статьёй, у одиннадцати в карточке настоящая
+/// иллюстрация, у двух — портрет.
+fn with_cover(source: &Document, content_html: String, url: &str) -> String {
+    let meta = |selector: &str| -> Option<String> {
+        source
+            .select(selector)
+            .nodes()
+            .first()
+            .and_then(|node| node.attr("content"))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+
+    let article = meta("meta[property='og:type']").is_some_and(|kind| kind == "article");
+    if !article {
+        return content_html;
+    }
+
+    let content = Document::from(content_html.clone());
+    if content.select("img").nodes().iter().any(has_source) {
+        return content_html;
+    }
+
+    let Some(cover) =
+        meta("meta[property='og:image']").or_else(|| meta("meta[name='twitter:image']"))
+    else {
+        return content_html;
+    };
+    let Some(cover) = absolute(Url::parse(url).ok().as_ref(), &cover) else {
+        return content_html;
+    };
+    let alt = meta("meta[property='og:image:alt']").unwrap_or_default();
+
+    let image = format!(
+        "<p><img src=\"{}\" alt=\"{}\"></p>",
+        escape(&cover),
+        escape(&alt)
+    );
+    match content.select("#readability-page-1").nodes().first() {
+        Some(node) => {
+            node.prepend_html(image);
+            node.html().to_string()
+        }
+        None => format!("{image}{content_html}"),
+    }
+}
+
+fn has_source(node: &NodeRef) -> bool {
+    node.attr("src")
+        .is_some_and(|src| !src.trim().is_empty() && !src.trim().starts_with("data:"))
+}
+
+fn escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+}
+
+/// Что вернуть вместе с картинкой: её `<figure>`, если он есть, — там
+/// подпись и ссылка «открыть в полном размере». Иначе саму картинку.
+fn lost_shot<'a>(image: &NodeRef<'a>) -> NodeRef<'a> {
+    const WRAPPERS: [&str; 2] = ["figure", "picture"];
+
+    let mut block = *image;
+    for up in image.ancestors_it(Some(3)) {
+        if up
+            .node_name()
+            .is_some_and(|name| WRAPPERS.contains(&name.as_ref()))
+        {
+            block = up;
+        }
+    }
+    block
 }
 
 fn para_key(node: &NodeRef) -> Option<(String, usize)> {
@@ -986,7 +1198,16 @@ fn notes(doc: &Document) -> Notes {
         let Some(id) = href.strip_prefix('#') else {
             continue;
         };
-        if !is_note_mark(&squeeze(&link.text())) || !blocks.contains_key(id) {
+        if !is_note_mark(&squeeze(&link.text())) {
+            continue;
+        }
+        let Some(body) = blocks.get(id) else { continue };
+        // Метка сноски стоит в тексте, а тело — в стороне. Ссылка,
+        // лежащая внутри того блока, на который она же и показывает, —
+        // это постоянная ссылка на абзац («дай ссылку на этот пункт»),
+        // и таким набран весь «Ководство» и разметка примечаний bizibah.
+        // Не отличив одно от другого, мы уносили в сноски саму статью.
+        if inside(link, body) {
             continue;
         }
         let id = id.to_owned();
@@ -1543,5 +1764,134 @@ mod tests {
                 .content_html
                 .contains("upload.example.org/commons/portrait.jpg")
         );
+    }
+
+    /// Ссылка на абзац, внутри которого она же и лежит, — постоянная
+    /// ссылка, а не метка сноски. Не отличив, мы уносили в сноски саму
+    /// статью: так набрано «Ководство» и примечания bizibah.
+    #[test]
+    fn a_permalink_to_its_own_block_is_not_a_footnote() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article><h1>Эрроу</h1>             <div id=\"01\"><div><a href=\"#01\">01</a></div><p>{text}</p></div>             <div id=\"02\"><div><a href=\"#02\">02</a></div><p>{text}</p></div>             <div id=\"03\"><div><a href=\"#03\">03</a></div><p>{text}</p></div>             </article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/kovodstvo/188/").unwrap();
+        assert!(
+            article.notes.bodies.is_empty(),
+            "сноски: {:?}",
+            article.notes
+        );
+        assert!(article.content_html.contains("Кеннет Эрроу"));
+        // Адрес у такой ссылки ведёт туда, где читатель уже стоит: снимаем
+        // его, но номер пункта оставляем текстом.
+        assert!(!article.content_html.contains("href=\"#01\""));
+        assert!(article.content_html.contains("01"));
+    }
+
+    /// А заголовок, который сам себе ссылка, теряет только адрес: выбросить
+    /// его целиком значит потерять раздел (matklad). Исключение — текст,
+    /// набранный якорем («#section2» у alistapart): там читать нечего.
+    #[test]
+    fn a_self_linked_heading_keeps_its_text() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article><h1>Эрроу</h1><p>{text}</p>             <h2 id=\"rust-analyzer\"><a href=\"#rust-analyzer\">rust-analyzer</a></h2><p>{text}</p>             <h2 id=\"section2\">Как считают<a href=\"#section2\">#section2</a></h2><p>{text}</p>             </article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/post").unwrap();
+        assert!(article.content_html.contains("rust-analyzer"));
+        assert!(article.content_html.contains("Как считают"));
+        assert!(!article.content_html.contains("#section2"));
+    }
+
+    /// Иллюстрация, выпавшая внутри статьи, возвращается тем же приёмом,
+    /// что и проза: галерея ixbt лежит в своём блоке без текста, и правило
+    /// про долю ссылок выносит её целиком.
+    #[test]
+    fn a_lost_illustration_comes_back() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article><h1>Эрроу</h1><p>{text}</p>             <div class=\"gallery\"><figure>             <a href=\"https://example.org/big.jpg\"><img src=\"/small.jpg\" alt=\"Фото 1\" width=\"1045\" height=\"740\"></a>             </figure></div>             <p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/post").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("https://example.org/small.jpg"),
+            "{}",
+            article.content_html
+        );
+    }
+
+    /// Но вернуться она должна один раз: адрес на странице относительный,
+    /// а в извлечённом уже развёрнутый, и сверяя как есть мы не узнавали
+    /// в них одну и ту же картинку.
+    #[test]
+    fn an_illustration_already_shown_is_not_doubled() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article><h1>Эрроу</h1><p>{text}</p>             <p><img src=\"/chart.svg\" alt=\"График\" width=\"800\" height=\"600\"></p>             <p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/post").unwrap();
+        assert_eq!(article.content_html.matches("chart.svg").count(), 1);
+    }
+
+    /// Что возвращать картинкой, а что нет. Ссылка на файл картинки — это
+    /// «открыть в полном размере», часть статьи; ссылка на страницу —
+    /// карточка «читайте ещё». Подвал и боковая колонка не иллюстрации
+    /// вовсе, а `<figure>`, наоборот, родное место картинки.
+    #[test]
+    fn only_illustrations_are_worth_returning() {
+        let doc = Document::from(
+            r#"<html><body>
+               <figure><a href="https://example.org/big.jpg"><img id="full" src="/small.jpg"></a></figure>
+               <div><a href="https://example.org/other-story"><img id="teaser" src="/teaser.jpg"></a></div>
+               <footer><img id="under" src="/logo.png"></footer>
+               <p><img id="badge" src="/flag.svg" width="16" height="16"></p>
+               </body></html>"#
+                .to_string(),
+        );
+        let shot = |id: &str| worth_shot(doc.select(id).nodes().first().expect(id));
+        assert!(shot("#full"));
+        assert!(!shot("#teaser"));
+        assert!(!shot("#under"));
+        assert!(!shot("#badge"));
+    }
+
+    /// Заглавную картинку берём из карточки Open Graph — но только если
+    /// страница объявила себя статьёй и своей картинки в ней нет ни одной.
+    #[test]
+    fn a_cover_comes_from_the_open_graph_card() {
+        let text = TEXT;
+        let head = "<meta property=\"og:type\" content=\"article\">                    <meta property=\"og:image\" content=\"https://cdn.example.org/lead.jpg\">                    <meta property=\"og:image:alt\" content=\"Бегун\">";
+        let page = format!(
+            "<html><head>{head}</head><body><article><h1>Налог</h1>             <p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/news/tax").unwrap();
+        assert!(article.content_html.contains("cdn.example.org/lead.jpg"));
+        assert!(article.content_html.contains("Бегун"));
+    }
+
+    #[test]
+    fn a_cover_does_not_double_a_picture_the_article_already_has() {
+        let text = TEXT;
+        let head = "<meta property=\"og:type\" content=\"article\">                    <meta property=\"og:image\" content=\"https://cdn.example.org/lead.jpg\">";
+        let page = format!(
+            "<html><head>{head}</head><body><article><h1>Налог</h1>             <p><img src=\"https://cdn.example.org/own.jpg\" alt=\"Своя\" width=\"800\" height=\"600\"></p>             <p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/news/tax").unwrap();
+        assert!(!article.content_html.contains("lead.jpg"));
+    }
+
+    /// Страница, которая статьёй себя не объявляла, заглавной картинки
+    /// не получает: в карточке у такой лежит логотип сайта.
+    #[test]
+    fn a_page_that_is_not_an_article_gets_no_cover() {
+        let text = TEXT;
+        let head = "<meta property=\"og:type\" content=\"website\">                    <meta property=\"og:image\" content=\"https://cdn.example.org/logo.png\">";
+        let page = format!(
+            "<html><head>{head}</head><body><article><h1>Раздел</h1>             <p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/section").unwrap();
+        assert!(!article.content_html.contains("logo.png"));
     }
 }
