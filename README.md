@@ -28,14 +28,16 @@ and the product is the window: your measure, your leading, your type, on every s
 
 ## Install
 
-Nothing is in a store yet. What exists is two ways to hand someone a build, and the
-source.
+Nothing is in a store yet. What exists is two builds in the
+[releases](https://github.com/gurov/brevier/releases/latest), and the source.
 
-**A Flatpak bundle.** One file, one command, and the runtime brings GTK with it — so it
-does not care which distribution is underneath:
+**A Flatpak bundle**, from the [latest release](https://github.com/gurov/brevier/releases/latest).
+One file, one command, and the runtime brings GTK with it — so it does not care which
+distribution is underneath:
 
 ```sh
-flatpak install --user ./brevier.flatpak      # the file you were handed
+wget https://github.com/gurov/brevier/releases/download/v0.1.0/brevier.flatpak
+flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
 
@@ -67,11 +69,13 @@ file portal; a local `.md` path cannot be opened, because the sandbox is granted
 filesystem access at all; and "Open in your browser" asks the portal, so the choice is
 the host's.
 
-**A tarball**, for a machine that already has GTK 4 and would rather not have a sandbox:
+**A tarball**, for a machine that already has GTK 4 and would rather not have a sandbox —
+also in the [release](https://github.com/gurov/brevier/releases/latest), or built with
+`packaging/tarball.sh`:
 
 ```sh
-packaging/tarball.sh                  # → packaging/dist/brevier-<version>-x86_64-linux.tar.gz
-tar xf brevier-0.1.0-x86_64-linux.tar.gz && cd brevier-0.1.0-x86_64-linux && ./install.sh
+tar xf brevier-0.1.0-x86_64-linux.tar.gz
+cd brevier-0.1.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` puts the two binaries, the desktop entry, the icon and the licenses under
