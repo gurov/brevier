@@ -23,7 +23,10 @@ path = "src/ui/gtk.rs"
 required-features = ["ui"]
 
 [features]
-ui = ["dep:gtk", "images", "save"]
+ui = ["dep:gtk", "typeset", "images", "save"]
+# Типографика окна: переносы по языку. Отдельной фичей — cli и корпус
+# в ней не нуждаются, а паттерны переносов лишний вес в их бинарнике.
+typeset = ["dep:hyphenation"]
 # Декодеры картинок. Отдельной фичей, потому что корпус M0 гоняется
 # бинарником `brevier` и лишние крейты ему ни к чему.
 images = ["dep:image", "dep:resvg"]
@@ -40,6 +43,7 @@ dom_smoothie = "0.18.1"
 # кнопками, которое ещё и доступность потеряет.
 gtk = { version = "0.11.4", package = "gtk4", features = ["v4_10"], optional = true }
 htmd = "0.5.5"
+hyphenation = { version = "0.8", optional = true, default-features = false, features = ["embed_en-us"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
 resvg = { version = "0.48.1", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }

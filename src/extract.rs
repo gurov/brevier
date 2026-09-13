@@ -30,6 +30,10 @@ pub struct Article {
     /// Навигация самого сайта: то, что лежит в его шапке, меню и подвале.
     /// Не текст статьи и в него не идёт — см. [`site`].
     pub site: Vec<Link>,
+    /// Язык страницы из `lang` на `<html>`, если он объявлен. Нужен окну
+    /// для переносов (`typeset`); без него переносов нет, и `--check` про
+    /// это говорит. Разбор по элементам (`lang` на абзаце) — на будущее.
+    pub lang: Option<String>,
 }
 
 /// Строка навигации: подпись и адрес.
@@ -143,6 +147,8 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let thumbs = thumbs(&doc, url);
     let navigation = site(&doc, url);
     let listing = listing(&doc, url);
+    // Язык страницы — до того, как `Readability` заберёт документ себе.
+    let lang = html_lang(&doc);
     // Копия — под сверку с извлечённым: `Readability` документ забирает себе
     // и чистит на месте, а сироты ищутся в исходном дереве (см. `restore`).
     let source = doc.clone();
@@ -192,7 +198,17 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         listing_html,
         notes,
         site: navigation,
+        lang,
     })
+}
+
+/// Язык страницы из `lang` на `<html>`. Пустое и отсутствующее — одно и то же:
+/// `None`, и тогда переносов нет.
+fn html_lang(doc: &Document) -> Option<String> {
+    doc.select("html")
+        .attr("lang")
+        .map(|lang| lang.trim().to_owned())
+        .filter(|lang| !lang.is_empty())
 }
 
 /// Где лежит навигация сайта.
@@ -2162,5 +2178,21 @@ mod tests {
         );
         let article = extract(&page, "https://example.org/section").unwrap();
         assert!(!article.content_html.contains("logo.png"));
+    }
+
+    #[test]
+    fn the_page_language_is_captured() {
+        let text = TEXT;
+        let page = format!(
+            "<html lang=\"ru\"><body><article><h1>Эрроу</h1>\
+             <p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/post").unwrap();
+        assert_eq!(article.lang.as_deref(), Some("ru"));
+
+        // Без `lang` — ничего: `None`, и тогда переносов не будет.
+        let bare = page.replacen("<html lang=\"ru\">", "<html>", 1);
+        let article = extract(&bare, "https://example.org/post").unwrap();
+        assert_eq!(article.lang, None);
     }
 }

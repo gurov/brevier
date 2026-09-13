@@ -1816,6 +1816,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            lang: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -1856,6 +1857,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            lang: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -1891,6 +1893,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            lang: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -1912,6 +1915,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            lang: None,
         };
 
         let reading = from_article(&article).unwrap();
