@@ -82,6 +82,10 @@ const OPEN_ACTION: &str = "open-address";
 const LOADING_DOTS: usize = 10;
 /// Что говорим на странице, оказавшейся списком ссылок, а не статьёй.
 const LISTING: &str = "A list of links, not an article — pick one to read.";
+/// Чем и как отмечена страница, приехавшая по `http://`.
+const INSECURE_ICON: &str = "channel-insecure-symbolic";
+const INSECURE: &str =
+    "Not secure: this page came over plain http, so anyone on the way can read and change it.";
 /// Сколько совпадений подсвечиваем. Дальше это уже не поиск, а заливка.
 const MAX_HITS: usize = 2000;
 /// Метка, которой прокручивают буфер: одна на все прыжки.
@@ -1919,6 +1923,28 @@ fn set_address(ui: &Ui, text: &str) {
     ui.quiet.set(true);
     ui.entry.set_text(text);
     ui.quiet.set(false);
+    mark_insecure(ui, text);
+}
+
+/// «Not secure» — только там, где это правда что-то значит.
+///
+/// Замочка на защищённой странице нет намеренно, и это не лень: браузеры
+/// от него отказались, потому что читатель понимал его как «сайт надёжный»,
+/// а означает он всего лишь «канал зашифрован». Отмечать надо обратное —
+/// страницу, приехавшую по `http://`: её видит и правит любой посредник
+/// по дороге.
+///
+/// Сайта с непроверенным сертификатом здесь быть не может вовсе: такую
+/// страницу мы не открываем, а объясняем отказ целой страницей
+/// (`failure.rs`). Значок ей не нужен — она сама и есть предупреждение.
+fn mark_insecure(ui: &Ui, address: &str) {
+    let insecure = address.starts_with("http://");
+    ui.entry
+        .set_primary_icon_name(insecure.then_some(INSECURE_ICON));
+    ui.entry
+        .set_primary_icon_tooltip_text(insecure.then_some(INSECURE));
+    ui.entry.set_primary_icon_activatable(false);
+    ui.entry.set_primary_icon_sensitive(false);
 }
 
 /// Смещение местных часов от UTC, в секундах. Часового пояса ядро не знает
