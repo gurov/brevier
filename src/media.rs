@@ -147,14 +147,24 @@ fn has_scheme(src: &str) -> bool {
 
 /// Достать и разобрать картинку.
 pub fn load(source: &Source, ua: UserAgent, look: Look) -> Result<Raster, Error> {
-    let (bytes, mime) = match source {
+    let (bytes, mime) = grab(source, ua)?;
+    decode(&bytes, mime.as_deref(), look)
+}
+
+/// Достать сырые байты картинки и объявленный тип, не разбирая их.
+///
+/// Вынесено из [`load`] ради окна: оно кладёт сырые байты в кэш вкладки,
+/// чтобы «назад» декодировал картинку из памяти, а не тянул её из сети
+/// заново. Тип отдаём для верного разбора, но на слово ему не верим —
+/// [`decode`] всё равно смотрит в сами байты.
+pub fn grab(source: &Source, ua: UserAgent) -> Result<(Vec<u8>, Option<String>), Error> {
+    match source {
         Source::Web(url) => {
             let blob = fetch::binary(url, ua, ACCEPT, MAX_IMAGE)?;
-            (blob.bytes, Some(blob.mime))
+            Ok((blob.bytes, Some(blob.mime)))
         }
-        Source::File(path) => (std::fs::read(path).map_err(Error::Convert)?, None),
-    };
-    decode(&bytes, mime.as_deref(), look)
+        Source::File(path) => Ok((std::fs::read(path).map_err(Error::Convert)?, None)),
+    }
 }
 
 /// Разобрать байты картинки. Тип берём из заголовка, но не верим ему

@@ -9,7 +9,9 @@
 //! ошибок лежат в ядре и про GTK не знают ничего.
 
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 mod article;
@@ -350,6 +352,53 @@ struct Tab {
     /// на окно; если читатель сменил его, пока эта вкладка была в фоне,
     /// при показе её надо перерисовать под новую ступень.
     zoom_seen: usize,
+    /// Кэш «назад/вперёд»: уже показанные документы этой вкладки, по адресу.
+    /// «Назад» рисует страницу из него сразу, без сети, — как bfcache
+    /// у браузеров. Живёт ровно на путь истории: страницы, обрубленные
+    /// новым переходом, из кэша уходят (`prune_pages`). Внутренние страницы
+    /// (сама история) не кэшируются — они обязаны показывать то, что на диске.
+    pages: HashMap<String, Document>,
+    /// Уже скачанные картинки этой вкладки — сырые байты по адресу источника.
+    /// Чтобы «назад» показывал их из памяти, а не тянул из сети заново. Общий
+    /// на вкладку: одна и та же картинка на двух страницах качается один раз.
+    blobs: Blobs,
+}
+
+/// Сколько байтов картинок держим на вкладке, прежде чем вытеснять старые.
+/// Читательская сессия иначе набрала бы сотни мегабайт за день; вытесняем
+/// по возрасту — самое старое первым.
+const BLOB_BUDGET: usize = 48 * 1024 * 1024;
+
+/// Кэш сырых байтов картинок вкладки с потолком по объёму.
+#[derive(Default)]
+struct Blobs {
+    map: HashMap<String, Arc<Vec<u8>>>,
+    /// Порядок прихода — по нему вытесняем старое, когда упёрлись в потолок.
+    order: VecDeque<String>,
+    bytes: usize,
+}
+
+impl Blobs {
+    fn get(&self, url: &str) -> Option<Arc<Vec<u8>>> {
+        self.map.get(url).cloned()
+    }
+
+    fn put(&mut self, url: String, data: Arc<Vec<u8>>) {
+        if self.map.contains_key(&url) {
+            return;
+        }
+        self.bytes += data.len();
+        self.order.push_back(url.clone());
+        self.map.insert(url, data);
+        while self.bytes > BLOB_BUDGET {
+            let Some(old) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(gone) = self.map.remove(&old) {
+                self.bytes = self.bytes.saturating_sub(gone.len());
+            }
+        }
+    }
 }
 
 struct State {
@@ -1332,6 +1381,8 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             resume: None,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
+            pages: HashMap::new(),
+            blobs: Blobs::default(),
         });
         id
     };
@@ -1451,6 +1502,33 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         });
     }
     view.add_controller(hover);
+
+    // Наведение на ссылку — нативная подсказка с её адресом: видно, куда ведёт,
+    // ещё до нажатия. То же, что строка состояния браузера, только у курсора.
+    view.set_has_tooltip(true);
+    {
+        let state = state.clone();
+        let view = view.clone();
+        view.clone()
+            .connect_query_tooltip(move |_, x, y, _keyboard, tooltip| {
+                let target = state
+                    .borrow()
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.id == id)
+                    .and_then(|tab| {
+                        link_at(&view, &tab.links, x as f64, y as f64)
+                            .map(|link| link.target.clone())
+                    });
+                match target {
+                    Some(target) => {
+                        tooltip.set_text(Some(&target));
+                        true
+                    }
+                    None => false,
+                }
+            });
+    }
 
     // Клавиши прокрутки висят на тексте, а не на окне: иначе пробел
     // и стрелки ломали бы набор адреса в строке.
@@ -2060,7 +2138,12 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
     // Решётку в адресе запоминаем здесь: серверу её не отправляют, и в адресе
     // загруженного документа её уже не будет.
     let anchor = anchor_of(&address);
-    let generation = {
+    // Ключ кэша — тот адрес, которым по вкладке и ходят «назад/вперёд».
+    // Внутренние страницы (сама история) не кэшируем: они обязаны показывать
+    // то, что на диске, а не слепок момента.
+    let key = address.display();
+    let cacheable = !matches!(address, Address::Internal(_));
+    let (generation, cached) = {
         let mut state = state.borrow_mut();
         let Some(tab) = state.find(id) else { return };
         if remember {
@@ -2070,15 +2153,34 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             let here = top_of(&tab.view);
             tab.history.set_place(here);
             tab.history.visit(address.clone());
+            // Переход в сторону обрубает «вперёд» — вместе с ним из кэша
+            // уходят страницы, до которых больше не дойти.
+            prune_pages(tab);
         }
         tab.generation += 1;
-        tab.loading = true;
-        // Корешок вкладки не мигает точками намеренно: ширина строки в нём
-        // меняла бы ширину самой вкладки, и полоса корешков дёргалась бы
-        // раз в секунду.
-        tab.label.set_text(&clip("Loading…", TAB_LABEL));
-        tab.generation
+        // «Назад» и «вперёд» по уже показанной странице — из памяти, без сети:
+        // страница у читателя уже была, тянуть её заново незачем. Свежий заход
+        // (набор адреса, клик по ссылке) кэш обходит — там читатель просит
+        // именно новую загрузку.
+        let cached = (!remember && cacheable)
+            .then(|| tab.pages.get(&key).cloned())
+            .flatten();
+        if cached.is_none() {
+            tab.loading = true;
+            // Корешок вкладки не мигает точками намеренно: ширина строки в нём
+            // меняла бы ширину самой вкладки, и полоса корешков дёргалась бы
+            // раз в секунду.
+            tab.label.set_text(&clip("Loading…", TAB_LABEL));
+        }
+        (tab.generation, cached)
     };
+
+    // Есть в кэше — показываем сразу, тем же трактом, что и свежую загрузку.
+    if let Some(document) = cached {
+        show_document(ui, state, id, &document, anchor.as_deref());
+        return;
+    }
+
     sync(ui, state, None);
 
     if let Some(view) = view_of(state, id) {
@@ -2104,62 +2206,12 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
 
         match loaded {
             Ok(Ok(document)) => {
-                dress(&state, &view);
-                let page = render(&view, &document, anchor.as_deref());
-                // Клавиатуру отдаём только той вкладке, которую читатель
-                // видит. Фоновая, догрузившись, забирала её себе, и стрелки
-                // с пробелом переставали прокручивать открытую страницу —
-                // заметно это стало на восстановлении сессии, где вкладок
-                // приезжает сразу несколько.
-                if current_id(&ui, &state) == Some(id) {
-                    view.grab_focus();
-                }
-                // Список ссылок показываем как есть, но говорим, что это он:
-                // читатель пришёл на главную блога не читать, а выбирать.
-                if document.kind == brevier::Kind::Listing {
-                    notice(&ui, LISTING);
-                } else if document.served {
-                    // Сайт отдал markdown сам — извлечения не было, текст точный.
-                    notice(&ui, SERVED_MARKDOWN);
-                }
-                let mut borrowed = state.borrow_mut();
-                // В историю идёт то, что открылось, и адрес итоговый —
-                // после редиректов. Неудачная загрузка визитом не считается:
-                // список «что я читал» не должен состоять из отказов.
-                borrowed
-                    .store
-                    .record(&document.address, &document.title, local_offset());
-                let seen = current_zoom(&borrowed);
-                if let Some(tab) = borrowed.find(id) {
-                    tab.loading = false;
-                    tab.label.set_text(&clip(&document.title, TAB_LABEL));
-                    tab.label.set_tooltip_text(Some(&document.title));
-                    tab.links = page.links;
-                    tab.marks = page.marks;
-                    tab.anchors = page.anchors;
-                    tab.shots = page.shots.clone();
-                    tab.site = site_rows(&document.site);
-                    tab.document = Some(document.clone());
-                    tab.zoom_seen = seen;
-                }
-                drop(borrowed);
-                sync(&ui, &state, None);
-                resume_place(&ui, &state);
-                remember_session(&ui, &state);
-                seek_entries(&ui, &state, id, &document.address);
-                // Заглушки оживляем после того, как вкладка узнала про них:
-                // клик по заглушке ищет вкладку по номеру.
-                let eager = state.borrow().images;
-                for shot in &page.shots {
-                    place_shot(&ui, &state, id, shot, None);
-                    // Именно в эту вкладку, а не в открытую: пока страница
-                    // грузилась, читатель мог уйти смотреть другую.
-                    if eager {
-                        load_shot(&ui, &state, id, shot);
-                    }
-                }
-                for cell in &page.cells {
-                    follow_cell_links(&ui, &state, id, cell);
+                show_document(&ui, &state, id, &document, anchor.as_deref());
+                // Кладём в кэш вкладки: теперь «назад» покажет её без сети.
+                if cacheable
+                    && let Some(tab) = state.borrow_mut().find(id)
+                {
+                    tab.pages.insert(key.clone(), document.clone());
                 }
             }
             Ok(Err(error)) => {
@@ -2195,6 +2247,84 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             }
         }
     });
+}
+
+/// Разложить готовый документ по вкладке и привести окно в порядок.
+///
+/// Общий путь для двух заходов: свежей загрузки из сети и показа из кэша
+/// «назад/вперёд». Отсюда и синхронность — вся отрисовка, отметки, полка
+/// и оживление картинок в одном месте, чтобы кэш и сеть вели себя одинаково.
+fn show_document(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    document: &Document,
+    anchor: Option<&str>,
+) {
+    let Some(view) = view_of(state, id) else {
+        return;
+    };
+    dress(state, &view);
+    let page = render(&view, document, anchor);
+    // Клавиатуру отдаём только той вкладке, которую читатель видит. Фоновая,
+    // догрузившись, забирала её себе, и стрелки с пробелом переставали
+    // прокручивать открытую страницу — заметно на восстановлении сессии.
+    if current_id(ui, state) == Some(id) {
+        view.grab_focus();
+    }
+    // Список ссылок показываем как есть, но говорим, что это он: читатель
+    // пришёл на главную блога не читать, а выбирать.
+    if document.kind == brevier::Kind::Listing {
+        notice(ui, LISTING);
+    } else if document.served {
+        // Сайт отдал markdown сам — извлечения не было, текст точный.
+        notice(ui, SERVED_MARKDOWN);
+    }
+    let mut borrowed = state.borrow_mut();
+    // В историю идёт то, что открылось, и адрес итоговый — после редиректов.
+    borrowed
+        .store
+        .record(&document.address, &document.title, local_offset());
+    let seen = current_zoom(&borrowed);
+    if let Some(tab) = borrowed.find(id) {
+        tab.loading = false;
+        tab.label.set_text(&clip(&document.title, TAB_LABEL));
+        tab.label.set_tooltip_text(Some(&document.title));
+        tab.links = page.links;
+        tab.marks = page.marks;
+        tab.anchors = page.anchors;
+        tab.shots = page.shots.clone();
+        tab.site = site_rows(&document.site);
+        tab.document = Some(document.clone());
+        tab.zoom_seen = seen;
+    }
+    drop(borrowed);
+    sync(ui, state, None);
+    resume_place(ui, state);
+    remember_session(ui, state);
+    seek_entries(ui, state, id, &document.address);
+    // Заглушки оживляем после того, как вкладка узнала про них: клик
+    // по заглушке ищет вкладку по номеру.
+    let eager = state.borrow().images;
+    for shot in &page.shots {
+        place_shot(ui, state, id, shot, None);
+        // Именно в эту вкладку, а не в открытую: пока страница грузилась,
+        // читатель мог уйти смотреть другую.
+        if eager {
+            load_shot(ui, state, id, shot);
+        }
+    }
+    for cell in &page.cells {
+        follow_cell_links(ui, state, id, cell);
+    }
+}
+
+/// Выбросить из кэша страницы, до которых по истории больше не дойти.
+/// Зовётся после перехода в сторону: `visit` обрубает «вперёд», и держать
+/// обрубленное в памяти незачем.
+fn prune_pages(tab: &mut Tab) {
+    let live: Vec<String> = tab.history.entries().iter().map(Address::display).collect();
+    tab.pages.retain(|key, _| live.contains(key));
 }
 
 fn view_of(state: &Rc<RefCell<State>>, id: u64) -> Option<gtk::TextView> {
@@ -4231,18 +4361,33 @@ fn hold_reading_place(
 ///
 /// Скачивание и декодирование уходят в отдельный поток: `ureq` синхронный,
 /// а схема на пол-мегабайта разбирается заметное время — окно не должно
-/// вставать на ней колом.
+/// вставать на ней колом. Уже скачанную картинку берём из кэша вкладки:
+/// «назад» декодирует её из памяти, а не тянет из сети заново.
 fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     if shot.busy.replace(true) {
         return;
     }
     // Под общую ступень: картинка ужимается до меры, а мера зависит от неё.
     set_zoom(ZOOM_STEPS[current_zoom(&state.borrow())]);
-    let Some(generation) = state.borrow_mut().find(id).map(|tab| tab.generation) else {
-        return;
+    let (generation, cached) = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else {
+            shot.busy.set(false);
+            return;
+        };
+        // Файловые картинки не кэшируем: диск и так рядом, тянуть нечего.
+        let cached = match &shot.source {
+            Source::Web(url) => tab.blobs.get(url),
+            Source::File(_) => None,
+        };
+        (tab.generation, cached)
     };
 
-    if let Some(frame) = shot.slot.frame() {
+    // Заглушку «loading…» показываем только когда правда идём в сеть: из кэша
+    // картинка встаёт почти в тот же кадр, и мигание заглушкой лишнее.
+    if cached.is_none()
+        && let Some(frame) = shot.slot.frame()
+    {
         let waiting = gtk::Label::builder()
             .label("loading the image…")
             .wrap(true)
@@ -4270,15 +4415,35 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     let shot = shot.clone();
 
     glib::spawn_future_local(async move {
-        let loaded =
-            gio::spawn_blocking(move || media::load(&source, UserAgent::Honest, look)).await;
+        // Из кэша — только декодируем; из сети — сначала берём байты, чтобы
+        // положить их в кэш, а потом декодируем. Второе значение — сырые байты
+        // к сохранению (только у сетевой картинки), иначе `None`.
+        let loaded = gio::spawn_blocking(move || match cached {
+            Some(bytes) => {
+                let raster = media::decode(&bytes, None, look)?;
+                Ok((raster, None::<Vec<u8>>))
+            }
+            None => {
+                let (bytes, mime) = media::grab(&source, UserAgent::Honest)?;
+                let raster = media::decode(&bytes, mime.as_deref(), look)?;
+                let keep = matches!(source, Source::Web(_)).then_some(bytes);
+                Ok((raster, keep))
+            }
+        })
+        .await;
 
         // Вкладку успели увести на другую страницу — рамки уже нет.
         if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {
             return;
         }
         match loaded {
-            Ok(Ok(raster)) => {
+            Ok(Ok((raster, keep))) => {
+                // Свежескачанное кладём в кэш вкладки под адресом источника.
+                if let (Source::Web(url), Some(bytes)) = (&shot.source, keep)
+                    && let Some(tab) = state.borrow_mut().find(id)
+                {
+                    tab.blobs.put(url.clone(), Arc::new(bytes));
+                }
                 // Картинка выше окна вырастет из заглушки в полный рост
                 // и толкнёт текст под глазами — держим место чтения.
                 let hold = hold_reading_place(&ui, &state, id, &shot);
