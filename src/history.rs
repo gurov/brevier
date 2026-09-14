@@ -9,6 +9,11 @@ use crate::address::Address;
 #[derive(Debug, Default)]
 pub struct History {
     entries: Vec<Address>,
+    /// Место чтения на каждой странице пути — смещение в буфере, по одному
+    /// на запись `entries`. По нему «назад» возвращает читателя туда, где он
+    /// стоял, а не в начало страницы. Смещение, а не пиксели: оно не зависит
+    /// ни от ширины окна, ни от масштаба.
+    places: Vec<i32>,
     at: usize,
 }
 
@@ -22,7 +27,14 @@ impl History {
     /// не только на свою страницу, но и со своими «назад» и «вперёд».
     pub fn restored(entries: Vec<Address>, at: usize) -> Self {
         let at = at.min(entries.len().saturating_sub(1));
-        Self { entries, at }
+        // Мест на диске сессия не хранит (у текущей страницы место едет
+        // отдельным полем), поэтому восстановленные записи начинают с нуля.
+        let places = vec![0; entries.len()];
+        Self {
+            entries,
+            places,
+            at,
+        }
     }
 
     pub fn current(&self) -> Option<&Address> {
@@ -50,10 +62,27 @@ impl History {
         }
         if !self.entries.is_empty() {
             self.entries.truncate(self.at + 1);
+            self.places.truncate(self.at + 1);
             self.at += 1;
         }
         self.entries.push(address);
+        self.places.push(0);
         self.at = self.entries.len() - 1;
+    }
+
+    /// Запомнить место чтения на текущей странице — чтобы вернуться сюда,
+    /// когда читатель пойдёт «назад» или «вперёд». Зовётся перед самим шагом,
+    /// пока `at` ещё указывает на покидаемую страницу.
+    pub fn set_place(&mut self, place: i32) {
+        if let Some(slot) = self.places.get_mut(self.at) {
+            *slot = place;
+        }
+    }
+
+    /// Место чтения на текущей странице, если оно было запомнено; иначе ноль
+    /// — начало страницы.
+    pub fn place(&self) -> i32 {
+        self.places.get(self.at).copied().unwrap_or(0)
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -150,6 +179,38 @@ mod tests {
         history.back();
         assert_eq!(history.entries().len(), 2);
         assert_eq!(history.at(), 0);
+    }
+
+    #[test]
+    fn each_page_keeps_its_reading_place() {
+        let mut history = History::new();
+        history.visit(web("https://a.test/"));
+        history.set_place(120);
+        history.visit(web("https://b.test/"));
+        history.set_place(340);
+
+        // Назад — и место страницы a возвращается.
+        history.back();
+        assert_eq!(history.place(), 120);
+        // Вперёд — место страницы b на месте.
+        history.forward();
+        assert_eq!(history.place(), 340);
+    }
+
+    #[test]
+    fn a_new_page_drops_the_places_that_were_ahead() {
+        let mut history = History::new();
+        history.visit(web("https://a.test/"));
+        history.set_place(50);
+        history.visit(web("https://b.test/"));
+        history.set_place(60);
+        history.back();
+        // Уходим в сторону — «вперёд» и его место обрублены вместе.
+        history.visit(web("https://c.test/"));
+        assert_eq!(history.place(), 0);
+        history.back();
+        assert_eq!(history.place(), 50);
+        assert_eq!(history.entries().len(), 2);
     }
 
     #[test]

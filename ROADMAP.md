@@ -269,5 +269,7 @@ Recorded so that nobody rediscovers them in six months.
   site" for the open web; threads and documentation hosts get named rules, each row
   with pages in the corpus, and no plugin system around them. This supersedes the
   earlier flat refusal of per-site rules.
-- **Type is a setting; zoom is not.** Face, size, measure and leading will persist
-  in `settings.tsv`; the zoom step lives per host, for the run only.
+- **Type is a setting; zoom is shared.** Face, size, measure and leading will
+  persist in `settings.tsv`; the zoom step is one for the window, applied to every
+  page, for the run only — not per host, and not saved. (Per-host zoom was tried
+  and dropped: it only made the next page open at a surprising size.)

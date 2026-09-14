@@ -9,7 +9,6 @@
 //! ошибок лежат в ядре и про GTK не знают ничего.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -347,6 +346,10 @@ struct Tab {
     /// когда на неё переключились, — десять восстановленных вкладок
     /// не должны означать десять запросов на старте.
     pending: bool,
+    /// На какой ступени масштаба вкладка сейчас нарисована. Масштаб общий
+    /// на окно; если читатель сменил его, пока эта вкладка была в фоне,
+    /// при показе её надо перерисовать под новую ступень.
+    zoom_seen: usize,
 }
 
 struct State {
@@ -358,14 +361,12 @@ struct State {
     /// после отказа от JS декодер картинок — единственная серьёзная
     /// поверхность атаки, и закрыть её должно быть чем.
     images: bool,
-    /// Ступень масштаба по хостам. По хостам — потому что разная у сайтов
-    /// не типографика (её задаём мы, CSS сайта не читаем вовсе), а материал:
-    /// страница сплошных таблиц и длинных строк кода просится отдалиться,
-    /// чтобы строка влезала целиком, а длинный текст — наоборот. Только
-    /// на этот запуск: иначе это уже хранилище настроек на диске, со своим
-    /// форматом, починкой при обновлении и вопросом «почему этот сайт
-    /// открывается странно» через полгода.
-    zoom: HashMap<String, usize>,
+    /// Ступень масштаба — одна на окно, общая для всех страниц. Читатель
+    /// выставляет её раз и ждёт её везде: разная по хостам ступень
+    /// оборачивалась тем, что соседняя страница открывалась «странно».
+    /// На диск по-прежнему не едет — только на этот запуск: иначе это уже
+    /// хранилище настроек со своим форматом и починкой при обновлении.
+    zoom: usize,
     /// Куда читатель уже ходил. Журнал на диске, свод в памяти: по нему
     /// строятся подсказки адресной строки, а страница истории читает файл
     /// заново — программа может быть открыта и дважды.
@@ -678,7 +679,7 @@ fn build(app: &Application, start: Vec<String>) {
         next_id: 0,
         dark: settings.dark,
         images: settings.images,
-        zoom: HashMap::new(),
+        zoom: ZOOM_NORMAL,
         store: Store::open(),
         marks: Marks::open(),
         // Сессию поднимает и пишет первое окно процесса. Второе окно —
@@ -998,6 +999,7 @@ fn build(app: &Application, start: Vec<String>) {
                 sync(&ui, &state, None);
                 wake_tab(&ui, &state);
                 resume_place(&ui, &state);
+                rezoom_current(&ui, &state);
                 remember_session(&ui, &state);
             });
         });
@@ -1329,6 +1331,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             loading: false,
             resume: None,
             pending: false,
+            zoom_seen: ZOOM_NORMAL,
         });
         id
     };
@@ -1347,6 +1350,25 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
                 close_tab(&ui, &state, index);
             }
         });
+    }
+
+    {
+        // Средняя кнопка по корешку закрывает вкладку — привычка из браузеров.
+        // Отдельным жестом ровно на средней кнопке: левый клик должен
+        // по-прежнему доставаться блокноту и переключать вкладку.
+        let ui = ui.clone();
+        let state = state.clone();
+        let middle = gtk::GestureClick::builder()
+            .button(gtk::gdk::BUTTON_MIDDLE)
+            .build();
+        middle.connect_pressed(move |gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            let index = state.borrow().tabs.iter().position(|tab| tab.id == id);
+            if let Some(index) = index {
+                close_tab(&ui, &state, index);
+            }
+        });
+        corner.add_controller(middle);
     }
 
     {
@@ -2008,18 +2030,27 @@ fn step(ui: &Ui, state: &Rc<RefCell<State>>, backwards: bool) {
         return;
     };
     let step = {
-        let mut state = state.borrow_mut();
-        let Some(tab) = state.tabs.get_mut(index as usize) else {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.tabs.get_mut(index as usize) else {
             return;
         };
+        // Где читатель стоит на этой странице — запоминаем, пока `at` ещё
+        // указывает на неё, чтобы вернуть его сюда шагом обратно.
+        let here = top_of(&tab.view);
+        tab.history.set_place(here);
         let address = if backwards {
             tab.history.back().cloned()
         } else {
             tab.history.forward().cloned()
         };
-        address.map(|address| (tab.id, address))
+        // Куда прокрутить страницу назначения, когда она приедет.
+        let place = tab.history.place();
+        address.map(|address| (tab.id, address, place))
     };
-    if let Some((id, address)) = step {
+    if let Some((id, address, place)) = step {
+        if let Some(tab) = state.borrow_mut().find(id) {
+            tab.resume = (place > 0).then_some(place);
+        }
         open(ui, state, id, address, false);
     }
 }
@@ -2033,6 +2064,11 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
         let mut state = state.borrow_mut();
         let Some(tab) = state.find(id) else { return };
         if remember {
+            // Место на покидаемой странице — чтобы «назад» вернул сюда,
+            // а не в её начало. У новой вкладки истории ещё нет, и запись
+            // молча ни к чему не привяжется.
+            let here = top_of(&tab.view);
+            tab.history.set_place(here);
             tab.history.visit(address.clone());
         }
         tab.generation += 1;
@@ -2068,7 +2104,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
 
         match loaded {
             Ok(Ok(document)) => {
-                dress(&state, &view, &document.address);
+                dress(&state, &view);
                 let page = render(&view, &document, anchor.as_deref());
                 // Клавиатуру отдаём только той вкладке, которую читатель
                 // видит. Фоновая, догрузившись, забирала её себе, и стрелки
@@ -2093,6 +2129,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                 borrowed
                     .store
                     .record(&document.address, &document.title, local_offset());
+                let seen = current_zoom(&borrowed);
                 if let Some(tab) = borrowed.find(id) {
                     tab.loading = false;
                     tab.label.set_text(&clip(&document.title, TAB_LABEL));
@@ -2103,6 +2140,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
                     tab.shots = page.shots.clone();
                     tab.site = site_rows(&document.site);
                     tab.document = Some(document.clone());
+                    tab.zoom_seen = seen;
                 }
                 drop(borrowed);
                 sync(&ui, &state, None);
@@ -2208,15 +2246,11 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
 
     // Ступень видна, только когда она не «как задумано»: кнопка, всегда
     // показывающая «100%», не говорит ничего и занимает место в панели.
-    let step = {
-        let borrowed = state.borrow();
-        zoom_index(&borrowed, &address_of(&borrowed, index))
-    };
+    let step = current_zoom(&state.borrow());
     ui.zoom_level
         .set_label(&format!("{}%", (ZOOM_STEPS[step] * 100.0).round() as i32));
     ui.zoom_level.set_visible(step != ZOOM_NORMAL);
-    // Ступень видимой вкладки — та, в которой считается ширина колонки
-    // ниже по этой же функции.
+    // Общая ступень — в ней же считается ширина колонки ниже по этой функции.
     set_zoom(ZOOM_STEPS[step]);
     ui.window.set_title(Some(&if address.is_empty() {
         "Brevier".to_owned()
@@ -2519,62 +2553,31 @@ thread_local! {
     static OWNS_SESSION: Cell<bool> = const { Cell::new(true) };
 }
 
-/// По какому ключу помнится ступень. Для страницы — хост, для репозитория
-/// и файла — сам адрес: там «сайта» нет, а материал у каждого свой.
-fn zoom_key(address: &Address) -> String {
-    let shown = address.display();
-    match address {
-        Address::Web(_) => shown
-            .split_once("://")
-            .map_or(shown.as_str(), |(_, rest)| rest)
-            .split('/')
-            .next()
-            .unwrap_or_default()
-            .to_owned(),
-        _ => shown,
-    }
+/// Общая ступень масштаба окна, ограниченная лестницей.
+fn current_zoom(state: &State) -> usize {
+    state.zoom.min(ZOOM_STEPS.len() - 1)
 }
 
-fn zoom_index(state: &State, address: &Address) -> usize {
-    state
-        .zoom
-        .get(&zoom_key(address))
-        .copied()
-        .unwrap_or(ZOOM_NORMAL)
-        .min(ZOOM_STEPS.len() - 1)
-}
-
-/// Адрес открытой страницы во вкладке. У пустой вкладки его нет —
-/// начальная страница тоже имеет право на свою ступень.
-fn address_of(state: &State, index: usize) -> Address {
-    state
-        .tabs
-        .get(index)
-        .and_then(|tab| tab.history.current().cloned())
-        .unwrap_or_else(|| Address::Web(String::new()))
-}
-
-/// Приготовить вкладку к отрисовке: ступень по хосту, теги под неё,
-/// колонка под меру. Всё, что зависит от масштаба, ставится здесь —
-/// иначе кегли, картинки и сетка таблицы разъедутся между собой.
-fn dress(state: &Rc<RefCell<State>>, view: &gtk::TextView, address: &Address) {
+/// Приготовить вкладку к отрисовке: общая ступень, теги под неё, колонка
+/// под меру. Всё, что зависит от масштаба, ставится здесь — иначе кегли,
+/// картинки и сетка таблицы разъедутся между собой.
+fn dress(state: &Rc<RefCell<State>>, view: &gtk::TextView) {
     let (scale, dark) = {
         let borrowed = state.borrow();
-        (ZOOM_STEPS[zoom_index(&borrowed, address)], borrowed.dark)
+        (ZOOM_STEPS[current_zoom(&borrowed)], borrowed.dark)
     };
     set_zoom(scale);
     tags(&view.buffer(), dark, scale);
     view.set_width_request(measure_px());
 }
 
-/// Сменить ступень у открытой страницы: `step` — насколько сдвинуться
-/// по лестнице, ноль возвращает к «как задумано».
+/// Сменить общую ступень масштаба: `step` — насколько сдвинуться по лестнице,
+/// ноль возвращает к «как задумано».
 fn zoom_by(ui: &Ui, state: &Rc<RefCell<State>>, step: i32) {
     let Some(index) = ui.notebook.current_page().map(|page| page as usize) else {
         return;
     };
-    let address = address_of(&state.borrow(), index);
-    let was = zoom_index(&state.borrow(), &address);
+    let was = current_zoom(&state.borrow());
     let now = if step == 0 {
         ZOOM_NORMAL
     } else {
@@ -2591,7 +2594,7 @@ fn zoom_by(ui: &Ui, state: &Rc<RefCell<State>>, step: i32) {
         notice(ui, "That step would not fit on this screen");
         return;
     }
-    state.borrow_mut().zoom.insert(zoom_key(&address), now);
+    state.borrow_mut().zoom = now;
     redraw(ui, state, index);
 }
 
@@ -2644,15 +2647,17 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         .map(|(from, to)| (from.offset(), to.offset()));
     let place = top_of(&view);
 
-    dress(state, &view, &document.address);
+    dress(state, &view);
     let page = render(&view, &document, None);
     {
         let mut borrowed = state.borrow_mut();
+        let seen = current_zoom(&borrowed);
         if let Some(tab) = borrowed.find(id) {
             tab.links = page.links;
             tab.marks = page.marks;
             tab.anchors = page.anchors;
             tab.shots = page.shots.clone();
+            tab.zoom_seen = seen;
         }
     }
     sync(ui, state, None);
@@ -2675,6 +2680,25 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         buffer.select_range(&from, &to);
     }
     settle(&view, place, 0.0);
+}
+
+/// Догнать общий масштаб на вкладке, которую только что показали. Если
+/// читатель сменил ступень, пока эта вкладка была в фоне, перерисовать её
+/// под новую. Место чтения держится смещением в буфере — от масштаба оно
+/// не зависит, поэтому `redraw` вернёт читателя туда же.
+fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page().map(|page| page as usize) else {
+        return;
+    };
+    let stale = {
+        let borrowed = state.borrow();
+        borrowed.tabs.get(index).is_some_and(|tab| {
+            !tab.pending && tab.document.is_some() && tab.zoom_seen != current_zoom(&borrowed)
+        })
+    };
+    if stale {
+        redraw(ui, state, index);
+    }
 }
 
 /// Смещение строки у верхнего края окна: ею читатель и мерит, где он
@@ -2958,13 +2982,15 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         site: Vec::new(),
         lang: None,
     };
-    dress(state, view, &document.address);
+    dress(state, view);
     let page = render(view, &document, None);
     let mut borrowed = state.borrow_mut();
+    let seen = current_zoom(&borrowed);
     if let Some(tab) = borrowed.find(id) {
         tab.links = page.links;
         tab.marks = page.marks;
         tab.anchors = page.anchors;
+        tab.zoom_seen = seen;
     }
     drop(borrowed);
     sync(ui, state, None);
@@ -4177,6 +4203,30 @@ fn show_all_shots(ui: &Ui, state: &Rc<RefCell<State>>) {
     }
 }
 
+/// Если картинка, которая только что приехала, стоит выше верхнего края окна,
+/// её рост из заглушки в полный размер сдвинул бы текст под глазами читателя.
+/// Тогда снимаем место чтения — вернём его `settle` после того, как картинка
+/// встанет. Для картинки в окне или ниже него делать нечего: верхняя строка
+/// не двигается, и трогать прокрутку значило бы драться с самим читателем.
+/// Возвращаем `None` и для фоновой вкладки, и для формулы (у неё нет рамки):
+/// формула растёт с кегль, а не с колонку, и рывка не даёт.
+fn hold_reading_place(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    shot: &Shot,
+) -> Option<(gtk::TextView, i32)> {
+    if current_id(ui, state) != Some(id) {
+        return None;
+    }
+    let frame = shot.slot.frame()?;
+    let view = view_of(state, id)?;
+    // Верх рамки в координатах окна: отрицательный — картинка уехала выше
+    // видимой области.
+    let (_, y) = frame.translate_coordinates(&view, 0.0, 0.0)?;
+    (y < 0.0).then(|| (view.clone(), top_of(&view)))
+}
+
 /// Скачать и показать одну картинку.
 ///
 /// Скачивание и декодирование уходят в отдельный поток: `ureq` синхронный,
@@ -4186,15 +4236,8 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     if shot.busy.replace(true) {
         return;
     }
-    // Под меру своей вкладки, а не открытой: пока страница грузилась,
-    // читатель мог уйти в соседнюю, где ступень другая.
-    {
-        let borrowed = state.borrow();
-        if let Some(index) = borrowed.tabs.iter().position(|tab| tab.id == id) {
-            let address = address_of(&borrowed, index);
-            set_zoom(ZOOM_STEPS[zoom_index(&borrowed, &address)]);
-        }
-    }
+    // Под общую ступень: картинка ужимается до меры, а мера зависит от неё.
+    set_zoom(ZOOM_STEPS[current_zoom(&state.borrow())]);
     let Some(generation) = state.borrow_mut().find(id).map(|tab| tab.generation) else {
         return;
     };
@@ -4235,7 +4278,15 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
             return;
         }
         match loaded {
-            Ok(Ok(raster)) => show_shot(&shot, raster),
+            Ok(Ok(raster)) => {
+                // Картинка выше окна вырастет из заглушки в полный рост
+                // и толкнёт текст под глазами — держим место чтения.
+                let hold = hold_reading_place(&ui, &state, id, &shot);
+                show_shot(&shot, raster);
+                if let Some((view, place)) = hold {
+                    settle(&view, place, 0.0);
+                }
+            }
             Ok(Err(error)) => {
                 shot.busy.set(false);
                 place_shot(&ui, &state, id, &shot, Some(describe(&error).headline));
