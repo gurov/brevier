@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Brevier
-GenericName=Reader
+GenericName=Web Reader
 Comment=Read the web without JavaScript, in typography you choose
 Exec=brevier-ui %u
 Icon=io.github.gurov.brevier
