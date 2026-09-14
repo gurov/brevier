@@ -2208,9 +2208,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
             Ok(Ok(document)) => {
                 show_document(&ui, &state, id, &document, anchor.as_deref());
                 // Кладём в кэш вкладки: теперь «назад» покажет её без сети.
-                if cacheable
-                    && let Some(tab) = state.borrow_mut().find(id)
-                {
+                if cacheable && let Some(tab) = state.borrow_mut().find(id) {
                     tab.pages.insert(key.clone(), document.clone());
                 }
             }
