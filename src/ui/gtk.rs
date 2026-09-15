@@ -1511,15 +1511,17 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
         let view = view.clone();
         view.clone()
             .connect_query_tooltip(move |_, x, y, _keyboard, tooltip| {
-                let target = state
-                    .borrow()
-                    .tabs
-                    .iter()
-                    .find(|tab| tab.id == id)
-                    .and_then(|tab| {
+                // GTK дёргает этот обработчик в произвольный момент — в том
+                // числе изнутри `set_tooltip_text` на соседнем виджете, пока
+                // мы держим `borrow_mut` в `show_document`. Поэтому `try_borrow`,
+                // а не `borrow`: занят — молча пропускаем, подсказка не срочная
+                // и покажется на следующем наведении.
+                let target = state.try_borrow().ok().and_then(|state| {
+                    state.tabs.iter().find(|tab| tab.id == id).and_then(|tab| {
                         link_at(&view, &tab.links, x as f64, y as f64)
                             .map(|link| link.target.clone())
-                    });
+                    })
+                });
                 match target {
                     Some(target) => {
                         tooltip.set_text(Some(&target));
