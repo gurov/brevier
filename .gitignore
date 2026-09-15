@@ -16,3 +16,4 @@
 /packaging/repo/
 /packaging/dist/
 /*.flatpak
+/NOTES.md
