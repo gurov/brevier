@@ -277,13 +277,10 @@ struct Ui {
     /// ширину.
     shelf_width: Rc<Cell<i32>>,
     show_contents: gtk::ToggleButton,
-    /// Настройки: шестерёнка в шапке и окно за ней. Панель — для того,
-    /// что нужно на каждой странице; настройка нужна раз и надолго,
-    /// и место ей за одной дверью.
-    settings: gtk::Button,
-    settings_window: gtk::Window,
-    dark_mode: gtk::Switch,
-    show_images: gtk::Switch,
+    /// Меню в шапке: настройки, история, закладки. Раньше здесь была
+    /// шестерёнка, открывавшая отдельное окно настроек; теперь это выпадающее
+    /// меню, а сами настройки живут вкладкой, а не отдельным окном.
+    menu: gtk::MenuButton,
     /// Ступень масштаба. Появляется в шапке, только когда она не сто
     /// процентов, и одним нажатием возвращает к ним: панель не свалка,
     /// а кнопка, которая всегда показывает «100%», не говорит ничего.
@@ -362,6 +359,9 @@ struct Tab {
     /// Чтобы «назад» показывал их из памяти, а не тянул из сети заново. Общий
     /// на вкладку: одна и та же картинка на двух страницах качается один раз.
     blobs: Blobs,
+    /// Это вкладка настроек, а не статья: `view` у неё заглушка, истории нет,
+    /// в сессию она не едет и на масштаб не отзывается. Одна на окно.
+    settings: bool,
 }
 
 /// Сколько байтов картинок держим на вкладке, прежде чем вытеснять старые.
@@ -590,24 +590,9 @@ fn build(app: &Application, start: Vec<String>) {
             .active(settings.shelf)
             .sensitive(false)
             .build(),
-        settings: gtk::Button::builder()
-            .icon_name("emblem-system-symbolic")
-            .tooltip_text("Settings")
-            .build(),
-        settings_window: gtk::Window::builder()
-            .title("Settings")
-            .modal(false)
-            .hide_on_close(true)
-            .default_width(420)
-            .resizable(false)
-            .build(),
-        dark_mode: gtk::Switch::builder()
-            .valign(gtk::Align::Center)
-            .active(settings.dark)
-            .build(),
-        show_images: gtk::Switch::builder()
-            .valign(gtk::Align::Center)
-            .active(settings.images)
+        menu: gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text("Menu")
             .build(),
         zoom_level: gtk::Button::builder()
             .tooltip_text("Reset zoom (Ctrl+0)")
@@ -686,7 +671,7 @@ fn build(app: &Application, start: Vec<String>) {
     header.pack_start(&ui.forward);
     header.pack_start(&ui.history);
     header.pack_start(&new_tab_button);
-    header.pack_end(&ui.settings);
+    header.pack_end(&ui.menu);
     header.pack_end(&ui.zoom_level);
     header.pack_end(&ui.show_contents);
     header.pack_end(&ui.save);
@@ -758,9 +743,6 @@ fn build(app: &Application, start: Vec<String>) {
         });
         window.add_action(&open);
     }
-    // Окно настроек собирается после состояния: кнопка «забыть» работает
-    // с журналом, а журнал лежит там.
-    build_settings(&ui, &state);
 
     // ── сцепка виджетов с действиями
     {
@@ -879,15 +861,6 @@ fn build(app: &Application, start: Vec<String>) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        ui.dark_mode.clone().connect_active_notify(move |switch| {
-            state.borrow_mut().dark = switch.is_active();
-            apply_theme(&ui, &state);
-            remember_settings(&ui, &state);
-        });
-    }
-    {
-        let ui = ui.clone();
-        let state = state.clone();
         ui.save
             .clone()
             .connect_clicked(move |_| ask_where_to_save(&ui, &state));
@@ -905,17 +878,6 @@ fn build(app: &Application, start: Vec<String>) {
         ui.zoom_level
             .clone()
             .connect_clicked(move |_| zoom_by(&ui, &state, 0));
-    }
-    {
-        let ui = ui.clone();
-        let state = state.clone();
-        ui.show_images.clone().connect_active_notify(move |switch| {
-            state.borrow_mut().images = switch.is_active();
-            if switch.is_active() {
-                show_all_shots(&ui, &state);
-            }
-            remember_settings(&ui, &state);
-        });
     }
 
     // ── поиск по странице
@@ -1095,13 +1057,150 @@ fn build(app: &Application, start: Vec<String>) {
     ui.window.present();
 }
 
-/// Окно настроек: переключатели того, что читатель решает раз и надолго.
+/// Открыть настройки вкладкой. Раньше это было отдельное окно; теперь —
+/// страница внутри блокнота, чтобы всё жило в одном окне.
 ///
-/// Почему отдельным окном, а не кнопками в шапке: панель — место для того,
-/// что нужно на каждой странице, и свалкой быть не должна. Тема и картинки
-/// нужны не на каждой, зато у каждой настройки есть причина, которую надо
-/// объяснить строкой, — в кнопку с иконкой такое не помещается.
-fn build_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
+/// Вкладка одна: если она уже открыта, просто переключаемся на неё. Иначе
+/// у окна оказались бы два экземпляра одних и тех же переключателей, а виджет
+/// GTK живёт ровно в одном месте.
+fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
+    if let Some(index) = state.borrow().tabs.iter().position(|tab| tab.settings) {
+        ui.notebook.set_current_page(Some(index as u32));
+        return;
+    }
+
+    let page = settings_page(ui, state);
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .hexpand(true)
+        .vexpand(true)
+        .child(&page)
+        .build();
+    // Тот же тон, что у страницы: холодная панель GTK рядом со слоновой
+    // костью выдавала бы склейку из двух окон.
+    scroller.add_css_class("page");
+    page.add_css_class("page");
+
+    let label = gtk::Label::builder()
+        .label("Settings")
+        .ellipsize(pango::EllipsizeMode::End)
+        .width_chars(TAB_LABEL as i32)
+        .max_width_chars(TAB_LABEL as i32)
+        .build();
+    let close = gtk::Button::builder()
+        .icon_name("window-close-symbolic")
+        .has_frame(false)
+        .build();
+    let corner = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    corner.append(&label);
+    corner.append(&close);
+
+    // Вкладке настроек нужен `view` как всякой вкладке, но статьи в ней нет —
+    // это заглушка, которую никто не показывает. Функции, которым она без
+    // разницы (сессия, масштаб, догрузка картинок), отсекают её по `settings`.
+    let id = {
+        let mut borrowed = state.borrow_mut();
+        let id = borrowed.next_id;
+        borrowed.next_id += 1;
+        borrowed.tabs.push(Tab {
+            id,
+            view: gtk::TextView::new(),
+            label: label.clone(),
+            history: History::new(),
+            links: Vec::new(),
+            marks: Vec::new(),
+            anchors: Vec::new(),
+            shots: Vec::new(),
+            site: Vec::new(),
+            entries: Vec::new(),
+            entries_for: None,
+            document: None,
+            generation: 0,
+            loading: false,
+            resume: None,
+            pending: false,
+            zoom_seen: ZOOM_NORMAL,
+            pages: HashMap::new(),
+            blobs: Blobs::default(),
+            settings: true,
+        });
+        id
+    };
+
+    let index = ui.notebook.append_page(&scroller, Some(&corner));
+    ui.notebook.set_tab_reorderable(&scroller, true);
+    ui.notebook.set_show_tabs(ui.notebook.n_pages() > 1);
+    ui.notebook.set_current_page(Some(index));
+
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        close.connect_clicked(move |_| {
+            let index = state.borrow().tabs.iter().position(|tab| tab.id == id);
+            if let Some(index) = index {
+                close_tab(&ui, &state, index);
+            }
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let middle = gtk::GestureClick::builder()
+            .button(gtk::gdk::BUTTON_MIDDLE)
+            .build();
+        middle.connect_pressed(move |gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            let index = state.borrow().tabs.iter().position(|tab| tab.id == id);
+            if let Some(index) = index {
+                close_tab(&ui, &state, index);
+            }
+        });
+        corner.add_controller(middle);
+    }
+
+    sync(ui, state, None);
+}
+
+/// Содержимое страницы настроек: переключатели того, что читатель решает раз
+/// и надолго. Строится заново на каждое открытие — переключатели тут свои,
+/// поэтому закрыть вкладку можно как любую другую, не разбирая виджеты руками.
+///
+/// У каждой настройки есть причина, которую надо объяснить строкой, — в кнопку
+/// с иконкой такое не помещается, потому это страница, а не значок в панели.
+fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
+    let (dark_on, images_on) = {
+        let borrowed = state.borrow();
+        (borrowed.dark, borrowed.images)
+    };
+    let dark_mode = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(dark_on)
+        .build();
+    let show_images = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(images_on)
+        .build();
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        dark_mode.connect_active_notify(move |switch| {
+            state.borrow_mut().dark = switch.is_active();
+            apply_theme(&ui, &state);
+            remember_settings(&ui, &state);
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        show_images.connect_active_notify(move |switch| {
+            state.borrow_mut().images = switch.is_active();
+            if switch.is_active() {
+                show_all_shots(&ui, &state);
+            }
+            remember_settings(&ui, &state);
+        });
+    }
+
     let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
     page.set_margin_top(18);
     page.set_margin_bottom(18);
@@ -1119,13 +1218,13 @@ fn build_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
     rows.append(&setting_row(
         "Dark theme",
         "Warm dark, in the same row as the ivory paper.",
-        &ui.dark_mode,
+        &dark_mode,
     ));
     rows.append(&setting_row(
         "Images",
         "Off means no decoding at all: after JavaScript is gone, the image \
          decoder is the one serious attack surface left.",
-        &ui.show_images,
+        &show_images,
     ));
     page.append(&rows);
 
@@ -1158,11 +1257,7 @@ fn build_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         forget.connect_clicked(move |_| forget_everything(&ui, &state));
     }
 
-    ui.settings_window.set_transient_for(Some(&ui.window));
-    ui.settings_window.set_child(Some(&page));
-
-    let window = ui.settings_window.clone();
-    ui.settings.connect_clicked(move |_| window.present());
+    page
 }
 
 /// Строка настройки: что делает, почему так и сам переключатель.
@@ -1260,6 +1355,35 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         });
     }
     add("history", &["<Control>h"], history);
+
+    // Закладки и настройки — соседи истории в выпадающем меню шапки.
+    // У закладок клавиши нет намеренно: их ставят звёздочкой, а список
+    // открывают из меню; у настроек — тоже, их трогают редко.
+    let bookmarks = gio::SimpleAction::new("bookmarks", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        bookmarks.connect_activate(move |_, _| {
+            new_tab(&ui, &state, Some(Address::Internal(Internal::Bookmarks)));
+        });
+    }
+    add("bookmarks", &[], bookmarks);
+
+    let settings = gio::SimpleAction::new("settings", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        settings.connect_activate(move |_, _| open_settings_tab(&ui, &state));
+    }
+    add("settings", &[], settings);
+
+    // Само меню под кнопкой в шапке. Порядок — как просили: настройки,
+    // история, закладки.
+    let menu = gio::Menu::new();
+    menu.append(Some("Settings"), Some("app.settings"));
+    menu.append(Some("History"), Some("app.history"));
+    menu.append(Some("Bookmarks"), Some("app.bookmarks"));
+    ui.menu.set_menu_model(Some(&menu));
 
     let focus = gio::SimpleAction::new("focus-address", None);
     {
@@ -1383,6 +1507,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             zoom_seen: ZOOM_NORMAL,
             pages: HashMap::new(),
             blobs: Blobs::default(),
+            settings: false,
         });
         id
     };
@@ -1778,7 +1903,7 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         .modal(true)
         .build();
 
-    let window = ui.settings_window.clone();
+    let window = ui.window.clone();
     let ui = ui.clone();
     let state = state.clone();
     dialog.choose(Some(&window), gio::Cancellable::NONE, move |answer| {
@@ -1815,12 +1940,20 @@ fn remember_session(ui: &Ui, state: &Rc<RefCell<State>>) {
     if !borrowed.keeps_session {
         return;
     }
-    let current = ui.notebook.current_page().unwrap_or_default() as usize;
+    // Вкладку настроек в сессию не пишем: это временный экран, а не место,
+    // куда читатель вернётся при следующем запуске. Текущей она поэтому и
+    // помечается по идентификатору, а не по индексу блокнота — иначе, стоя
+    // на настройках, читатель сбил бы отметку «текущей» соседней статье.
+    let current_id = ui
+        .notebook
+        .current_page()
+        .and_then(|index| borrowed.tabs.get(index as usize))
+        .map(|tab| tab.id);
     let tabs: Vec<store::Opened> = borrowed
         .tabs
         .iter()
-        .enumerate()
-        .map(|(index, tab)| store::Opened {
+        .filter(|tab| !tab.settings)
+        .map(|tab| store::Opened {
             addresses: tab.history.entries().iter().map(Address::display).collect(),
             at: tab.history.at(),
             // Место, которое ещё не применили, старше того, что показывает
@@ -1828,7 +1961,7 @@ fn remember_session(ui: &Ui, state: &Rc<RefCell<State>>) {
             // на экране, он честно отвечает «ноль», и этим нулём мы бы
             // затёрли настоящее место.
             place: tab.resume.unwrap_or_else(|| top_of(&tab.view)),
-            current: index == current,
+            current: Some(tab.id) == current_id,
         })
         .collect();
     drop(borrowed);
@@ -2098,6 +2231,12 @@ fn open_current(ui: &Ui, state: &Rc<RefCell<State>>, address: Address, remember:
         return;
     };
     let id = match state.borrow().tabs.get(index as usize) {
+        // На вкладке настроек статье места нет — открываем её новой вкладкой,
+        // а не поверх переключателей.
+        Some(tab) if tab.settings => {
+            new_tab(ui, state, Some(address));
+            return;
+        }
         Some(tab) => tab.id,
         None => return,
     };
@@ -2755,13 +2894,14 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         };
         (tab.id, tab.view.clone(), tab.document.clone())
     };
-    // Вкладка, которая ещё не грузилась: рисовать нечего, и начальную
-    // страницу ей подсовывать нельзя — она не пустая, а неоткрытая.
+    // Вкладка настроек и ещё не грузившаяся: рисовать нечего. У настроек
+    // своё содержимое, не статья, и масштаб к нему не применяется; неоткрытой
+    // подсовывать начальную страницу нельзя — она не пустая, а неоткрытая.
     if state
         .borrow()
         .tabs
         .get(index)
-        .is_some_and(|tab| tab.pending)
+        .is_some_and(|tab| tab.settings || tab.pending)
     {
         return;
     }
