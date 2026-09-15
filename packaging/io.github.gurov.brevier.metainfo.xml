@@ -90,6 +90,19 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.1" date="2026-09-15" type="development">
+      <description>
+        <p>Reading holds its place: back and forward return to where you were,
+          from memory rather than the network, images already in place; an image
+          loading above the viewport no longer jogs the text. Links show their
+          address on hover. Settings, history and bookmarks moved into a header
+          menu, and settings now opens in a tab.</p>
+        <p>Also new since 0.1.0: typesetting by language (hyphenation and
+          non-breaking spaces), a page zoom shared across tabs, native Markdown
+          when a site serves it, and a check that scores a page for reading
+          without JavaScript.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-13" type="development">
       <description>
         <p>Early build, shared for testing: the window, the repository mode, tabs,

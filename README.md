@@ -40,7 +40,7 @@ One file, one command, and the runtime brings GTK with it — so it does not car
 distribution is underneath:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.1.0/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.1.1/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -78,8 +78,8 @@ also in the [release](https://github.com/gurov/brevier/releases/latest), or buil
 `packaging/tarball.sh`:
 
 ```sh
-tar xf brevier-0.1.0-x86_64-linux.tar.gz
-cd brevier-0.1.0-x86_64-linux && ./install.sh
+tar xf brevier-0.1.1-x86_64-linux.tar.gz
+cd brevier-0.1.1-x86_64-linux && ./install.sh
 ```
 
 `install.sh` puts the two binaries, the desktop entry, the icon and the licenses under
