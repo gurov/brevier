@@ -232,11 +232,25 @@ ems, some 65 characters — is a phone's natural column instead of a compromise 
 And accessibility improves rather than degrades: native views speak to TalkBack, so
 the gap the README states for every platform but Linux closes here instead of widening.
 
-Four seams in the core, each of them small, none of them done: the platform verifier
-wants a JNI initialisation and a Kotlin component in the Gradle build; the folders
-learn a fourth place, for which `BREVIER_DATA_DIR` is the hook and it exists already;
-font fallback beyond the shipped Noto has no fontconfig to ask and must ask the system
-instead; "open in your browser" becomes an Intent.
+A spike has run, so what follows is measured rather than assumed. The core builds for
+`aarch64-linux-android` and links into a 6 MB shared library; two JNI entry points are
+enough for a phone to read a page; and the failure texts in the core serve an Android
+front-end unchanged, which is what they were put in the core for.
+
+Three of the four seams are small: the folders learn a fourth place, for which
+`BREVIER_DATA_DIR` is the hook and it exists already; font fallback beyond the shipped
+Noto has no fontconfig to ask and must ask the system instead; "open in your browser"
+becomes an Intent.
+
+The fourth is not small. The platform verifier needs a JNI initialisation and a Kotlin
+component in the Gradle build, and with both in place it refuses most of the web:
+Android's trust manager insists on OCSP revocation checking, Let's Encrypt stopped
+publishing OCSP responders in August 2025, and the verifier reports the resulting
+exception as a revoked certificate. Wikipedia, GitHub and the Rust blog all fail that
+way, while a site whose certificate still carries an OCSP URL reads fine. The bug is
+upstream and open (rustls/rustls-platform-verifier#221). That leaves three ways: wait
+for the fix, patch the Kotlin component we already ship, or stop delegating trust to
+the operating system — and the third costs a promise, so it is not a way.
 
 ### macOS and Windows
 

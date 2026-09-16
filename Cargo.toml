@@ -50,3 +50,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
 url = "2.5.8"
 zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }
+
+# Android: ядро едет в приложение общей библиотекой и разговаривает с ним
+# по JNI. Версию `jni` держим ту же, что тянет платформенный проверяющий
+# сертификаты, — иначе `Env` у них окажется разным типом. Обеих зависимостей
+# на десктопе нет вовсе: цель отсекает их раньше, чем фича.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+rustls-platform-verifier = "0.7"
