@@ -225,6 +225,31 @@ With them comes the extra-root setting (#18): a certificate the reader adds, val
 only for the hosts they list next to it. On Linux "install the root in the system"
 is the answer; on the other two it stops being an obvious instruction.
 
+### Android
+
+A second front-end, not a second build — which is what separates it from the two
+above. The core crosses as it is: the library links no toolkit, its dependencies are
+Rust the whole way down, and the dependency graph for `aarch64-linux-android` holds no
+X11, no fontconfig, no GTK. CI cross-compiles it into a shared library for arm64 on
+every push so that it stays that way, long before anybody writes the front-end.
+
+The window does not cross. GTK's Android backend is experimental, and the interaction
+is keyboard and mouse throughout — Ctrl+L, a tooltip on hover, a middle click, a
+divider dragged to width. None of those exist on a phone. So the front-end is native,
+Kotlin over the core, and what travels with the core is the typographic model: the
+measure is stated in ems rather than pixels, and it holds wherever it is drawn.
+
+Two things argue for the platform rather than merely allowing it. That measure — 36
+ems, some 65 characters — is a phone's natural column instead of a compromise on it.
+And accessibility improves rather than degrades: native views speak to TalkBack, so
+the gap the README states for every platform but Linux closes here instead of widening.
+
+Four seams in the core, each of them small, none of them done: the platform verifier
+wants a JNI initialisation and a Kotlin component in the Gradle build; the folders
+learn a fourth place, for which `BREVIER_DATA_DIR` is the hook and it exists already;
+font fallback beyond the shipped Noto has no fontconfig to ask and must ask the system
+instead; "open in your browser" becomes an Intent.
+
 ### Print
 
 `Ctrl+P`, in the reader's own type, through GTK's print dialog. A PDF falls out of
@@ -255,7 +280,8 @@ Recorded so that nobody rediscovers them in six months.
 - **Authenticated reading** goes through the companion extension. Brevier never
   holds a cookie or any other credential.
 - **Platforms:** Linux first and in a store; macOS and Windows builds after, with the
-  accessibility gap stated rather than hidden.
+  accessibility gap stated rather than hidden. Android is planned as well, as a second
+  front-end over the same core rather than another build of the same window.
 - **The archive** is on by default and compressed.
 - **The check** gives a number, 0 to 100, with the arithmetic printed.
 - **The alternate-Markdown link** is followed. A second request for a page that then
