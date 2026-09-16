@@ -212,26 +212,14 @@ that *any* reading client reads it well — the list from the manifesto, written
 with the check as its reference test and the alternate-Markdown link as its centre.
 Written after the check has run on enough sites to know which findings matter.
 
-### macOS and Windows
-
-Builds for both, once Linux is in a store. GTK 4 runs on both and the fonts ship
-inside the binary, so the typography holds. What does not hold is accessibility: GTK
-speaks AT-SPI, and VoiceOver and NVDA do not listen. The builds ship with that stated
-in the README, the way the Linux-only note is stated today. Whether the gap is later
-closed with a second front-end is a question for when there are readers on those
-platforms to ask.
-
-With them comes the extra-root setting (#18): a certificate the reader adds, valid
-only for the hosts they list next to it. On Linux "install the root in the system"
-is the answer; on the other two it stops being an obvious instruction.
-
 ### Android
 
 A second front-end, not a second build — which is what separates it from the two
-above. The core crosses as it is: the library links no toolkit, its dependencies are
-Rust the whole way down, and the dependency graph for `aarch64-linux-android` holds no
-X11, no fontconfig, no GTK. CI cross-compiles it into a shared library for arm64 on
-every push so that it stays that way, long before anybody writes the front-end.
+desktop builds below. The core crosses as it is: the library links no toolkit, its
+dependencies are Rust the whole way down, and the dependency graph for
+`aarch64-linux-android` holds no X11, no fontconfig, no GTK. CI cross-compiles it into
+a shared library for arm64 on every push so that it stays that way, long before
+anybody writes the front-end.
 
 The window does not cross. GTK's Android backend is experimental, and the interaction
 is keyboard and mouse throughout — Ctrl+L, a tooltip on hover, a middle click, a
@@ -249,6 +237,19 @@ wants a JNI initialisation and a Kotlin component in the Gradle build; the folde
 learn a fourth place, for which `BREVIER_DATA_DIR` is the hook and it exists already;
 font fallback beyond the shipped Noto has no fontconfig to ask and must ask the system
 instead; "open in your browser" becomes an Intent.
+
+### macOS and Windows
+
+Builds for both, once Linux is in a store. GTK 4 runs on both and the fonts ship
+inside the binary, so the typography holds. What does not hold is accessibility: GTK
+speaks AT-SPI, and VoiceOver and NVDA do not listen. The builds ship with that stated
+in the README, the way the Linux-only note is stated today. Whether the gap is later
+closed with a second front-end is a question for when there are readers on those
+platforms to ask.
+
+With them comes the extra-root setting (#18): a certificate the reader adds, valid
+only for the hosts they list next to it. On Linux "install the root in the system"
+is the answer; on the other two it stops being an obvious instruction.
 
 ### Print
 
@@ -279,9 +280,10 @@ Recorded so that nobody rediscovers them in six months.
 
 - **Authenticated reading** goes through the companion extension. Brevier never
   holds a cookie or any other credential.
-- **Platforms:** Linux first and in a store; macOS and Windows builds after, with the
-  accessibility gap stated rather than hidden. Android is planned as well, as a second
-  front-end over the same core rather than another build of the same window.
+- **Platforms:** Linux first and in a store; then Android, as a second front-end over
+  the same core rather than another build of the same window — readers read on phones,
+  and it is the one platform where accessibility improves rather than degrades; macOS
+  and Windows builds after that, with their accessibility gap stated rather than hidden.
 - **The archive** is on by default and compressed.
 - **The check** gives a number, 0 to 100, with the arithmetic printed.
 - **The alternate-Markdown link** is followed. A second request for a page that then
