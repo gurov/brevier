@@ -227,6 +227,21 @@ divider dragged to width. None of those exist on a phone. So the front-end is na
 Kotlin over the core, and what travels with the core is the typographic model: the
 measure is stated in ems rather than pixels, and it holds wherever it is drawn.
 
+It draws the article itself, in native text, rather than handing it to a WebView. The
+WebView is the cheaper road and an honest one to weigh: our Markdown, our HTML, our
+CSS, scripts off by the toolkit's own default, and hyphenation, tables, selection and
+TalkBack all arrive for free. What it costs is the promise. Reading the web through a
+browser engine is the thing this program exists to stop doing, and the type would move
+into a CSS layer that the desktop does not have, so one article would be set two ways
+on two platforms. Drawing it natively is direct work rather than clever work: the core
+hands a front-end a parsed structure instead of a blob of text, and the type is already
+a handful of constants.
+
+Nor is that front-end as large as the desktop window makes it look. Of the window's
+five thousand lines, a quarter draw the article; the rest are tabs, the session,
+history, the shelf, search, zoom and system glue, and a first release on a phone needs
+almost none of it.
+
 Two things argue for the platform rather than merely allowing it. That measure — 36
 ems, some 65 characters — is a phone's natural column instead of a compromise on it.
 And accessibility improves rather than degrades: native views speak to TalkBack, so
@@ -298,6 +313,9 @@ Recorded so that nobody rediscovers them in six months.
   the same core rather than another build of the same window — readers read on phones,
   and it is the one platform where accessibility improves rather than degrades; macOS
   and Windows builds after that, with their accessibility gap stated rather than hidden.
+- **The Android front-end draws the article itself**, in native text rather than in a
+  WebView: the type is a promise of the product, and a browser engine is precisely what
+  the program exists to do without.
 - **The archive** is on by default and compressed.
 - **The check** gives a number, 0 to 100, with the arithmetic printed.
 - **The alternate-Markdown link** is followed. A second request for a page that then
