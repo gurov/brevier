@@ -178,6 +178,7 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Space`, `PageUp`/`PageDown` | page down / up |
 | arrows, `Home`/`End` | line, top, bottom |
 | `Ctrl+L` | focus the address bar |
+| `Ctrl+R`, `F5` | load the page afresh, past the saved copy |
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
 | `Ctrl+H` | what you have read |
 | `Ctrl+D` | keep this page, or take it off again |
@@ -189,7 +190,14 @@ The reports go to the job summary; the lowest score is the step's `score` output
 
 Ctrl+click and middle-click open a link in a new tab; middle-click a tab closes it.
 Hovering a link shows where it goes. Settings, history and bookmarks are one menu in the
-header. Selection, copying and the context menu come from GTK.
+header, under Reload and **Check this page**. Selection, copying and the context menu come
+from GTK.
+
+An article you have opened in the last week opens from a copy on disk, images included —
+no fetch, no extraction — and the status line says how old the copy is. `Ctrl+R` fetches
+the page as it is now. A list of links (a blog's front page, a directory) is always
+fetched: its point is what is new. "Forget everything" in Settings deletes the copies with
+the history.
 
 ## In the window
 

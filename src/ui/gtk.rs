@@ -162,8 +162,12 @@ fn main() -> glib::ExitCode {
         .build();
 
     // Иконка ставится на запуске приложения, а не в `main`: темы значков
-    // до открытого дисплея ещё нет.
-    app.connect_startup(|_| use_bundled_icon());
+    // до открытого дисплея ещё нет. Там же, раз на запуск и в фоне, — уборка
+    // недельного кэша страниц: второй экземпляр сюда не доходит.
+    app.connect_startup(|_| {
+        use_bundled_icon();
+        std::thread::spawn(|| brevier::cache::Cache::open().prune());
+    });
 
     app.connect_command_line(|app, command_line| {
         let start: Vec<String> = command_line
@@ -1229,8 +1233,9 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
     history_rows.add_css_class("rich-list");
     history_rows.append(&action_row(
         "Forget everything you have read",
-        "The list at brevier:history goes away, and the address bar stops \
-         suggesting those pages. Bookmarks and open tabs stay.",
+        "The list at brevier:history goes away, the address bar stops \
+         suggesting those pages, and the saved copies of pages are deleted. \
+         Bookmarks and open tabs stay.",
         &forget,
     ));
     page.append(&history_rows);
@@ -1385,10 +1390,22 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("check", &[], check);
 
+    // Перезагрузка — мимо памяти вкладки и мимо недельной копии: читатель
+    // просит страницу такой, какая она на сайте сейчас. Место чтения
+    // остаётся, как у браузеров.
+    let reload = gio::SimpleAction::new("reload", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        reload.connect_activate(move |_, _| reload_current(&ui, &state));
+    }
+    add("reload", &["<Control>r", "F5"], reload);
+
     // Само меню под кнопкой в шапке. Сверху — про открытую страницу, под
     // чертой — места программы в том порядке, как просили: настройки,
     // история, закладки.
     let page = gio::Menu::new();
+    page.append(Some("Reload"), Some("app.reload"));
     page.append(Some("Check this page"), Some("app.check"));
     let places = gio::Menu::new();
     places.append(Some("Settings"), Some("app.settings"));
@@ -1452,6 +1469,31 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         save.connect_activate(move |_, _| ask_where_to_save(&ui, &state));
     }
     add("save", &["<Control>s"], save);
+}
+
+/// Загрузить открытую страницу заново, из сети, на том же месте.
+fn reload_current(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let target = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.tabs.get_mut(index as usize) else {
+            return;
+        };
+        if tab.settings {
+            return;
+        }
+        let here = top_of(&tab.view);
+        tab.resume = (here > 0).then_some(here);
+        tab.history
+            .current()
+            .cloned()
+            .map(|address| (tab.id, address))
+    };
+    if let Some((id, address)) = target {
+        open_with(ui, state, id, address, false, true);
+    }
 }
 
 /// Открыть новую вкладку и, если дали адрес, сразу читать.
@@ -1909,7 +1951,8 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
     let dialog = gtk::AlertDialog::builder()
         .message("Forget everything you have read?")
         .detail(
-            "The list of pages goes away, and the address bar stops suggesting them.              Bookmarks and open tabs stay.",
+            "The list of pages goes away, the address bar stops suggesting them, \
+             and the saved copies of pages are deleted. Bookmarks and open tabs stay.",
         )
         .buttons(["Cancel", "Forget"])
         .cancel_button(0)
@@ -1925,6 +1968,9 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
             return;
         }
         state.borrow_mut().store.forget();
+        // Копии страниц — такой же след прочитанного, как журнал. Память
+        // вкладок не трогаем: открытые вкладки остаются, как и обещано.
+        brevier::cache::Cache::open().forget();
         notice(&ui, "The list of pages you have read is empty now");
     });
 }
@@ -2290,6 +2336,22 @@ fn step(ui: &Ui, state: &Rc<RefCell<State>>, backwards: bool) {
 
 /// Открыть адрес в названной вкладке.
 fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember: bool) {
+    open_with(ui, state, id, address, remember, false);
+}
+
+/// Открыть адрес; `fresh` — мимо обоих кэшей, прямо из сети (перезагрузка).
+///
+/// Откуда берётся страница, по порядку: память вкладки («назад/вперёд»),
+/// недельная копия на диске (`brevier::cache`), сеть. Скачанное ложится
+/// и в память, и на диск.
+fn open_with(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    address: Address,
+    remember: bool,
+    fresh: bool,
+) {
     // Решётку в адресе запоминаем здесь: серверу её не отправляют, и в адресе
     // загруженного документа её уже не будет.
     let anchor = anchor_of(&address);
@@ -2317,7 +2379,7 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
         // страница у читателя уже была, тянуть её заново незачем. Свежий заход
         // (набор адреса, клик по ссылке) кэш обходит — там читатель просит
         // именно новую загрузку.
-        let cached = (!remember && cacheable)
+        let cached = (!remember && cacheable && !fresh)
             .then(|| tab.pages.get(&key).cloned())
             .flatten();
         if cached.is_none() {
@@ -2336,6 +2398,26 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
         return;
     }
 
+    // Недельная копия на диске. Читается сразу, без потока: это один файл
+    // в десятки килобайт, а «Loading…» на кадр мигал бы зря. Что страница
+    // из копии, говорим строкой — это не та страница, что сейчас на сайте.
+    if !fresh && let Some(copy) = brevier::cache::Cache::open().page(&address) {
+        show_document(ui, state, id, &copy.document, anchor.as_deref());
+        if current_id(ui, state) == Some(id) {
+            notice(
+                ui,
+                &format!(
+                    "{} Ctrl+R loads the page afresh.",
+                    brevier::cache::copy_note(copy.saved)
+                ),
+            );
+        }
+        if cacheable && let Some(tab) = state.borrow_mut().find(id) {
+            tab.pages.insert(key, copy.document);
+        }
+        return;
+    }
+
     sync(ui, state, None);
 
     if let Some(view) = view_of(state, id) {
@@ -2349,7 +2431,14 @@ fn open(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: Address, remember
     // в поток загрузки: на отказе он понадобится, а его уже не будет.
     let external = address.external();
     glib::spawn_future_local(async move {
-        let loaded = gio::spawn_blocking(move || brevier::open(&address, UserAgent::Honest)).await;
+        let loaded = gio::spawn_blocking(move || {
+            let document = brevier::open(&address, UserAgent::Honest)?;
+            // На диск — здесь же, в потоке: кэш сам решает, годится ли
+            // документ (статья из сети — да, лента и свои страницы — нет).
+            brevier::cache::Cache::open().keep(&address, &document);
+            Ok::<_, brevier::Error>(document)
+        })
+        .await;
 
         // Читатель уже ушёл на другую страницу — ответ никому не нужен.
         if state.borrow_mut().find(id).map(|tab| tab.generation) != Some(generation) {
@@ -4501,8 +4590,22 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
                 Ok((raster, None::<Vec<u8>>))
             }
             None => {
-                let (bytes, mime) = media::grab(&source, UserAgent::Honest)?;
+                // Недельная копия на диске, потом сеть. На диск — только
+                // то, что разобралось: битые байты хранить незачем.
+                let disk = brevier::cache::Cache::open();
+                let copy = match &source {
+                    Source::Web(url) => disk.image(url),
+                    Source::File(_) => None,
+                };
+                let from_disk = copy.is_some();
+                let (bytes, mime) = match copy {
+                    Some(bytes) => (bytes, None),
+                    None => media::grab(&source, UserAgent::Honest)?,
+                };
                 let raster = media::decode(&bytes, mime.as_deref(), look)?;
+                if !from_disk && let Source::Web(url) = &source {
+                    disk.keep_image(url, &bytes);
+                }
                 let keep = matches!(source, Source::Web(_)).then_some(bytes);
                 Ok((raster, keep))
             }

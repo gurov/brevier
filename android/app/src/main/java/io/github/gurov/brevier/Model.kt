@@ -98,6 +98,8 @@ class Loaded(
     val title: String,
     val listing: Boolean,
     val served: Boolean,
+    /** Страница из недельной копии на диске: строка о том, какой давности. */
+    val copy: String?,
     val kept: Boolean,
     val insecure: Boolean,
     val internal: Boolean,
@@ -124,6 +126,7 @@ class Loaded(
                 title = if (ok) json.optString("title") else json.optString("headline"),
                 listing = json.optBoolean("listing"),
                 served = json.optBoolean("served"),
+                copy = json.text("copy"),
                 kept = json.optBoolean("kept"),
                 insecure = json.optBoolean("insecure"),
                 internal = json.optBoolean("internal"),

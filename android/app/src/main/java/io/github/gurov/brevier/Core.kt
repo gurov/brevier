@@ -34,8 +34,12 @@ object Core {
     fun intro(): JSONObject = obj("intro")
     fun parse(typed: String): JSONObject = obj("parse", typed)
 
-    /** Смещение от UTC в секундах — ядро пишет его в журнал рядом со временем. */
-    fun open(address: String): JSONObject = obj("open", utcOffset(), address)
+    /**
+     * Смещение от UTC в секундах — ядро пишет его в журнал рядом со временем.
+     * `fresh` — мимо недельной копии на диске, прямо из сети (перезагрузка).
+     */
+    fun open(address: String, fresh: Boolean = false): JSONObject =
+        obj("open", utcOffset(), address, if (fresh) "1" else "0")
     fun follow(here: String, target: String): JSONObject = obj("follow", here, target)
     fun suggest(typed: String): JSONArray = list("suggest", typed)
     fun titleOf(address: String): String? = obj("title", address).text("title")

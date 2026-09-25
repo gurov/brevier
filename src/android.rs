@@ -38,6 +38,7 @@ use jni::errors::{Error as JniError, ThrowRuntimeExAndDefault};
 use jni::objects::{JByteArray, JClass, JIntArray, JObject, JString};
 
 use crate::address::{self, Address};
+use crate::cache::{self, Cache};
 use crate::failure::describe;
 use crate::fetch::UserAgent;
 use crate::media::{self, Fit, Look, Source};
@@ -131,6 +132,8 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_init<'caller>(
         store::set_home(PathBuf::from(home));
         rustls_platform_verifier::android::init_with_env(env, context)?;
         crate::init_crypto();
+        // Уборка недельного кэша страниц — раз на запуск и в фоне.
+        std::thread::spawn(|| Cache::open().prune());
         Ok(())
     });
     outcome.resolve::<ThrowRuntimeExAndDefault>()
@@ -212,7 +215,7 @@ fn call(method: &str, arg: &str) -> String {
         "typography" => typography(),
         "intro" => intro(),
         "parse" => parse(arg),
-        "open" => open(field(0).parse().unwrap_or(0), field(1)),
+        "open" => open(field(0).parse().unwrap_or(0), field(1), field(2) == "1"),
         "follow" => follow(field(0), field(1)),
         "suggest" => suggest(arg),
         "title" => title(arg),
@@ -233,6 +236,8 @@ fn call(method: &str, arg: &str) -> String {
         }
         "forget" => {
             core().store.forget();
+            // Копии страниц — такой же след прочитанного, как журнал.
+            Cache::open().forget();
             "{}".to_owned()
         }
         "docs" => docs(arg),
@@ -411,17 +416,27 @@ fn failure_json(failure: &crate::failure::Failure, external: Option<String>) -> 
     out
 }
 
-/// Открыть адрес: сеть, извлечение, раскладка — и запись в журнал.
-fn open(offset: i32, typed: &str) -> String {
+/// Открыть адрес: недельная копия или сеть, извлечение, раскладка — и запись
+/// в журнал. `fresh` — мимо копии, прямо из сети (перезагрузка).
+fn open(offset: i32, typed: &str, fresh: bool) -> String {
     let address = match address::parse(typed) {
         Ok(address) => address,
         Err(error) => return failure_json(&describe(&error), None),
     };
     let external = address.external();
     let anchor = page::anchor_in(&address);
-    let document = match crate::open(&address, UserAgent::Honest) {
-        Ok(document) => document,
-        Err(error) => return failure_json(&describe(&error), Some(external)),
+    let disk = Cache::open();
+    let copy = (!fresh).then(|| disk.page(&address)).flatten();
+    let saved = copy.as_ref().map(|copy| copy.saved);
+    let document = match copy {
+        Some(copy) => copy.document,
+        None => match crate::open(&address, UserAgent::Honest) {
+            Ok(document) => {
+                disk.keep(&address, &document);
+                document
+            }
+            Err(error) => return failure_json(&describe(&error), Some(external)),
+        },
     };
     let page = Page::of(&document);
 
@@ -449,6 +464,11 @@ fn open(offset: i32, typed: &str) -> String {
         document.kind == Kind::Listing,
         document.served,
     ));
+    // Страница из копии говорит об этом: это не то, что на сайте сейчас.
+    if let Some(saved) = saved {
+        out.push_str(",\"copy\":");
+        json_string(&mut out, &cache::copy_note(saved));
+    }
     if let Some(anchor) = anchor {
         out.push_str(",\"anchor\":");
         json_string(&mut out, &anchor);
@@ -673,12 +693,23 @@ fn image(source: &str, look: Look) -> Vec<u8> {
         Source::Web(url) => core().blobs.get(url),
         Source::File(_) => None,
     };
+    // Нет в памяти — недельная копия на диске, её тоже в память.
+    let disk = Cache::open();
+    let cached = cached.or_else(|| match &source {
+        Source::Web(url) => disk.image(url).map(|bytes| {
+            let bytes = Arc::new(bytes);
+            core().blobs.put(url.clone(), bytes.clone());
+            bytes
+        }),
+        Source::File(_) => None,
+    });
     let decoded = match cached {
         Some(bytes) => media::decode(&bytes, None, look),
         // В кэш — только то, что разобралось: битые байты хранить незачем.
         None => media::grab(&source, UserAgent::Honest).and_then(|(bytes, mime)| {
             let raster = media::decode(&bytes, mime.as_deref(), look)?;
             if let Source::Web(url) = &source {
+                disk.keep_image(url, &bytes);
                 core().blobs.put(url.clone(), Arc::new(bytes));
             }
             Ok(raster)

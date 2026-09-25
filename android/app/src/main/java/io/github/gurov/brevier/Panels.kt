@@ -345,7 +345,7 @@ class SettingsPage(
         column.addView(section("History", palette))
         column.addView(row(
             "Forget everything you have read",
-            "The list at brevier:history goes away, and the address bar stops suggesting those pages. Bookmarks and open tabs stay.",
+            "The list at brevier:history goes away, the address bar stops suggesting those pages, and the saved copies of pages are deleted. Bookmarks and open tabs stay.",
             button("Forget", 0xffb3261e.toInt(), palette) { forget() }, palette,
         ))
         visibility = VISIBLE

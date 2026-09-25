@@ -486,7 +486,7 @@ class MainActivity : Activity(), ArticleHost {
         open(tab, parsed.getString("address"), remember = true)
     }
 
-    private fun open(tab: Tab, address: String, remember: Boolean) {
+    private fun open(tab: Tab, address: String, remember: Boolean, fresh: Boolean = false) {
         if (remember) {
             // Место на покидаемой странице — чтобы «назад» вернул сюда.
             val view = tab.view
@@ -498,7 +498,7 @@ class MainActivity : Activity(), ArticleHost {
         val generation = tab.generation
         // «Назад» и «вперёд» по уже показанной странице — из памяти, без сети.
         // Свежий заход кэш обходит: там читатель просит именно новую загрузку.
-        val cached = if (!remember && !address.startsWith("brevier:")) tab.pages[address] else null
+        val cached = if (!remember && !fresh && !address.startsWith("brevier:")) tab.pages[address] else null
         if (cached != null) {
             showDocument(tab, cached)
             return
@@ -512,7 +512,7 @@ class MainActivity : Activity(), ArticleHost {
 
         App.work.execute {
             val loaded = try {
-                Loaded.of(Core.open(address), address)
+                Loaded.of(Core.open(address, fresh), address)
             } catch (failure: Throwable) {
                 null
             }
@@ -591,6 +591,8 @@ class MainActivity : Activity(), ArticleHost {
         if (tab == currentTab()) {
             // Список ссылок показываем как есть, но говорим, что это он.
             if (loaded.listing) notice(LISTING)
+            // Из копии — не то, что на сайте сейчас; об этом строкой.
+            else if (loaded.copy != null) notice("${loaded.copy} Reload, in the menu, loads the page afresh.")
             else if (loaded.served) notice(SERVED_MARKDOWN)
         }
         if (loaded.ok) seekEntries(tab, loaded)
@@ -604,6 +606,15 @@ class MainActivity : Activity(), ArticleHost {
         if (tab.shown != null) tab.resume = view.place()
         render(tab)
         if (hits.isNotEmpty() && tab == currentTab()) find(needle.text.toString(), restart = false)
+    }
+
+    /** Загрузить открытую страницу заново, из сети, на том же месте. */
+    private fun reload() {
+        val tab = currentTab() ?: return
+        val address = tab.current() ?: return
+        val view = tab.view
+        if (tab.shown != null && view != null) tab.resume = view.place()
+        open(tab, address, remember = false, fresh = true)
     }
 
     /** Шаг по истории текущей вкладки, с возвратом на прежнее место. */
@@ -888,6 +899,7 @@ class MainActivity : Activity(), ArticleHost {
             val target = tab?.shown?.external?.ifEmpty { null }
             if (target == null) notice("Nothing to open outside") else openOutside(target)
         }
+        menu.item("Reload") { reload() }
         // Отчёт — новой вкладкой: его читают рядом со страницей, а не вместо неё.
         menu.item("Check this page") {
             val target = tab?.shown?.check
@@ -967,7 +979,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun forgetEverything() {
         AlertDialog.Builder(this)
             .setTitle("Forget everything you have read?")
-            .setMessage("The list of pages goes away, and the address bar stops suggesting them. Bookmarks and open tabs stay.")
+            .setMessage("The list of pages goes away, the address bar stops suggesting them, and the saved copies of pages are deleted. Bookmarks and open tabs stay.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Forget") { _, _ ->
                 Core.forget()
@@ -1209,6 +1221,7 @@ class MainActivity : Activity(), ArticleHost {
                 KeyEvent.KEYCODE_S -> { askWhereToSave(); true }
                 KeyEvent.KEYCODE_H -> { newTab("brevier:history"); true }
                 KeyEvent.KEYCODE_D -> { keepPage(); true }
+                KeyEvent.KEYCODE_R -> { reload(); true }
                 KeyEvent.KEYCODE_O -> { currentTab()?.shown?.external?.ifEmpty { null }?.let(::openOutside); true }
                 KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_NUMPAD_ADD -> { zoom(+1); true }
                 KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> { zoom(-1); true }
@@ -1216,6 +1229,10 @@ class MainActivity : Activity(), ArticleHost {
                 else -> false
             }
             if (done) return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_F5) {
+            reload()
+            return true
         }
         if (event.action == KeyEvent.ACTION_DOWN && event.isAltPressed) {
             when (event.keyCode) {
