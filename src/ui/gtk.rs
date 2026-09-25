@@ -33,8 +33,13 @@ use brevier::code;
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
-    HEADING_WEIGHTS, HEADINGS, LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, TEXT_SIZE,
-    ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
+    ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, HANG, HEADING_WEIGHTS, HEADINGS, INDENT,
+    LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, NOTE_HANG, NOTE_INDENT, NOTE_SIZE,
+    NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE, TEXT_SIZE, ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
+};
+use brevier::palette::{
+    FOUND, FOUND_HERE, FOUND_INK, INK_DARK, INK_LIGHT, PAPER_DARK, PAPER_LIGHT, SHELF_DARK,
+    SHELF_LIGHT, colors, rgb,
 };
 use brevier::save;
 use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
@@ -103,28 +108,6 @@ const QUOTE_LEVELS: i32 = 3;
 /// Куда по высоте окна ставить заголовок, к которому прыгнули: вплотную
 /// к кромке он выглядит обрезанным.
 const ANCHOR_ALIGN: f64 = 0.1;
-
-/// Цвета страницы. Заданы здесь, а не взяты у темы GTK, по той же причине,
-/// по которой в комплекте едут гарнитуры: вид задаёт читатель, а не система.
-/// Заодно уходит разнобой, из-за которого поля вокруг колонки текста красила
-/// тема, а саму колонку — виджет текста.
-///
-/// Бумага цвета слоновой кости, а не белая: чистый белый на экране светится,
-/// а тёплый тон это свечение снимает, не трогая контраст — краска остаётся
-/// почти чёрной. Тёмная тема подобрана в тот же тёплый ряд, иначе переключение
-/// выглядит сменой продукта, а не света.
-const PAPER_DARK: &str = "#1d1b19";
-const INK_DARK: &str = "#ded8cf";
-const PAPER_LIGHT: &str = "#faf5ea";
-const INK_LIGHT: &str = "#23201c";
-/// Оглавлению отличаться можно: это не страница, а полка рядом с ней.
-const SHELF_DARK: &str = "#171514";
-const SHELF_LIGHT: &str = "#f3ecdd";
-/// Найденное поиском. Цвета одни на обе темы: подсветка обязана читаться
-/// и там и там, а жёлтый маркер узнаётся без объяснений.
-const FOUND: &str = "#f2d47e";
-const FOUND_HERE: &str = "#f6a13c";
-const FOUND_INK: &str = "#1c1a17";
 
 /// Что окно отвечает в терминале. Оно запускается строкой, значит обязано
 /// уметь объяснить себя там же: `--help` у окна — такая же часть продукта,
@@ -2755,67 +2738,6 @@ fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
     paint("com", "foreground", colors.comment);
 }
 
-/// Краски, зависящие от темы. Всё, что не бумага и не краска текста:
-/// ссылка, приглушённое, подложка кода, четыре цвета подсветки и линейка
-/// таблицы. Собраны в одном месте, потому что меняются вместе.
-struct Colors {
-    link: &'static str,
-    dim: &'static str,
-    /// Подложка блока кода и кода в строке.
-    panel: &'static str,
-    keyword: &'static str,
-    literal: &'static str,
-    number: &'static str,
-    comment: &'static str,
-    /// Линейки таблицы.
-    rule: &'static str,
-    /// Строка полки под глазами и строка под курсором. В тёплом ряду
-    /// бумаги, а не в синем ряду темы: полка стоит вплотную к странице.
-    chosen: &'static str,
-    touched: &'static str,
-}
-
-fn colors(dark: bool) -> Colors {
-    if dark {
-        Colors {
-            link: "#8ec4d4",
-            dim: "#958c80",
-            panel: "#26231f",
-            keyword: "#c79bd4",
-            literal: "#8fbf8f",
-            number: "#dda15e",
-            comment: "#8a8175",
-            rule: "#3d3833",
-            chosen: "#332e27",
-            touched: "#252220",
-        }
-    } else {
-        Colors {
-            link: "#0d6a9e",
-            dim: "#7a7266",
-            panel: "#f2ead9",
-            keyword: "#7b3fa0",
-            literal: "#1f7a3d",
-            number: "#9a5518",
-            comment: "#857c6e",
-            rule: "#e2d9c6",
-            chosen: "#e7dabc",
-            touched: "#efe7d6",
-        }
-    }
-}
-
-/// `#rrggbb` в три байта. Цвета записаны так, как их читают глазами,
-/// а декодеру картинок нужны числа.
-fn rgb(hex: &str) -> [u8; 3] {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() < 6 {
-        return [255, 255, 255];
-    }
-    let byte = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).unwrap_or(255);
-    [byte(0), byte(2), byte(4)]
-}
-
 thread_local! {
     static ZOOM: Cell<f32> = const { Cell::new(1.0) };
     /// Первое окно процесса — то, которое отвечает за сессию.
@@ -3334,7 +3256,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         "code",
         &[
             ("family", &MONO_FAMILY),
-            ("size-points", &(body * 0.9)),
+            ("size-points", &(body * f64::from(CODE_SIZE))),
             ("background", &colors.panel),
         ],
     );
@@ -3346,7 +3268,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         "codeblock",
         &[
             ("family", &MONO_FAMILY),
-            ("size-points", &(body * 0.9)),
+            ("size-points", &(body * f64::from(CODE_SIZE))),
             // Блок стоит в той же мере, что и текст: левый край кода
             // ровно под первой буквой абзаца. Поле слева было бы видно
             // дважды — подложка красится от него же, и панель отъезжала
@@ -3356,8 +3278,8 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             // первая строка стоит у края, перенос длинной строки кода
             // уходит правее, и его видно. Строку кода не перенести нельзя —
             // колонок в буфере нет.
-            ("indent", &px(-18.0)),
-            ("pixels-below-lines", &px(2.0)),
+            ("indent", &px(-f64::from(HANG))),
+            ("pixels-below-lines", &px(f64::from(CODE_GAP))),
             ("paragraph-background", &colors.panel),
         ],
     );
@@ -3366,7 +3288,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         buffer,
         "pad",
         &[
-            ("size-points", &(body * 0.4)),
+            ("size-points", &(body * f64::from(PAD_SIZE))),
             ("paragraph-background", &colors.panel),
             ("pixels-above-lines", &extra),
             ("pixels-below-lines", &extra),
@@ -3393,7 +3315,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             &format!("quote{level}"),
             &[
                 ("style", &pango::Style::Italic),
-                ("left-margin", &px(f64::from(26 * level))),
+                ("left-margin", &px(f64::from(INDENT) * f64::from(level))),
             ],
         );
     }
@@ -3405,8 +3327,8 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             buffer,
             &format!("list{level}"),
             &[
-                ("left-margin", &px(f64::from(26 * level))),
-                ("indent", &px(-18.0)),
+                ("left-margin", &px(f64::from(INDENT) * f64::from(level))),
+                ("indent", &px(-f64::from(HANG))),
                 // Пункты стоят плотнее абзацев: список — одна мысль, разбитая
                 // на части, а не несколько абзацев подряд.
                 ("pixels-below-lines", &(extra / 2)),
@@ -3431,8 +3353,11 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         &[
             ("weight", &700),
             ("style", &pango::Style::Normal),
-            ("size-points", &(body * 0.85)),
-            ("letter-spacing", &px(f64::from(pango::SCALE) * 0.75)),
+            ("size-points", &(body * f64::from(ALERT_SIZE))),
+            (
+                "letter-spacing",
+                &px(f64::from(pango::SCALE) * f64::from(ALERT_TRACKING)),
+            ),
         ],
     );
 
@@ -3443,8 +3368,11 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         buffer,
         "noteref",
         &[
-            ("size-points", &(body * 0.72)),
-            ("rise", &px(f64::from(pango::SCALE) * 4.5)),
+            ("size-points", &(body * f64::from(NOTEREF_SIZE))),
+            (
+                "rise",
+                &px(f64::from(pango::SCALE) * f64::from(NOTEREF_RISE)),
+            ),
         ],
     );
     // Сама сноска под статьёй: мельче текста, с висячим отступом, как пункт
@@ -3453,9 +3381,9 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         buffer,
         "note",
         &[
-            ("size-points", &(body * 0.9)),
-            ("left-margin", &px(30.0)),
-            ("indent", &px(-22.0)),
+            ("size-points", &(body * f64::from(NOTE_SIZE))),
+            ("left-margin", &px(f64::from(NOTE_INDENT))),
+            ("indent", &px(-f64::from(NOTE_HANG))),
             ("pixels-below-lines", &(extra / 2)),
         ],
     );
@@ -3798,24 +3726,9 @@ fn site_rows(site: &[brevier::Link]) -> Vec<Entry> {
 /// На самом листинге строки нет: шаг наверх у него в тексте, а показывать
 /// ссылку на себя же незачем.
 fn directory_row(address: &Address) -> Option<Entry> {
-    let Address::Repo(repo) = address else {
-        return None;
-    };
-    if repo.listing {
-        return None;
-    }
-
-    let inside = repo.path.as_deref().unwrap_or("");
-    let directory = inside.rsplit_once('/').map(|(dir, _)| dir.to_owned());
-
-    Some(Entry {
+    brevier::repo::directory_of(address).map(|address| Entry {
         title: "Files in this directory".to_owned(),
-        address: Address::Repo(Repo {
-            path: directory,
-            listing: true,
-            source: None,
-            ..repo.clone()
-        }),
+        address,
     })
 }
 
@@ -3921,14 +3834,7 @@ fn seek_entries(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: &Address)
             .into_iter()
             .map(|entry| Entry {
                 title: entry.title,
-                address: Address::Repo(Repo {
-                    path: Some(entry.path),
-                    // Точка входа — файл, даже если пришли мы на неё
-                    // с листинга: флаг каталога наследовать нельзя.
-                    listing: false,
-                    source: None,
-                    ..asked.clone()
-                }),
+                address: brevier::repo::entry_address(&asked, entry.path),
             })
             .collect();
         drop(borrowed);

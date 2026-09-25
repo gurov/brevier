@@ -19,14 +19,9 @@ use gtk::subclass::prelude::*;
 /// Вложенная цитата получает свою, правее, — иначе ответ на ответ в треде
 /// обсуждения не отличить от новой реплики.
 const QUOTES: [&str; 3] = ["quote1", "quote2", "quote3"];
-/// Толщина линейки и её место в левом поле цитаты. Шаг уровня тот же,
-/// что у отступа самого тега.
-const RULE_WIDTH: f32 = 3.0;
-const RULE_X: i32 = 8;
-const RULE_STEP: i32 = 26;
-/// Насколько линейка короче строки сверху и снизу: вплотную к соседям
-/// она выглядит сплошной колонкой, а не отметкой цитаты.
-const RULE_INSET: f32 = 2.0;
+// Толщина линейки, её место в левом поле цитаты и шаг уровня — в ядре,
+// вместе с остальной типографской моделью: телефон рисует ту же линейку.
+use brevier::outline::{INDENT as RULE_STEP, RULE_INSET, RULE_WIDTH, RULE_X};
 
 mod imp {
     use super::*;
@@ -123,7 +118,7 @@ fn draw_quote_rules(view: &gtk::TextView, snapshot: &gtk::Snapshot, color: gtk::
             snapshot.append_color(
                 &color,
                 &gtk::graphene::Rect::new(
-                    (RULE_X + RULE_STEP * level as i32) as f32,
+                    RULE_X + RULE_STEP * level as f32,
                     top as f32 + RULE_INSET,
                     RULE_WIDTH,
                     (height as f32 - RULE_INSET * 2.0).max(1.0),

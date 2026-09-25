@@ -19,7 +19,7 @@
 use comrak::Arena;
 use comrak::nodes::NodeValue;
 
-use crate::address::{Repo, RepoHost};
+use crate::address::{Address, Repo, RepoHost};
 use crate::error::Error;
 use crate::fetch::{self, UserAgent};
 use crate::markdown::Kind;
@@ -67,6 +67,40 @@ pub struct Documentation {
     pub title: String,
     /// Путь внутри репозитория.
     pub path: String,
+}
+
+/// Каталог, в котором лежит открытый файл репозитория, — адрес его листинга.
+///
+/// Это дверь «а что ещё лежит рядом»: без неё листинг доступен только тому,
+/// кто сам напечатает адрес каталога, а знать раскладку чужого репозитория
+/// читатель не обязан. На самом листинге двери нет: шаг наверх у него
+/// в тексте, а ссылка на себя же ничего не даёт.
+pub fn directory_of(address: &Address) -> Option<Address> {
+    let Address::Repo(repo) = address else {
+        return None;
+    };
+    if repo.listing {
+        return None;
+    }
+    let inside = repo.path.as_deref().unwrap_or("");
+    let directory = inside.rsplit_once('/').map(|(dir, _)| dir.to_owned());
+    Some(Address::Repo(Repo {
+        path: directory,
+        listing: true,
+        source: None,
+        ..repo.clone()
+    }))
+}
+
+/// Адрес точки входа в документацию: файл того же проекта. Файл, даже если
+/// пришли мы на неё с листинга, — флаг каталога наследовать нельзя.
+pub fn entry_address(repo: &Repo, path: String) -> Address {
+    Address::Repo(Repo {
+        path: Some(path),
+        listing: false,
+        source: None,
+        ..repo.clone()
+    })
 }
 
 /// Где генераторы документации держат свой конфиг. Список получен замером
