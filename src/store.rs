@@ -240,7 +240,7 @@ impl Store {
     /// markdown — внутреннее представление, а рисует его тот же отрисовщик,
     /// что и статью, поэтому история набрана той же типографикой.
     pub fn page(&self) -> String {
-        let mut out = String::from("# History\n\n[Bookmarks](brevier:bookmarks)\n\n");
+        let mut out = String::from("# History\n\n");
 
         if !self.writable {
             out.push_str(&format!(
@@ -426,7 +426,7 @@ impl Marks {
     /// Страница закладок. Дней тут нет, в отличие от истории: закладку
     /// ставят не «когда-то», а «вот это»; порядок — свежие сверху.
     pub fn page(&self) -> String {
-        let mut out = String::from("# Bookmarks\n\n[History](brevier:history)\n\n");
+        let mut out = String::from("# Bookmarks\n\n");
         if self.marks.is_empty() {
             out.push_str(
                 "Nothing here yet. **Ctrl+D** keeps the page you are reading, \
@@ -1262,7 +1262,10 @@ mod tests {
         );
 
         let page = store.page();
-        assert!(page.starts_with("# History\n\n[Bookmarks](brevier:bookmarks)\n\n## Today\n"));
+        assert!(page.starts_with("# History\n\n## Today\n"));
+        // Страницы разные и друг на друга не ссылаются: в каждую ведёт своё
+        // меню, а ссылка поперёк делала из двух списков один.
+        assert!(!page.contains("brevier:bookmarks"));
         assert!(page.contains("## Today"));
         assert!(page.contains("## Yesterday"));
         assert!(
@@ -1327,7 +1330,8 @@ mod tests {
         marks.toggle(&web("https://danluu.com/"), "danluu", 0);
 
         let page = marks.page();
-        assert!(page.starts_with("# Bookmarks\n\n[History](brevier:history)\n"));
+        assert!(page.starts_with("# Bookmarks\n\n- "));
+        assert!(!page.contains("brevier:history"));
         assert!(page.find("danluu").unwrap() < page.find("FAQ").unwrap());
         assert!(
             Marks::at(temporary("no-marks"))
