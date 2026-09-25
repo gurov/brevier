@@ -58,6 +58,24 @@ jobs:
             { echo "run packaging/cargo-sources.py > packaging/cargo-sources.json" >&2; exit 1; }
       - run: sh -n packaging/install.sh && sh -n packaging/tarball.sh
 
+  action:
+    name: the check as a GitHub Action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Та же дверь, что у чужого сайта (`uses: gurov/brevier@…`), только
+      # из своего дерева. Порог ноль: здесь проверяют Action, а не example.com.
+      - id: check
+        uses: ./
+        with:
+          urls: https://example.com/
+          min: 0
+          badge: brevier-check.svg
+      - name: The step reports a score and draws the badge
+        run: |
+          test -n "${{ steps.check.outputs.score }}"
+          grep -q '<svg' brevier-check.svg
+
   tls:
     name: trust stays delegated to the OS
     runs-on: ubuntu-latest

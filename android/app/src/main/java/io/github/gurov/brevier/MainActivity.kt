@@ -888,6 +888,11 @@ class MainActivity : Activity(), ArticleHost {
             val target = tab?.shown?.external?.ifEmpty { null }
             if (target == null) notice("Nothing to open outside") else openOutside(target)
         }
+        // Отчёт — новой вкладкой: его читают рядом со страницей, а не вместо неё.
+        menu.item("Check this page") {
+            val target = tab?.shown?.check
+            if (target == null) notice("Only a web page can be checked") else newTab(target)
+        }
         menu.item("History") { newTab("brevier:history") }
         menu.item("Bookmarks") { newTab("brevier:bookmarks") }
         menu.item("Settings") { showSettings() }

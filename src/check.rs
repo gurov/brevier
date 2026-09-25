@@ -80,7 +80,8 @@ struct Rule {
 /// Та самая одна таблица весов. Источник истины и для счёта, и для отчёта.
 /// Числа здесь спорные намеренно — на то они и напечатаны.
 const RULES: &[Rule] = &[
-    // --- Access. Всё это — стены до первой буквы, поэтому caps, а не вычет.
+    // --- Access. Почти всё это — стены до первой буквы, поэтому caps, а не
+    // вычет. Длинная цепочка переходов не стена, а задержка — она вычитает.
     Rule {
         id: "access-forbidden",
         stage: Stage::Access,
@@ -117,6 +118,12 @@ const RULES: &[Rule] = &[
         cost: Cost::Cap(0),
         advice: "The response is larger than a document should be; a reader stops at a size limit.",
     },
+    Rule {
+        id: "access-redirects",
+        stage: Stage::Access,
+        cost: Cost::Deduct(3),
+        advice: "Link to the final address, or shorten the chain: every hop is a round trip before the first word.",
+    },
     // --- Text.
     Rule {
         id: "text-empty",
@@ -141,6 +148,12 @@ const RULES: &[Rule] = &[
         stage: Stage::Text,
         cost: Cost::Deduct(4),
         advice: "Give images a real `src`: an address parked in a `data-` attribute for a script to move never loads here.",
+    },
+    Rule {
+        id: "text-image-headings",
+        stage: Stage::Text,
+        cost: Cost::Deduct(5),
+        advice: "Set headings in text, not as pictures of text: words in an image cannot be hyphenated, searched, copied or read aloud.",
     },
     // --- Structure.
     Rule {
@@ -174,6 +187,18 @@ const RULES: &[Rule] = &[
         advice: "Name the language on `<pre><code class=\"language-…\">`, so code is set and coloured as code.",
     },
     Rule {
+        id: "structure-tables",
+        stage: Stage::Structure,
+        cost: Cost::Deduct(3),
+        advice: "Make tables `<table>`: a grid of `<div>`s is a table only on screen, and a reader gets a pile of cells.",
+    },
+    Rule {
+        id: "structure-captions",
+        stage: Stage::Structure,
+        cost: Cost::Deduct(3),
+        advice: "Put an image and its caption in `<figure>` with `<figcaption>`, so the caption travels with the image.",
+    },
+    Rule {
         id: "structure-lang",
         stage: Stage::Structure,
         cost: Cost::Deduct(6),
@@ -197,6 +222,12 @@ const RULES: &[Rule] = &[
         cost: Cost::Deduct(4),
         advice: "Mark the author where the extractor can find it (`rel=author`, or an `<address>` in the article).",
     },
+    Rule {
+        id: "structure-date",
+        stage: Stage::Structure,
+        cost: Cost::Deduct(2),
+        advice: "Mark the date with `<time datetime>` or `article:published_time`, so a reader can tell when the text was written.",
+    },
     // --- Extras.
     Rule {
         id: "extras-alt",
@@ -214,7 +245,7 @@ const RULES: &[Rule] = &[
         id: "extras-alt-markdown",
         stage: Stage::Extras,
         cost: Cost::Deduct(3),
-        advice: "Offer `<link rel=alternate type=text/markdown>`: a reader then takes the exact text, with no extraction in the way.",
+        advice: "Answer `Accept: text/markdown`, or offer `<link rel=alternate type=text/markdown>`: a reader then takes the exact text, with no extraction in the way.",
     },
 ];
 
@@ -257,11 +288,14 @@ pub struct Report {
 /// что не даёт даже начать, — неразобранный адрес и чужая схема.
 pub fn check(url: &str, ua: UserAgent) -> Result<Report, Error> {
     match fetch::fetch(url, ua) {
-        Ok(page) => Ok(match page.kind {
-            ContentKind::Html => from_html(&page.body, &page.url, true),
-            ContentKind::Markdown => served(&page.url, &page.body, "Markdown"),
-            ContentKind::Text => served(&page.url, &page.body, "plain text"),
-        }),
+        Ok(page) => {
+            let moved = redirect_finding(page.redirects);
+            Ok(match page.kind {
+                ContentKind::Html => from_html(&page.body, &page.url, Access::Measured(moved)),
+                ContentKind::Markdown => served(&page.url, &page.body, "Markdown", moved),
+                ContentKind::Text => served(&page.url, &page.body, "plain text", moved),
+            })
+        }
         Err(error) => match access_finding(&error) {
             Some(finding) => Ok(from_findings(url.to_owned(), vec![finding], true, None)),
             None => Err(error),
@@ -272,7 +306,28 @@ pub fn check(url: &str, ua: UserAgent) -> Result<Report, Error> {
 /// Проверить HTML, который уже на руках, — `--check --stdin`, для страницы,
 /// которую ещё не выложили. Доступ здесь не меряется: скачивания не было.
 pub fn check_html(html: &str, url: &str) -> Report {
-    from_html(html, url, false)
+    from_html(html, url, Access::Unmeasured)
+}
+
+/// Что известно о доступе к странице, кроме того, что она пришла.
+enum Access {
+    /// Скачали сами — и вот что заметили по дороге (цепочка переходов).
+    Measured(Option<Finding>),
+    /// HTML пришёл из stdin: сети не было, мерить нечего.
+    Unmeasured,
+}
+
+/// Сколько переездов адреса терпим без замечания. Три — это обычная жизнь
+/// сайта: http → https, голый домен → www, косая черта на конце.
+const REDIRECTS_OK: u8 = 3;
+
+fn redirect_finding(redirects: u8) -> Option<Finding> {
+    (redirects > REDIRECTS_OK).then(|| {
+        note(
+            "access-redirects",
+            format!("the address moved {redirects} times before the page arrived"),
+        )
+    })
 }
 
 /// Ошибку fetch — в находку стадии Access. `None` означает «это не про
@@ -325,23 +380,29 @@ fn status(error: &Error) -> u16 {
 
 /// Страница, которую сервер отдал текстом сразу. Извлекать нечего,
 /// ставить в вину — тоже: это ровно то, о чём просит манифест.
-fn served(url: &str, body: &str, kind: &'static str) -> Report {
+/// Замечание о доступе тут может быть одно — длинная цепочка переходов.
+fn served(url: &str, body: &str, kind: &'static str, moved: Option<Finding>) -> Report {
+    let findings: Vec<Finding> = moved.into_iter().collect();
     Report {
         address: url.to_owned(),
         access_measured: true,
         served: Some(kind),
-        findings: Vec::new(),
+        score: score(&findings),
+        findings,
         preview: Some(first_screen(body)),
-        score: 100,
     }
 }
 
-fn from_html(html: &str, url: &str, access_measured: bool) -> Report {
+fn from_html(html: &str, url: &str, access: Access) -> Report {
     let doc = Document::from(html);
+    let access_measured = matches!(access, Access::Measured(_));
     let mut findings = Vec::new();
+    if let Access::Measured(Some(finding)) = access {
+        findings.push(finding);
+    }
 
     structure_findings(&doc, &mut findings);
-    extras_findings(&doc, &mut findings);
+    extras_findings(&doc, access_measured, &mut findings);
     let preview = text_findings(html, url, &doc, &mut findings);
 
     from_findings_with_preview(url.to_owned(), findings, access_measured, preview)
@@ -415,6 +476,18 @@ fn text_findings(
         findings.push(note("text-lazy-images", seen));
     }
 
+    // Слова картинкой: заголовок, в котором нет текста, а есть изображение.
+    // Шире не ловим — без распознавания текста на картинке это гадание.
+    let pictured = image_headings(doc);
+    if pictured > 0 {
+        let seen = if pictured == 1 {
+            "a heading is an image with no text in it".to_owned()
+        } else {
+            format!("{pictured} headings are images with no text in them")
+        };
+        findings.push(note("text-image-headings", seen));
+    }
+
     match extract::extract(html, url) {
         Ok(article) => {
             // Доля шума: сколько текста страницы читателю пришлось выбросить.
@@ -436,6 +509,14 @@ fn text_findings(
                 .is_empty()
             {
                 findings.push(note("structure-byline", "no author was found".to_owned()));
+            }
+
+            // Дата — там, где её берёт извлечение, или в `<time datetime>`.
+            if article.published.is_none() && !doc.select("time[datetime]").exists() {
+                findings.push(note(
+                    "structure-date",
+                    "no publication date was found".to_owned(),
+                ));
             }
 
             markdown::from_article(&article)
@@ -490,6 +571,21 @@ fn lazy_images(doc: &Document) -> Option<usize> {
     (count > 0).then_some(count)
 }
 
+/// Заголовки без единой буквы, но с картинкой внутри: название, набранное
+/// изображением.
+fn image_headings(doc: &Document) -> usize {
+    doc.select("h1, h2, h3, h4, h5, h6")
+        .nodes()
+        .iter()
+        .filter(|heading| {
+            squeeze(&heading.text()).is_empty()
+                && heading
+                    .descendants_it()
+                    .any(|node| matches!(node.node_name().as_deref(), Some("img" | "svg")))
+        })
+        .count()
+}
+
 // --- Стадия Structure: набрана ли страница так, чтобы её можно было прочесть.
 
 fn structure_findings(doc: &Document, findings: &mut Vec<Finding>) {
@@ -539,6 +635,33 @@ fn structure_findings(doc: &Document, findings: &mut Vec<Finding>) {
         findings.push(note("structure-code-lang", seen));
     }
 
+    // Таблицы — таблицами, а не сеткой `<div>` с ролью.
+    let pretend = doc
+        .select("[role=table]")
+        .nodes()
+        .iter()
+        .filter(|node| node.node_name().as_deref() != Some("table"))
+        .count();
+    if pretend > 0 {
+        let seen = if pretend == 1 {
+            "a table is built from elements with `role=table`, not `<table>`".to_owned()
+        } else {
+            format!("{pretend} tables are built from elements with `role=table`, not `<table>`")
+        };
+        findings.push(note("structure-tables", seen));
+    }
+
+    // Подписи к картинкам — в `<figcaption>`.
+    let loose = loose_captions(doc);
+    if loose > 0 {
+        let seen = if loose == 1 {
+            "an image caption is not a `<figcaption>`".to_owned()
+        } else {
+            format!("{loose} image captions are not `<figcaption>`")
+        };
+        findings.push(note("structure-captions", seen));
+    }
+
     // Язык страницы объявлен.
     if doc
         .select("html")
@@ -566,6 +689,29 @@ fn structure_findings(doc: &Document, findings: &mut Vec<Finding>) {
             ),
         ));
     }
+}
+
+/// Подписи к картинкам мимо `<figcaption>`: элемент, названный подписью
+/// (`caption` в классе — `wp-caption-text`, `image-caption`), с текстом,
+/// без картинки внутри, но рядом с картинкой — у общего родителя. Имя
+/// в классе здесь такое же соглашение, как `language-*` у кода.
+fn loose_captions(doc: &Document) -> usize {
+    let is_image = |node: &NodeRef| matches!(node.node_name().as_deref(), Some("img" | "picture"));
+    doc.select("[class*=caption i]")
+        .nodes()
+        .iter()
+        .filter(|node| {
+            !matches!(node.node_name().as_deref(), Some("figcaption" | "caption"))
+                && !node
+                    .ancestors_it(None)
+                    .any(|up| up.node_name().as_deref() == Some("figcaption"))
+                && !squeeze(&node.text()).is_empty()
+                && !node.descendants_it().any(|inner| is_image(&inner))
+                && node
+                    .parent()
+                    .is_some_and(|parent| parent.descendants_it().any(|inner| is_image(&inner)))
+        })
+        .count()
 }
 
 /// Первый прыжок уровня вниз через ступень (h2→h4). Вверх скакать можно:
@@ -667,7 +813,7 @@ fn has_language(code: &NodeRef) -> bool {
 
 // --- Стадия Extras: чего можно и не делать, но с чем читателю лучше.
 
-fn extras_findings(doc: &Document, findings: &mut Vec<Finding>) {
+fn extras_findings(doc: &Document, fetched: bool, findings: &mut Vec<Finding>) {
     // Картинки описаны в alt.
     let selection = doc.select("img");
     let images = selection.nodes();
@@ -699,12 +845,16 @@ fn extras_findings(doc: &Document, findings: &mut Vec<Finding>) {
         ));
     }
 
-    // Копия в markdown предложена ссылкой.
+    // Копия в markdown: ответом на `Accept` или ссылкой. Ответь сайт
+    // markdown-ом, сюда бы не дошло — отчёт тогда `served`; значит, при
+    // скачивании он на `Accept: text/markdown` вернул HTML.
     if !link_with_type(doc, &["text/markdown"]) {
-        findings.push(note(
-            "extras-alt-markdown",
-            "no `<link rel=alternate type=text/markdown>`".to_owned(),
-        ));
+        let seen = if fetched {
+            "HTML came back to `Accept: text/markdown`, and no `<link rel=alternate type=text/markdown>`"
+        } else {
+            "no `<link rel=alternate type=text/markdown>`"
+        };
+        findings.push(note("extras-alt-markdown", seen.to_owned()));
     }
 }
 
@@ -764,7 +914,8 @@ impl Report {
         out
     }
 
-    /// Счёт и арифметика к нему.
+    /// Счёт и арифметика к нему. Строку `**Score N / 100.**` читает
+    /// GitHub Action (`action.yml`) — менять её вместе с ним.
     fn headline(&self) -> String {
         if let Some(kind) = self.served {
             return format!(
@@ -885,6 +1036,49 @@ impl Report {
     }
 }
 
+/// Страница `brevier:check` без адреса: что это и как позвать. Markdown,
+/// как и отчёт, — тем же рендерером.
+pub fn about() -> &'static str {
+    "# Check\n\n\
+     How a page reads for a client that runs no scripts: a score from 0 to 100, \
+     what stands in the way, and what each thing costs.\n\n\
+     Choose **Check this page** from the menu while reading it, or type the address \
+     after `brevier:check/` — for example `brevier:check/https://example.com/`.\n\n\
+     The same check runs from the command line, `brevier --check <url>`, and in CI \
+     as a GitHub Action that fails the build below a pass mark.\n"
+}
+
+/// Значок со счётом — svg для README сайта или страницы CI. Рисуем сами:
+/// у проверки нет внешних сервисов, и у значка их тоже нет. Цвет — по полосам
+/// счёта, как у привычных значков сборки; ширины заданы, а не измерены:
+/// надпись одна, числа не длиннее трёх знаков.
+pub fn badge(score: u32) -> String {
+    const LABEL: &str = "brevier check";
+    const LEFT: u32 = 88;
+    const RIGHT: u32 = 36;
+    let color = match score {
+        90.. => "#4c1",
+        80..=89 => "#97ca00",
+        60..=79 => "#dfb317",
+        40..=59 => "#fe7d37",
+        _ => "#e05d44",
+    };
+    let width = LEFT + RIGHT;
+    let (left_mid, right_mid) = (LEFT / 2, LEFT + RIGHT / 2);
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"20\" \
+         role=\"img\" aria-label=\"{LABEL}: {score}\">\
+         <title>{LABEL}: {score}</title>\
+         <rect width=\"{LEFT}\" height=\"20\" fill=\"#555\"/>\
+         <rect x=\"{LEFT}\" width=\"{RIGHT}\" height=\"20\" fill=\"{color}\"/>\
+         <g fill=\"#fff\" text-anchor=\"middle\" \
+         font-family=\"Verdana,Geneva,DejaVu Sans,sans-serif\" font-size=\"11\">\
+         <text x=\"{left_mid}\" y=\"14\">{LABEL}</text>\
+         <text x=\"{right_mid}\" y=\"14\">{score}</text>\
+         </g></svg>\n"
+    )
+}
+
 // --- Мелочи вывода.
 
 /// Первый экран: до [`LINES`] строк или [`CHARS`] знаков, что раньше. Дальше —
@@ -995,6 +1189,7 @@ mod tests {
     <article>
       <h1>A clean page</h1>
       <address rel=\"author\">A. Writer</address>
+      <time datetime=\"2026-09-25\">25 September 2026</time>
       <p>A paragraph long enough to count as prose and not a caption or a stray line of text.</p>
       <h2>A section</h2>
       <p>Another paragraph of real body text, several words wide, so the extractor keeps it.</p>
@@ -1041,6 +1236,84 @@ mod tests {
                 .iter()
                 .any(|f| f.rule.id == "structure-code-lang")
         );
+    }
+
+    fn ids(report: &Report) -> Vec<&'static str> {
+        report.findings.iter().map(|f| f.rule.id).collect()
+    }
+
+    #[test]
+    fn words_set_as_images_are_caught() {
+        let html = "<html lang=en><body><article><h1><img src=\"/title.png\" alt=\"Title\"></h1>\
+                    <p>enough words here to keep the article alive and well</p></article></body></html>";
+        assert!(ids(&check_html(html, "https://example.com/t")).contains(&"text-image-headings"));
+
+        // Логотип рядом с текстом заголовка — не слова картинкой.
+        let html = html.replace("alt=\"Title\">", "alt=\"\"> Title");
+        assert!(!ids(&check_html(&html, "https://example.com/t")).contains(&"text-image-headings"));
+    }
+
+    #[test]
+    fn a_table_of_divs_is_caught() {
+        let html = "<html lang=en><body><article><h1>T</h1>\
+                    <p>enough words here to keep the article alive and well</p>\
+                    <div role=\"table\"><div role=\"row\"><div role=\"cell\">1</div></div></div>\
+                    </article></body></html>";
+        assert!(ids(&check_html(html, "https://example.com/t")).contains(&"structure-tables"));
+
+        let real = "<html lang=en><body><article><h1>T</h1>\
+                    <p>enough words here to keep the article alive and well</p>\
+                    <table role=\"table\"><tr><td>1</td></tr></table></article></body></html>";
+        assert!(!ids(&check_html(real, "https://example.com/t")).contains(&"structure-tables"));
+    }
+
+    #[test]
+    fn a_caption_outside_figcaption_is_caught() {
+        let loose = "<html lang=en><body><article><h1>T</h1>\
+                     <p>enough words here to keep the article alive and well</p>\
+                     <div class=\"wp-caption\"><img src=\"/a.png\" alt=\"a\">\
+                     <p class=\"wp-caption-text\">A harbour at dawn</p></div></article></body></html>";
+        assert!(ids(&check_html(loose, "https://example.com/t")).contains(&"structure-captions"));
+
+        let figure = "<html lang=en><body><article><h1>T</h1>\
+                      <p>enough words here to keep the article alive and well</p>\
+                      <figure><img src=\"/a.png\" alt=\"a\">\
+                      <figcaption class=\"caption\">A harbour at dawn</figcaption></figure>\
+                      </article></body></html>";
+        assert!(!ids(&check_html(figure, "https://example.com/t")).contains(&"structure-captions"));
+
+        // Подпись без картинки рядом — не подпись к картинке (у видео,
+        // у таблицы свой разговор).
+        let alone = "<html lang=en><body><article><h1>T</h1>\
+                     <p>enough words here to keep the article alive and well</p>\
+                     <div><p class=\"caption\">Table 1</p></div></article></body></html>";
+        assert!(!ids(&check_html(alone, "https://example.com/t")).contains(&"structure-captions"));
+    }
+
+    #[test]
+    fn a_long_chain_of_redirects_costs_points() {
+        assert!(redirect_finding(0).is_none());
+        assert!(redirect_finding(REDIRECTS_OK).is_none());
+        let finding = redirect_finding(REDIRECTS_OK + 1).expect("four hops is a finding");
+        assert_eq!(finding.rule.id, "access-redirects");
+        // Сайт отдал markdown, но через пять переездов — счёт не сто.
+        let report = served(
+            "https://example.com/",
+            "# Hi\n",
+            "Markdown",
+            redirect_finding(5),
+        );
+        assert_eq!(report.score, 97);
+        assert!(report.to_markdown().contains("moved 5 times"));
+    }
+
+    #[test]
+    fn a_badge_names_the_score_in_its_colour() {
+        let pass = badge(92);
+        assert!(pass.starts_with("<svg") && pass.contains(">92</text>"));
+        assert!(pass.contains("#4c1"));
+        assert!(badge(12).contains("#e05d44"));
+        assert!(badge(100).contains("brevier check: 100"));
     }
 
     #[test]

@@ -1808,6 +1808,7 @@ mod tests {
         let article = Article {
             title: "Блог компании".to_owned(),
             byline: None,
+            published: None,
             content_html: "<h2><a href=\"https://e.com/1\">Первая</a></h2><p>анонс</p>\
                 <h2><a href=\"https://e.com/2\">Вторая</a></h2><p>анонс</p>\
                 <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
@@ -1849,6 +1850,7 @@ mod tests {
         let article = Article {
             title: "Блог".to_owned(),
             byline: None,
+            published: None,
             content_html: "<h2><a href=\"https://e.com/1\">Первая</a></h2><p>анонс</p>\
                 <h2><a href=\"https://e.com/2\">Вторая</a></h2><p>анонс</p>\
                 <h2><a href=\"https://e.com/3\">Третья</a></h2><p>анонс</p>"
@@ -1886,6 +1888,7 @@ mod tests {
         let article = Article {
             title: "Статья".to_owned(),
             byline: None,
+            published: None,
             content_html: "<p>Первый абзац со <a href=\"https://e.com/1\">ссылкой</a>.</p>\
                 <h2>Раздел</h2><p>Второй абзац.</p>"
                 .to_owned(),
@@ -1908,6 +1911,7 @@ mod tests {
         let article = Article {
             title: "Статья".to_owned(),
             byline: None,
+            published: None,
             content_html: "<p>Первый абзац со <a href=\"https://e.com/1\">ссылкой</a>.</p>\
                 <h2>Раздел</h2><p>Второй абзац.</p>"
                 .to_owned(),

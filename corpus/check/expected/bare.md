@@ -2,9 +2,9 @@
 
 `https://check.example/bare`
 
-**Score 65 / 100.**
+**Score 63 / 100.**
 
-100 − 8 (structure-h1) − 8 (structure-landmark) − 6 (structure-lang) − 4 (structure-title) − 4 (structure-byline) − 2 (extras-feed) − 3 (extras-alt-markdown) = 65
+100 − 8 (structure-h1) − 8 (structure-landmark) − 6 (structure-lang) − 4 (structure-title) − 4 (structure-byline) − 2 (structure-date) − 2 (extras-feed) − 3 (extras-alt-markdown) = 63
 
 ## Access
 
@@ -21,11 +21,12 @@ Nothing to fix.
 - **−6 · structure-lang** — no `lang` on `<html>`. Declare the page's language with `lang` on `<html>`, so it can be hyphenated the right way.
 - **−4 · structure-title** — no `<title>`. Give the page a `<title>`: it names the tab, the saved file and the history line.
 - **−4 · structure-byline** — no author was found. Mark the author where the extractor can find it (`rel=author`, or an `<address>` in the article).
+- **−2 · structure-date** — no publication date was found. Mark the date with `<time datetime>` or `article:published_time`, so a reader can tell when the text was written.
 
 ## Extras
 
 - **−2 · extras-feed** — no feed advertised in `<head>`. Advertise a feed in `<head>` (`<link rel=alternate type=application/rss+xml>`) so it can be followed.
-- **−3 · extras-alt-markdown** — no `<link rel=alternate type=text/markdown>`. Offer `<link rel=alternate type=text/markdown>`: a reader then takes the exact text, with no extraction in the way.
+- **−3 · extras-alt-markdown** — no `<link rel=alternate type=text/markdown>`. Answer `Accept: text/markdown`, or offer `<link rel=alternate type=text/markdown>`: a reader then takes the exact text, with no extraction in the way.
 
 ## What the reader will see
 
@@ -46,19 +47,24 @@ Every check and what it costs. Argue with a number here, not with a hidden formu
 | access-unreachable | Access | caps at 0 |
 | access-content-type | Access | caps at 0 |
 | access-too-large | Access | caps at 0 |
+| access-redirects | Access | −3 |
 | text-empty | Text | caps at 10 |
 | text-script-only | Text | caps at 10 |
 | text-noise | Text | −6 |
 | text-lazy-images | Text | −4 |
+| text-image-headings | Text | −5 |
 | structure-h1 | Structure | −8 |
 | structure-heading-order | Structure | −5 |
 | structure-landmark | Structure | −8 |
 | structure-paragraphs | Structure | −5 |
 | structure-code-lang | Structure | −4 |
+| structure-tables | Structure | −3 |
+| structure-captions | Structure | −3 |
 | structure-lang | Structure | −6 |
 | structure-title | Structure | −4 |
 | structure-title-h1 | Structure | −3 |
 | structure-byline | Structure | −4 |
+| structure-date | Structure | −2 |
 | extras-alt | Extras | −4 |
 | extras-feed | Extras | −2 |
 | extras-alt-markdown | Extras | −3 |

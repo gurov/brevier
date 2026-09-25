@@ -1,10 +1,10 @@
 # Check
 
-`https://check.example/spa`
+`https://check.example/markup`
 
-**Score 10 / 100.** The page cannot be read as it stands: the text is absent until a script runs.
+**Score 86 / 100.**
 
-Even served, the markup would bring it to 79.
+100 − 5 (text-image-headings) − 3 (structure-tables) − 3 (structure-captions) − 3 (extras-alt-markdown) = 86
 
 ## Access
 
@@ -12,21 +12,46 @@ Not fetched — the HTML came from stdin, so access, redirects and content type 
 
 ## Text
 
-- **caps at 10 · text-script-only** — the text is absent until a script runs. Put the words in the HTML: they arrive here only after a script runs, and this reader runs none.
+- **−5 · text-image-headings** — a heading is an image with no text in it. Set headings in text, not as pictures of text: words in an image cannot be hyphenated, searched, copied or read aloud.
 
 ## Structure
 
-- **−8 · structure-h1** — no `<h1>` on the page. Give the page exactly one `<h1>` — its title, once.
-- **−8 · structure-landmark** — neither `<article>` nor `<main>` is present. Wrap the article in `<article>` or `<main>` so its body is unambiguous.
+- **−3 · structure-tables** — a table is built from elements with `role=table`, not `<table>`. Make tables `<table>`: a grid of `<div>`s is a table only on screen, and a reader gets a pile of cells.
+- **−3 · structure-captions** — an image caption is not a `<figcaption>`. Put an image and its caption in `<figure>` with `<figcaption>`, so the caption travels with the image.
 
 ## Extras
 
-- **−2 · extras-feed** — no feed advertised in `<head>`. Advertise a feed in `<head>` (`<link rel=alternate type=application/rss+xml>`) so it can be followed.
 - **−3 · extras-alt-markdown** — no `<link rel=alternate type=text/markdown>`. Answer `Accept: text/markdown`, or offer `<link rel=alternate type=text/markdown>`: a reader then takes the exact text, with no extraction in the way.
 
 ## What the reader will see
 
-Nothing was extracted.
+```
+# Harbours of the north
+
+A. Writer
+
+25 September 2026
+
+A harbour is a sentence the coast writes about the sea: where the water is calm enough to stop, and deep enough to arrive. This page sets its parts the way a script-free reader cannot follow.
+
+## ![Tides and moorings](https://check.example/tides.png)
+
+The section above has a heading, but its words are a picture: a reader can show the picture, and cannot hyphenate, search or copy what it says.
+
+![Boats moored in a stone harbour at dawn.](https://check.example/harbour.jpg)
+
+Stone harbour at dawn, before the fleet goes out.
+
+Harbour
+
+Depth
+
+North quay
+
+Fish dock
+…
+```
+
 
 ## The weights
 

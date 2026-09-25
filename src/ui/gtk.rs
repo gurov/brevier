@@ -1360,12 +1360,43 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("settings", &[], settings);
 
-    // Само меню под кнопкой в шапке. Порядок — как просили: настройки,
+    // Проверка открытой страницы (`brevier:check/…`) — новой вкладкой:
+    // отчёт читают рядом со страницей, а не вместо неё. Проверяют веб;
+    // на проверке это перепроверка.
+    let check = gio::SimpleAction::new("check", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        check.connect_activate(move |_, _| {
+            let target = ui.notebook.current_page().and_then(|index| {
+                state
+                    .borrow()
+                    .tabs
+                    .get(index as usize)?
+                    .history
+                    .current()
+                    .and_then(Address::check)
+            });
+            match target {
+                Some(address) => new_tab(&ui, &state, Some(address)),
+                None => notice(&ui, "Only a web page can be checked"),
+            }
+        });
+    }
+    add("check", &[], check);
+
+    // Само меню под кнопкой в шапке. Сверху — про открытую страницу, под
+    // чертой — места программы в том порядке, как просили: настройки,
     // история, закладки.
+    let page = gio::Menu::new();
+    page.append(Some("Check this page"), Some("app.check"));
+    let places = gio::Menu::new();
+    places.append(Some("Settings"), Some("app.settings"));
+    places.append(Some("History"), Some("app.history"));
+    places.append(Some("Bookmarks"), Some("app.bookmarks"));
     let menu = gio::Menu::new();
-    menu.append(Some("Settings"), Some("app.settings"));
-    menu.append(Some("History"), Some("app.history"));
-    menu.append(Some("Bookmarks"), Some("app.bookmarks"));
+    menu.append_section(None, &page);
+    menu.append_section(None, &places);
     ui.menu.set_menu_model(Some(&menu));
 
     let focus = gio::SimpleAction::new("focus-address", None);

@@ -118,7 +118,7 @@ brevier gh:rust-lang/book/src           # the README of a directory inside it
 brevier gh:rust-lang/book/src/          # …or what the directory holds, listed
 brevier gl:owner/repo                   # the same for GitLab
 brevier --docs gh:rust-lang/book        # entry points into its documentation
-brevier --check <url>                   # score the page for a scriptless reader
+brevier --check <url> [<url>…]          # score pages for a scriptless reader
 brevier --links <url>                   # the article's outgoing links, one per line
 brevier --nav <url>                     # the site's own navigation: menu and footer
 brevier --raw <url>                     # no extraction, the whole page
@@ -149,6 +149,26 @@ at the right](assets/screenshot-repository.png)
 
 Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extracted,
 6 conversion — so a batch run can tell "the site refused" from "extraction failed".
+
+### Checking your own site
+
+`--check` scores a page 0 to 100 for a reader that runs no scripts, prints what to change
+and what each finding cost, and exits non-zero below `--min` (80 by default). In the window
+the same report opens from the menu, **Check this page**, or at `brevier:check/<url>`.
+
+In CI it is a GitHub Action, built from this repository at the ref you name:
+
+```yaml
+- uses: gurov/brevier@main     # or a release tag, once one carries the action
+  with:
+    urls: |
+      https://example.com/
+      https://example.com/docs/getting-started
+    min: 80                      # fail the job below this
+    badge: brevier-check.svg     # optional: an SVG with the lowest score
+```
+
+The reports go to the job summary; the lowest score is the step's `score` output.
 
 ## Keys
 

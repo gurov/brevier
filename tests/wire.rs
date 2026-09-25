@@ -47,6 +47,12 @@ fn answer(mut stream: TcpStream, routes: &[Route]) {
     let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
 
     let response = match routes.iter().find(|r| r.path == path) {
+        // Переезд: тело маршрута — куда.
+        Some(route) if route.content_type == REDIRECT => format!(
+            "HTTP/1.1 301 Moved Permanently\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            String::from_utf8_lossy(&route.body)
+        )
+        .into_bytes(),
         Some(route) => {
             let mut head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -64,6 +70,9 @@ fn answer(mut stream: TcpStream, routes: &[Route]) {
 
     let _ = stream.write_all(&response);
 }
+
+/// Вместо типа содержимого у маршрута: ответить 301 на адрес из тела.
+const REDIRECT: &str = "redirect";
 
 fn brevier(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_brevier"))
@@ -224,4 +233,61 @@ fn links_are_absolute() {
     let out = stdout(&brevier(&["--links", &format!("{base}/a")]));
 
     assert_eq!(out.trim(), format!("{base}/дальше"));
+}
+
+#[test]
+fn check_counts_the_redirect_chain() {
+    let base = serve(vec![
+        route("/1", REDIRECT, "/2"),
+        route("/2", REDIRECT, "/3"),
+        route("/3", REDIRECT, "/4"),
+        route("/4", REDIRECT, "/a"),
+        route("/a", "text/html", ARTICLE),
+    ]);
+
+    // Четыре переезда — больше обычной жизни сайта, это находка.
+    let long = stdout(&brevier(&["--check", "--min", "0", &format!("{base}/1")]));
+    assert!(long.contains("access-redirects"), "{long}");
+    assert!(long.contains("moved 4 times"), "{long}");
+
+    // Три — нет: http → https, www, косая черта.
+    let usual = stdout(&brevier(&["--check", "--min", "0", &format!("{base}/2")]));
+    assert!(!usual.contains("· access-redirects"), "{usual}");
+}
+
+#[test]
+fn check_takes_a_list_and_draws_the_lowest_score() {
+    let base = serve(vec![
+        route("/a", "text/html", ARTICLE),
+        route("/doc.md", "text/markdown", "# Заголовок\n\nТекст.\n"),
+    ]);
+    let badge = std::env::temp_dir().join(format!("brevier-badge-{}.svg", std::process::id()));
+
+    let out = brevier(&[
+        "--check",
+        "--min",
+        "90",
+        "--badge",
+        badge.to_str().unwrap(),
+        &format!("{base}/doc.md"),
+        &format!("{base}/a"),
+    ]);
+    let text = stdout(&out);
+    // Два отчёта подряд, через черту.
+    assert_eq!(text.matches("# Check\n").count(), 2, "{text}");
+    assert!(text.contains("\n---\n"));
+    // Markdown сайта — сто, статья без языка, автора и даты — ниже
+    // порога в девяносто, и код возврата идёт по худшей.
+    assert_eq!(out.status.code(), Some(1));
+
+    let svg = std::fs::read_to_string(&badge).expect("значок записан");
+    let _ = std::fs::remove_file(&badge);
+    let lowest = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("**Score "))
+        .filter_map(|rest| rest.split(' ').next()?.parse::<u32>().ok())
+        .min()
+        .unwrap();
+    assert!(lowest < 100);
+    assert!(svg.contains(&format!(">{lowest}</text>")), "{svg}");
 }

@@ -14,6 +14,7 @@ brevier — a JavaScript-free reader: fetches a page, extracts the article,
 prints it as Markdown (CommonMark + GFM).
 
 Usage: brevier [options] <url|gh:owner/repo|gl:owner/repo|brevier:history>
+       brevier --check [--min <0..100>] [--badge <path>] <url>…
 
 Options:
       --ua <honest|browser>  User-Agent to send (default: honest)
@@ -27,9 +28,12 @@ Options:
                              documentation, one per line
       --check                score the page for a scriptless reader, 0..100,
                              and say what to change; with --stdin, check HTML
-                             that is not deployed yet
+                             that is not deployed yet. Takes several urls,
+                             one report after another
       --min <0..100>         with --check, the pass mark: exit non-zero below
                              it (default 80), so the check can sit in CI
+      --badge <path>         with --check, write an SVG badge with the score
+                             (the lowest one, for several urls)
       --save                 write the article to a file instead of stdout;
                              `.md` is the text, `.zip` the text plus its
                              images (needs the `save` feature)
@@ -59,6 +63,11 @@ struct Args {
     check: bool,
     /// Порог для `--check`: ниже него выходим с ненулём. По умолчанию 80.
     min: u8,
+    /// Ещё адреса — только для `--check`: сайт проверяют списком страниц,
+    /// и CI удобнее один вызов, чем цикл.
+    more: Vec<String>,
+    /// Куда положить значок со счётом (`--check`). Счёт — наименьший.
+    badge: Option<String>,
     /// Статья ложится на диск, а не в stdout.
     save: bool,
     /// Куда именно. Выбор читателя старше нашего предложения — и здесь,
@@ -112,36 +121,55 @@ fn main() -> ExitCode {
 fn check_page(args: &Args) -> ExitCode {
     use brevier::check;
 
-    let report = if args.stdin {
+    let mut reports = Vec::new();
+    // Ошибка ввода (адрес не разобран, схема чужая) — не оценка страницы.
+    // Остальные адреса списка всё равно проверяем, а код возврата берём
+    // первой такой ошибки: она важнее порога.
+    let mut failed: Option<u8> = None;
+    if args.stdin {
         let mut html = String::new();
         if let Err(e) = io::stdin().read_to_string(&mut html) {
             eprintln!("brevier: {}", Error::Convert(e));
             return ExitCode::from(6);
         }
-        check::check_html(&html, &args.url)
+        reports.push(check::check_html(&html, &args.url));
     } else {
-        match check::check(&args.url, args.ua) {
-            Ok(report) => report,
-            // Осталось только то, что не даёт даже начать: адрес не разобран,
-            // схема чужая. Это ошибка ввода, а не оценка страницы.
-            Err(e) => {
-                eprintln!("brevier: {e}");
-                return ExitCode::from(e.exit_code());
+        for url in std::iter::once(&args.url).chain(&args.more) {
+            match check::check(url, args.ua) {
+                Ok(report) => reports.push(report),
+                Err(e) => {
+                    eprintln!("brevier: {e}");
+                    failed.get_or_insert(e.exit_code());
+                }
             }
         }
-    };
+    }
 
-    let code = if report.score < u32::from(args.min) {
-        1
-    } else {
-        0
+    let lowest = reports.iter().map(|report| report.score).min();
+    if let (Some(path), Some(score)) = (&args.badge, lowest)
+        && let Err(e) = std::fs::write(path, check::badge(score))
+    {
+        eprintln!("brevier: cannot write the badge to {path}: {e}");
+        failed.get_or_insert(7);
+    }
+
+    let code = match (failed, lowest) {
+        (Some(code), _) => code,
+        (None, Some(score)) if score < u32::from(args.min) => 1,
+        _ => 0,
     };
 
     // Отчёт — в stdout, чтобы `brevier --check url | less` и запись в файл
     // работали как у всякого вывода. Код возврата отражает порог, не печать.
+    // Несколько отчётов идут подряд, через черту.
+    let text = reports
+        .iter()
+        .map(check::Report::to_markdown)
+        .collect::<Vec<_>>()
+        .join("\n---\n\n");
     let mut stdout = io::stdout();
     match stdout
-        .write_all(report.to_markdown().as_bytes())
+        .write_all(text.as_bytes())
         .and_then(|()| stdout.flush())
     {
         Ok(()) => ExitCode::from(code),
@@ -375,6 +403,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     let mut check = false;
     let mut min: u8 = 80;
     let mut min_set = false;
+    let mut more: Vec<String> = Vec::new();
+    let mut badge: Option<String> = None;
     let mut save = false;
     let mut output: Option<String> = None;
 
@@ -407,6 +437,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
                 }
                 Err(message) => return Parsed::Usage(message),
             },
+            "--badge" => match args.next() {
+                Some(path) => badge = Some(path),
+                None => return Parsed::Usage("--badge needs a path".to_owned()),
+            },
+            _ if arg.starts_with("--badge=") => {
+                badge = Some(arg["--badge=".len()..].to_owned());
+            }
             "--save" => save = true,
             "-o" | "--output" => match args.next() {
                 Some(path) => output = Some(path),
@@ -430,8 +467,16 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
                 return Parsed::Usage(format!("unknown option `{arg}`"));
             }
             _ if url.is_none() => url = Some(arg),
-            _ => return Parsed::Usage(format!("only one url at a time, got `{arg}` too")),
+            _ => more.push(arg),
         }
+    }
+
+    // Списком проверяют сайт; читают и сохраняют — по одной странице,
+    // а из stdin приходит одна страница по определению.
+    if let Some(extra) = more.first()
+        && (!check || stdin)
+    {
+        return Parsed::Usage(format!("only one url at a time, got `{extra}` too"));
     }
 
     // Точки входа ищутся в репозитории, а в stdin приходит страница:
@@ -465,6 +510,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
     if min_set && !check {
         return Parsed::Usage("--min is the pass mark for --check; add --check".to_owned());
     }
+    if badge.is_some() && !check {
+        return Parsed::Usage("--badge shows the score of --check; add --check".to_owned());
+    }
 
     match url {
         // Адрес обязателен и при `--stdin`: сеть он не трогает, но без него
@@ -480,6 +528,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             docs,
             check,
             min,
+            more,
+            badge,
             save,
             output,
         })),
@@ -616,6 +666,37 @@ mod tests {
         // И число должно быть числом 0..100.
         assert!(matches!(
             parse(&["--check", "--min", "200", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+        // Значок — тоже про проверку.
+        assert!(matches!(
+            parse(&["--badge", "b.svg", "https://e.com/a"]),
+            Parsed::Usage(_)
+        ));
+    }
+
+    #[test]
+    fn a_site_is_checked_as_a_list_of_pages() {
+        let Parsed::Run(args) = parse(&[
+            "--check",
+            "--badge",
+            "check.svg",
+            "https://e.com/a",
+            "https://e.com/b",
+        ]) else {
+            panic!("не разобралось");
+        };
+        assert_eq!(args.url, "https://e.com/a");
+        assert_eq!(args.more, ["https://e.com/b"]);
+        assert_eq!(args.badge.as_deref(), Some("check.svg"));
+
+        // Читают по одной странице, и из stdin приходит одна.
+        assert!(matches!(
+            parse(&["https://e.com/a", "https://e.com/b"]),
+            Parsed::Usage(_)
+        ));
+        assert!(matches!(
+            parse(&["--check", "--stdin", "https://e.com/a", "https://e.com/b"]),
             Parsed::Usage(_)
         ));
     }

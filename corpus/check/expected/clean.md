@@ -27,6 +27,8 @@ Nothing to fix.
 
 A. Writer
 
+13 September 2026
+
 The measure of a line is the length a reader's eye can travel and still find the start of the next line without effort. Typographers settled on roughly sixty-five characters, and screens have not changed the eye.
 
 ## A short history
@@ -55,19 +57,24 @@ Every check and what it costs. Argue with a number here, not with a hidden formu
 | access-unreachable | Access | caps at 0 |
 | access-content-type | Access | caps at 0 |
 | access-too-large | Access | caps at 0 |
+| access-redirects | Access | −3 |
 | text-empty | Text | caps at 10 |
 | text-script-only | Text | caps at 10 |
 | text-noise | Text | −6 |
 | text-lazy-images | Text | −4 |
+| text-image-headings | Text | −5 |
 | structure-h1 | Structure | −8 |
 | structure-heading-order | Structure | −5 |
 | structure-landmark | Structure | −8 |
 | structure-paragraphs | Structure | −5 |
 | structure-code-lang | Structure | −4 |
+| structure-tables | Structure | −3 |
+| structure-captions | Structure | −3 |
 | structure-lang | Structure | −6 |
 | structure-title | Structure | −4 |
 | structure-title-h1 | Structure | −3 |
 | structure-byline | Structure | −4 |
+| structure-date | Structure | −2 |
 | extras-alt | Extras | −4 |
 | extras-feed | Extras | −2 |
 | extras-alt-markdown | Extras | −3 |

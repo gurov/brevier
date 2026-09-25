@@ -1,0 +1,85 @@
+name: Brevier check
+description: >
+  Score pages for a reader that runs no scripts, 0 to 100, say what to change,
+  and fail the build below a pass mark.
+author: gurov
+branding:
+  icon: book-open
+  color: orange
+
+inputs:
+  urls:
+    description: Addresses to check, one per line.
+    required: true
+  min:
+    description: The pass mark, 0 to 100. The step fails when any page scores below it.
+    default: "80"
+  badge:
+    description: >
+      Where to write an SVG badge with the lowest score, relative to the
+      workspace. Empty for no badge.
+    default: ""
+
+outputs:
+  score:
+    description: The lowest score among the checked pages.
+    value: ${{ steps.check.outputs.score }}
+
+runs:
+  using: composite
+  steps:
+    # The check is the `brevier` command line, built from this action's own
+    # tree: no binary to trust, and the version is the one the workflow named.
+    - name: Cache the brevier binary
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/brevier-action
+        key: brevier-check-${{ runner.os }}-${{ runner.arch }}-${{ github.action_ref || github.sha }}
+
+    - name: Build brevier
+      shell: bash
+      run: |
+        root="$HOME/.cache/brevier-action"
+        if [ ! -x "$root/bin/brevier" ]; then
+          cargo install --locked --path "$GITHUB_ACTION_PATH" --bin brevier --root "$root"
+        fi
+        echo "$root/bin" >> "$GITHUB_PATH"
+
+    - name: Check the pages
+      id: check
+      shell: bash
+      env:
+        URLS: ${{ inputs.urls }}
+        MIN: ${{ inputs.min }}
+        BADGE: ${{ inputs.badge }}
+      run: |
+        urls=()
+        while IFS= read -r line; do
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
+          [ -n "$line" ] && urls+=("$line")
+        done <<< "$URLS"
+        if [ ${#urls[@]} -eq 0 ]; then
+          echo "::error::no addresses to check: set the 'urls' input"
+          exit 1
+        fi
+
+        args=(--check --min "$MIN")
+        [ -n "$BADGE" ] && args+=(--badge "$BADGE")
+
+        report="$RUNNER_TEMP/brevier-check.md"
+        set +e
+        brevier "${args[@]}" "${urls[@]}" > "$report"
+        code=$?
+        set -e
+
+        # The report is Markdown already: it goes to the job summary as it is.
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        # Every report opens with `**Score N / 100.**` (check.rs, `headline`).
+        score=$(grep -oE '^\*\*Score [0-9]+ / 100\.' "$report" | grep -oE '[0-9]+' | sort -n | head -1)
+        echo "score=${score:-0}" >> "$GITHUB_OUTPUT"
+
+        if [ "$code" -eq 1 ] && [ -n "$score" ] && [ "$score" -lt "$MIN" ]; then
+          echo "::error::the lowest score is $score, below the pass mark of $MIN"
+        fi
+        exit "$code"

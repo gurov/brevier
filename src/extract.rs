@@ -15,6 +15,10 @@ use crate::error::Error;
 pub struct Article {
     pub title: String,
     pub byline: Option<String>,
+    /// Когда статья опубликована, как её назвала сама страница
+    /// (`article:published_time`, JSON-LD). Нужна `--check`: дату, которую
+    /// извлечение не нашло, читатель не увидит.
+    pub published: Option<String>,
     /// Очищенный HTML статьи. Относительные ссылки уже развёрнуты в абсолютные.
     pub content_html: String,
     /// Миниатюры записей: адрес ссылки → адрес картинки внутри неё.
@@ -193,6 +197,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     Ok(Article {
         title: article.title.to_string(),
         byline: article.byline.filter(|b| !b.trim().is_empty()),
+        published: article.published_time.filter(|p| !p.trim().is_empty()),
         content_html,
         thumbs,
         listing_html,

@@ -100,21 +100,31 @@ pub fn open(address: &Address, ua: UserAgent) -> Result<Document, Error> {
         Address::Web(url) => open_web(url, ua),
         Address::Repo(repo) => open_repo(repo, ua),
         Address::File(path) => open_file(path),
-        Address::Internal(page) => Ok(open_internal(*page)),
+        Address::Internal(page) => open_internal(page, ua),
     }
 }
 
-/// Страница самой программы. Сети здесь нет, зато есть диск: историю
-/// читаем заново, а не из памяти окна, — так страница верна и тогда,
-/// когда программа открыта дважды.
-fn open_internal(page: Internal) -> Document {
+/// Страница самой программы. Истории и закладкам сети не нужно, зато
+/// есть диск: читаем его заново, а не из памяти окна, — так страница верна
+/// и тогда, когда программа открыта дважды. Проверка ходит в сеть, как
+/// `--check`, — за той страницей, которую проверяет.
+fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
     let (title, markdown) = match page {
-        Internal::History => ("History", store::Store::open().page()),
-        Internal::Bookmarks => ("Bookmarks", store::Marks::open().page()),
+        Internal::History => ("History".to_owned(), store::Store::open().page()),
+        Internal::Bookmarks => ("Bookmarks".to_owned(), store::Marks::open().page()),
+        Internal::Check(None) => ("Check".to_owned(), check::about().to_owned()),
+        Internal::Check(Some(url)) => {
+            let report = check::check(url, ua)?;
+            let host = url::Url::parse(url)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_owned))
+                .unwrap_or_else(|| url.clone());
+            (format!("Check · {host}"), report.to_markdown())
+        }
     };
-    Document {
-        address: Address::Internal(page),
-        title: title.to_owned(),
+    Ok(Document {
+        address: Address::Internal(page.clone()),
+        title,
         markdown,
         // Ссылок тут список, но это не лента: читатель открыл историю
         // намеренно, и говорить ему «это список ссылок» незачем.
@@ -122,7 +132,7 @@ fn open_internal(page: Internal) -> Document {
         served: false,
         site: Vec::new(),
         lang: None,
-    }
+    })
 }
 
 fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {

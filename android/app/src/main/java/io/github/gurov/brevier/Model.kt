@@ -107,6 +107,8 @@ class Loaded(
     val directory: Entry?,
     /** Проект репозитория: точки входа в документацию принадлежат ему. */
     val project: String?,
+    /** Адрес проверки этой страницы (`brevier:check/…`), если её есть что проверять. */
+    val check: String?,
     val page: Page,
     /** Отказ: заголовок и чем открыть страницу снаружи, если это поможет. */
     val headline: String?,
@@ -129,6 +131,7 @@ class Loaded(
                 site = json.optJSONArray("site")?.map { entry(it as JSONObject) } ?: emptyList(),
                 directory = json.optJSONObject("directory")?.let(::entry),
                 project = json.text("project"),
+                check = json.text("check"),
                 page = Page.of(json.getJSONObject("page")),
                 headline = if (ok) null else json.optString("headline"),
                 offer = json.text("offer"),

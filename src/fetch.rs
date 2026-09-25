@@ -96,6 +96,10 @@ pub struct Page {
     pub url: String,
     pub kind: ContentKind,
     pub body: String,
+    /// Сколько раз адрес переехал, прежде чем отдал страницу: переходы HTTP
+    /// и `<meta http-equiv=refresh>` вместе. Читателю это стоит времени,
+    /// а `--check` говорит о длинной цепочке автору.
+    pub redirects: u8,
 }
 
 /// Что скачали, кроме текста. Картинку разбирает `media`, а тракт загрузки —
@@ -111,17 +115,23 @@ pub struct Blob {
 pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
     let mut target = url.to_owned();
     let mut hops = 0;
+    let mut redirects = 0u8;
 
     loop {
-        let page = fetch_once(&target, ua)?;
+        let mut page = fetch_once(&target, ua)?;
+        redirects = redirects.saturating_add(page.redirects);
 
         match meta_refresh(&page) {
             Some(next) if hops < MAX_META_REFRESH && next != page.url => {
                 hops += 1;
+                redirects = redirects.saturating_add(1);
                 target = next;
             }
             // Бюджет кончился или редиректа нет — отдаём что есть.
-            _ => return Ok(page),
+            _ => {
+                page.redirects = redirects;
+                return Ok(page);
+            }
         }
     }
 }
@@ -148,6 +158,7 @@ pub fn readable(url: &str, ua: UserAgent) -> Result<Page, Error> {
             url: page.url,
             kind: md.kind,
             body: md.body,
+            redirects: page.redirects,
         }),
         _ => Ok(page),
     }
@@ -181,6 +192,13 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
     let mut res: Response<Body> = agent(ua, ACCEPT).get(parsed.as_str()).call()?;
 
     let final_url = res.get_uri().to_string();
+    // В истории переходов первый адрес — сам запрос, поэтому переездов
+    // на один меньше, чем адресов.
+    let redirects = res
+        .get_redirect_history()
+        .map(|history| history.len().saturating_sub(1))
+        .unwrap_or(0)
+        .min(u8::MAX as usize) as u8;
     let mime = res
         .body()
         .mime_type()
@@ -200,6 +218,7 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         url: final_url,
         kind,
         body,
+        redirects,
     })
 }
 
@@ -317,6 +336,9 @@ fn agent(ua: UserAgent, accept: &str) -> Agent {
         .accept(accept)
         .tls_config(tls)
         .max_redirects(MAX_REDIRECTS)
+        // Цепочку переходов меряет `--check`; стоит это список адресов
+        // на запрос, а не запрос.
+        .save_redirect_history(true)
         .timeout_global(Some(TIMEOUT))
         .build()
         .new_agent()
@@ -338,6 +360,7 @@ mod tests {
             url: "https://e.com/old/page.html".to_owned(),
             kind: ContentKind::Html,
             body: body.to_owned(),
+            redirects: 0,
         }
     }
 

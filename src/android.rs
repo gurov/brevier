@@ -377,6 +377,12 @@ fn address_fields(out: &mut String, address: &Address) {
         address.is_internal(),
         address.display().starts_with("http://")
     ));
+    // Проверка этой страницы — адресом, который решает ядро: веб да,
+    // репозиторий и свои страницы нет.
+    if let Some(check) = address.check() {
+        out.push_str(",\"check\":");
+        json_string(out, &check.display());
+    }
     // Проект — для полки: точки входа в документацию принадлежат ему,
     // а не файлу, и переход между файлами одного проекта их не ищет заново.
     if let Address::Repo(repo) = address {

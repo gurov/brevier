@@ -27,25 +27,39 @@ pub enum Address {
 }
 
 /// Какая из внутренних страниц.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Internal {
     History,
     Bookmarks,
+    /// Проверка страницы (`--check`): что стоит между ней и чтением.
+    /// Адрес проверяемой страницы — часть адреса проверки
+    /// (`brevier:check/https://…`), иначе отчёт не положить ни в историю
+    /// вкладки, ни в сессию. Без него — страница о том, как проверять.
+    Check(Option<String>),
 }
 
 impl Internal {
     /// Имя после `brevier:` — оно же то, что читатель печатает.
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Internal::History => "history",
             Internal::Bookmarks => "bookmarks",
+            Internal::Check(_) => "check",
         }
     }
 
     fn of_name(name: &str) -> Option<Self> {
-        match name.trim_start_matches("//").trim_end_matches('/') {
-            "history" => Some(Internal::History),
-            "bookmarks" => Some(Internal::Bookmarks),
+        let name = name.trim_start_matches("//");
+        match name.trim_end_matches('/') {
+            "history" => return Some(Internal::History),
+            "bookmarks" => return Some(Internal::Bookmarks),
+            "check" => return Some(Internal::Check(None)),
+            _ => {}
+        }
+        // Проверяют веб-страницу: у репозитория и файла сайта нет, а своя
+        // страница проверки не требует. Голый домен разбирается как везде.
+        match parse(name.strip_prefix("check/")?) {
+            Ok(Address::Web(url)) => Some(Internal::Check(Some(url))),
             _ => None,
         }
     }
@@ -231,10 +245,23 @@ impl Address {
             Address::Web(url) => url.clone(),
             Address::Repo(repo) => repo.web_url(),
             Address::File(path) => format!("file://{}", path.display()),
-            // Внутренней странице снаружи соответствия нет. Пустая строка
-            // здесь честнее выдуманного адреса: окно по ней и понимает,
+            // Проверка — о странице, и снаружи ей соответствует сама страница.
+            Address::Internal(Internal::Check(Some(url))) => url.clone(),
+            // Остальным внутренним страницам снаружи соответствия нет. Пустая
+            // строка здесь честнее выдуманного адреса: окно по ней и понимает,
             // что отдавать чужому браузеру нечего.
             Address::Internal(_) => String::new(),
+        }
+    }
+
+    /// Адрес проверки этой страницы — `brevier:check/…`. Проверяют
+    /// веб-страницу; у проверки это она сама, то есть перепроверка.
+    /// Репозиторию, файлу и своим страницам проверять нечего.
+    pub fn check(&self) -> Option<Address> {
+        match self {
+            Address::Web(url) => Some(Address::Internal(Internal::Check(Some(url.clone())))),
+            Address::Internal(Internal::Check(Some(_))) => Some(self.clone()),
+            _ => None,
         }
     }
 
@@ -266,6 +293,7 @@ impl Address {
                 }
             }
             Address::File(path) => path.display().to_string(),
+            Address::Internal(Internal::Check(Some(url))) => format!("brevier:check/{url}"),
             Address::Internal(page) => format!("brevier:{}", page.name()),
         }
     }
@@ -450,6 +478,41 @@ mod tests {
             Address::Internal(Internal::Bookmarks)
         );
         assert!(matches!(parse("brevier:nowhere"), Err(Error::BadUrl(_))));
+    }
+
+    #[test]
+    fn a_check_carries_the_page_it_checks() {
+        let check = parse("brevier:check/https://example.com/a?b=c#d").unwrap();
+        assert_eq!(
+            check,
+            Address::Internal(Internal::Check(Some(
+                "https://example.com/a?b=c#d".to_owned()
+            )))
+        );
+        // Разбирается обратно из того, что показано в строке.
+        assert_eq!(parse(&check.display()).unwrap(), check);
+        // Снаружи ей соответствует проверяемая страница.
+        assert_eq!(check.external(), "https://example.com/a?b=c#d");
+        // Голый домен — как в адресной строке.
+        assert_eq!(
+            parse("brevier:check/example.com").unwrap().display(),
+            "brevier:check/https://example.com"
+        );
+        // Без адреса — страница о том, как проверять.
+        assert_eq!(
+            parse("brevier:check").unwrap(),
+            Address::Internal(Internal::Check(None))
+        );
+        // Проверяют веб: репозиторий и опечатка — не адрес проверки.
+        assert!(parse("brevier:check/gh:o/n").is_err());
+        assert!(parse("brevier:checks").is_err());
+
+        // Адрес проверки берётся у страницы, а у проверки — она сама.
+        let page = parse("https://example.com/a").unwrap();
+        let check = page.check().unwrap();
+        assert_eq!(check.display(), "brevier:check/https://example.com/a");
+        assert_eq!(check.check(), Some(check.clone()));
+        assert!(parse("gh:o/n").unwrap().check().is_none());
     }
 
     #[test]
