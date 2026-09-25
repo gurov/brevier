@@ -34,14 +34,14 @@ the product is the window: your measure, your leading, your type, on every site.
 
 ## Install
 
-Nothing is in a store yet — two builds in the
+Nothing is in a store yet — builds for Linux and Android in the
 [releases](https://github.com/gurov/brevier/releases/latest), and the source.
 
 **A Flatpak bundle.** One file, one command; the runtime brings GTK, so it does not care
 which distribution is underneath:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.1.1/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.2.0/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -63,13 +63,26 @@ also in the [release](https://github.com/gurov/brevier/releases/latest), or buil
 `packaging/tarball.sh`:
 
 ```sh
-tar xf brevier-0.1.1-x86_64-linux.tar.gz
-cd brevier-0.1.1-x86_64-linux && ./install.sh
+tar xf brevier-0.2.0-x86_64-linux.tar.gz
+cd brevier-0.2.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` puts the binaries, the desktop entry, the icon and the licenses under
 `~/.local`, needs no root, and takes `--uninstall`. It wants GTK 4 in the system
 (`libgtk-4-1` on Debian and Ubuntu) and a glibc no older than the build machine's.
+
+**Android** (7.0 and later, 64-bit ARM — any phone from the last several years): download
+[`brevier-0.2.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.2.0/brevier-0.2.0-arm64.apk)
+on the phone and open it; Android asks once to allow installing apps from the browser or
+file manager you opened it with. Updates install over it as long as they carry the same
+signature — the release key, whose SHA-256 fingerprint is
+
+```
+30:A4:32:B8:2F:3E:F0:FC:E5:F4:68:1F:D7:F9:FE:20:5F:4B:17:A2:F4:34:19:C2:45:0C:A2:6B:E6:8D:34:80
+```
+
+Every file in a release is listed with its SHA-256 in `SHA256SUMS` next to it. Releases
+are built by CI from the tag (`.github/workflows/release.yml`), not on a laptop.
 
 ## Build
 

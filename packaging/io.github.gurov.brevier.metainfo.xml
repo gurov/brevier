@@ -90,6 +90,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.0" date="2026-09-25" type="development">
+      <description>
+        <p>An article opened again within a week comes from a copy on disk,
+          images included, and says how old the copy is; Reload fetches it
+          afresh. The check that scores a page for reading without JavaScript
+          opens inside Brevier from the menu, and runs in CI as a GitHub Action.
+          The history and bookmarks pages are separate.</p>
+        <p>Brevier also has an Android app now, built on the same core.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-09-15" type="development">
       <description>
         <p>Reading holds its place: back and forward return to where you were,
