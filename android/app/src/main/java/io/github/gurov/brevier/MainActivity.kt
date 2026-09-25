@@ -195,6 +195,7 @@ class MainActivity : Activity(), ArticleHost {
         settings = SettingsPage(this, fonts,
             changed = { dark, images -> changeSettings(dark, images) },
             forget = { forgetEverything() },
+            browser = { askToBeBrowser() },
         )
         root.addView(settings, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
@@ -771,17 +772,29 @@ class MainActivity : Activity(), ArticleHost {
     override fun openOutside(target: String) {
         val uri = Uri.parse(target)
         val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
-        val handlers = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        // `MATCH_ALL`, а не умолчание: когда браузер по умолчанию выбран,
+        // Android на веб-ссылку отвечает только им — то есть нами же,
+        // и остальных браузеров без этого флага не видно вовсе.
+        val handlers = packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
             .filter { it.activityInfo.packageName != packageName }
-        if (handlers.isEmpty()) {
-            notice("No other browser is registered for links")
-            return
+        val chosen = when (handlers.size) {
+            0 -> {
+                notice("No other browser is registered for links")
+                return
+            }
+            // Другой браузер один — им и открываем, без лишнего вопроса.
+            1 -> Intent(intent)
+                .setComponent(ComponentName(handlers[0].activityInfo.packageName, handlers[0].activityInfo.name))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Несколько — «твой браузер» уже не один: спрашиваем систему,
+            // убрав из списка самих себя.
+            else -> Intent.createChooser(intent, "Open in your browser").putExtra(
+                Intent.EXTRA_EXCLUDE_COMPONENTS,
+                arrayOf(ComponentName(this, MainActivity::class.java)),
+            )
         }
-        val default = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        val chosen = handlers.firstOrNull { it.activityInfo.packageName == default?.activityInfo?.packageName } ?: handlers.first()
-        intent.component = ComponentName(chosen.activityInfo.packageName, chosen.activityInfo.name)
         try {
-            startActivity(intent)
+            startActivity(chosen)
         } catch (failure: ActivityNotFoundException) {
             notice("No other browser is registered for links")
         }
@@ -877,8 +890,50 @@ class MainActivity : Activity(), ArticleHost {
         }
         menu.item("History") { newTab("brevier:history") }
         menu.item("Bookmarks") { newTab("brevier:bookmarks") }
-        menu.item("Settings") { settings.show(palette, dark, images) }
+        menu.item("Settings") { showSettings() }
         menu.show(more)
+    }
+
+    private fun showSettings() = settings.show(palette, dark, images, isBrowser())
+
+    /**
+     * Brevier ли браузер по умолчанию. С Android 10 это роль, у которой
+     * есть держатель; раньше — то, кого система выберет для веб-ссылки.
+     */
+    private fun isBrowser(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getSystemService(android.app.role.RoleManager::class.java)
+                ?.isRoleHeld(android.app.role.RoleManager.ROLE_BROWSER) == true
+        } else {
+            val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")).addCategory(Intent.CATEGORY_BROWSABLE)
+            packageManager.resolveActivity(web, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName == packageName
+        }
+
+    /**
+     * Попросить систему сделать Brevier браузером. Решает читатель, в диалоге
+     * системы; если диалога нет (Android до 10, оболочка производителя, два
+     * отказа подряд) — открываем экран приложений по умолчанию.
+     */
+    private fun askToBeBrowser() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roles = getSystemService(android.app.role.RoleManager::class.java)
+            if (roles != null && roles.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER) &&
+                !roles.isRoleHeld(android.app.role.RoleManager.ROLE_BROWSER)
+            ) {
+                try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(roles.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER), ROLE)
+                    return
+                } catch (failure: ActivityNotFoundException) {
+                    // Дальше — экран настроек.
+                }
+            }
+        }
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+        } catch (failure: ActivityNotFoundException) {
+            notice("Choose the browser in the system settings, under default apps")
+        }
     }
 
     /** Закладку ставят руками — звёздочкой, про ту страницу, что на экране. */
@@ -897,7 +952,7 @@ class MainActivity : Activity(), ArticleHost {
         Core.saveSettings(dark, images)
         if (themeChanged) {
             applyTheme()
-            settings.show(palette, dark, images)
+            showSettings()
             currentTab()?.let { redraw(it) }
         }
         if (imagesOn) currentTab()?.view?.loadAll()
@@ -1002,6 +1057,11 @@ class MainActivity : Activity(), ArticleHost {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == ROLE) {
+            if (settings.visibility == View.VISIBLE) showSettings()
+            if (isBrowser()) notice("Links from other apps now open in Brevier")
+            return
+        }
         if (requestCode != SAVE) return
         val uri = data?.data
         val address = pendingSave
@@ -1163,6 +1223,7 @@ class MainActivity : Activity(), ArticleHost {
 
     companion object {
         private const val SAVE = 1
+        private const val ROLE = 2
         private val NOTICE = Any()
         /** Докуда растёт «Loading…», прежде чем начать сначала. */
         private const val LOADING_DOTS = 10

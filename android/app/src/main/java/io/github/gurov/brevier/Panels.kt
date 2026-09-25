@@ -292,6 +292,7 @@ class SettingsPage(
     private val fonts: Fonts,
     private val changed: (dark: Boolean, images: Boolean) -> Unit,
     private val forget: () -> Unit,
+    private val browser: () -> Unit,
 ) : ScrollView(context) {
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private var dark = false
@@ -304,7 +305,7 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, dark: Boolean, images: Boolean) {
+    fun show(palette: Palette, dark: Boolean, images: Boolean, isBrowser: Boolean) {
         this.dark = dark
         this.images = images
         setBackgroundColor(palette.shelf)
@@ -328,26 +329,40 @@ class SettingsPage(
             switch(palette, images) { on -> this.images = on; changed(this.dark, this.images) }, palette,
         ))
 
+        column.addView(section("Links", palette))
+        column.addView(row(
+            "Default browser",
+            if (isBrowser) {
+                "Brevier is your browser: links from other apps open here, as new tabs. " +
+                    "What needs JavaScript or a login goes on to your other browser — Open in your browser, in the menu."
+            } else {
+                "Links from other apps would open here, as new tabs. " +
+                    "What needs JavaScript or a login goes on to your other browser — Open in your browser, in the menu."
+            },
+            button(if (isBrowser) "Change" else "Make default", palette.ink, palette) { browser() }, palette,
+        ))
+
         column.addView(section("History", palette))
-        val button = TextView(context).apply {
-            text = "Forget"
-            typeface = fonts.medium
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            setTextColor(0xffb3261e.toInt())
-            val side = context.dp(14f)
-            setPadding(side, context.dp(8f), side, context.dp(8f))
-            background = GradientDrawable().apply {
-                setStroke(context.dp(1f), palette.rule)
-                cornerRadius = context.dp(6f).toFloat()
-            }
-            setOnClickListener { forget() }
-        }
         column.addView(row(
             "Forget everything you have read",
             "The list at brevier:history goes away, and the address bar stops suggesting those pages. Bookmarks and open tabs stay.",
-            button, palette,
+            button("Forget", 0xffb3261e.toInt(), palette) { forget() }, palette,
         ))
         visibility = VISIBLE
+    }
+
+    private fun button(label: String, ink: Int, palette: Palette, act: () -> Unit) = TextView(context).apply {
+        text = label
+        typeface = fonts.medium
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        setTextColor(ink)
+        val side = context.dp(14f)
+        setPadding(side, context.dp(8f), side, context.dp(8f))
+        background = GradientDrawable().apply {
+            setStroke(context.dp(1f), palette.rule)
+            cornerRadius = context.dp(6f).toFloat()
+        }
+        setOnClickListener { act() }
     }
 
     private fun section(title: String, palette: Palette) =
