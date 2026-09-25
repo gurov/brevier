@@ -36,6 +36,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::address::Address;
@@ -681,13 +682,33 @@ fn parse_tab(line: &str) -> Option<Opened> {
     })
 }
 
+/// Папка, которую назвал сам интерфейс. На Android домашней папки и XDG нет:
+/// место приложению выдаёт система (`Context.getFilesDir`), и узнать его
+/// ядро может только от того, кто его спросил.
+static HOME: OnceLock<PathBuf> = OnceLock::new();
+
+/// Назвать папку для всего, что переживает запуск: данных, настроек
+/// и кэша разом. Зовётся один раз, до первого чтения; второй вызов
+/// ничего не меняет — хранилище не переезжает посреди работы.
+pub fn set_home(dir: PathBuf) {
+    let _ = HOME.set(dir);
+}
+
+/// Своя папка, если её назвали: интерфейсом или переменной окружения.
+/// Старше всего остального — ей открывают чистый профиль, как
+/// `--user-data-dir` у браузеров.
+fn own_dir() -> Option<PathBuf> {
+    if let Some(home) = HOME.get() {
+        return Some(home.clone());
+    }
+    std::env::var_os("BREVIER_DATA_DIR").map(PathBuf::from)
+}
+
 /// Куда кладём то, что переживает запуск. Данные, настройки и кэш — три
 /// разные папки: см. шапку модуля.
 pub fn data_dir() -> Option<PathBuf> {
-    // Своя папка старше всего остального: ей открывают чистый профиль,
-    // как `--user-data-dir` у браузеров.
-    if let Some(own) = std::env::var_os("BREVIER_DATA_DIR") {
-        return Some(PathBuf::from(own));
+    if let Some(own) = own_dir() {
+        return Some(own);
     }
     place("XDG_DATA_HOME", ".local/share", "Application Support")
 }
@@ -695,16 +716,16 @@ pub fn data_dir() -> Option<PathBuf> {
 /// Где лежат настройки. Пока ими никто не пользуется — раскладку решаем
 /// один раз и целиком, иначе заведётся второе хранилище со своей судьбой.
 pub fn config_dir() -> Option<PathBuf> {
-    if let Some(own) = std::env::var_os("BREVIER_DATA_DIR") {
-        return Some(PathBuf::from(own));
+    if let Some(own) = own_dir() {
+        return Some(own);
     }
     place("XDG_CONFIG_HOME", ".config", "Application Support")
 }
 
 /// Где лежит то, что не жалко потерять.
 pub fn cache_dir() -> Option<PathBuf> {
-    if let Some(own) = std::env::var_os("BREVIER_DATA_DIR") {
-        return Some(PathBuf::from(own));
+    if let Some(own) = own_dir() {
+        return Some(own);
     }
     place("XDG_CACHE_HOME", ".cache", "Caches")
 }

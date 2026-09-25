@@ -331,6 +331,17 @@ fn fonts() -> Arc<usvg::fontdb::Database> {
         .get_or_init(|| {
             let mut db = usvg::fontdb::Database::new();
             db.load_system_fonts();
+            // На Android `fontdb` системных шрифтов не ищет вовсе — у него нет
+            // для этой платформы ветки, и текст в svg (подписи значков, схемы)
+            // пропадал. Шрифты там лежат в одном месте, а родовые имена
+            // называем те, что есть на любом Android.
+            #[cfg(target_os = "android")]
+            {
+                db.load_fonts_dir("/system/fonts");
+                db.set_sans_serif_family("Roboto");
+                db.set_serif_family("Noto Serif");
+                db.set_monospace_family("Droid Sans Mono");
+            }
             Arc::new(db)
         })
         .clone()
