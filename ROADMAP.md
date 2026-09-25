@@ -101,8 +101,8 @@ and face are Brevier's constants, and the reader's knobs are zoom and the theme.
 
 A page in Settings for size, measure (kept in ems, so the line holds its length in
 characters when the size changes), leading, and face — saved in `settings.tsv` next
-to the theme, chosen once, for every site. Zoom stays what it is: a per-run, per-host
-adjustment for the material, not for the type.
+to the theme, chosen once, for every site. Zoom stays what it is: one step for the
+whole window, for the run only — an adjustment on top of the type, not part of it.
 
 The face is the expensive part. Brevier ships Noto Sans so that the promise holds on
 a machine with no fonts; a chosen face comes from the system through fontconfig, and
@@ -191,6 +191,37 @@ Two cheaper doors alongside: crates.io (`cargo install brevier --features ui`, o
 `Cargo.toml` has its metadata and an `exclude` for the corpus), and the cli as one
 file per tag for Linux, macOS and Windows — `brevier` links neither GTK nor OpenSSL.
 Published on tags, not on pushes.
+
+### 12. Reading progress (#19)
+
+A long page is read over several sittings, and it should not start from the top each
+time. Back and forward already return to the place, and so does the session; a page
+opened afresh — from a link, the history, a bookmark, another tab — does not.
+
+- **Continue, offered.** A page read for more than ten minutes is remembered: where
+  the reader stopped, and which parts were read. Opened again, it opens at the top,
+  and the status line offers "Continue from 43%". An offer, never a jump: opening a
+  link can be a deliberate re-read. An address with a `#fragment` goes to the
+  fragment, and no offer is made.
+- **Ten minutes of reading**, counted only while the page is on screen and the reader
+  is there. A page left open overnight has not been read for eight hours. Shorter
+  visits are not written down.
+- **What has been read, not how far.** A stretch of text counts once it has stayed on
+  screen for a few seconds; one scrolled past does not. A jump through the contents to
+  the last section does not read the article.
+- **On the shelf**, a thin bar at the right edge of every row: the share of its
+  section read. Waypoints — the paragraph starts that stand in for headings when a
+  page has none — carry the share in their label: "40% · Beginning of the
+  paragraph…". A section several screens long is split by waypoints of its own, shown
+  for the current section only.
+- **A file you own:** `reading.tsv`, one line per page — address, a fingerprint of the
+  text, the place, the stretches read. Capped; "forget everything" empties it. The
+  core does the counting, so the window and Android share one implementation.
+
+Known cost: offsets hold only while the text is the same, and pages change. When the
+fingerprint differs, what was read is carried over by heading anchors, or dropped.
+The archive (#8) removes the problem for the pages it keeps: a stored copy does not
+change.
 
 ## Far — after that
 
@@ -333,3 +364,9 @@ Recorded so that nobody rediscovers them in six months.
   persist in `settings.tsv`; the zoom step is one for the window, applied to every
   page, for the run only — not per host, and not saved. (Per-host zoom was tried
   and dropped: it only made the next page open at a surprising size.)
+- **A page read in the last week opens from a copy on disk**, images included —
+  no fetch, no extraction. The week runs from the download. A list of links is
+  always fetched, since its point is what is new; the status line says a page
+  is a copy and how old it is; Reload (`Ctrl+R`) fetches it as it is now;
+  "forget everything" deletes the copies. This is a cache, not the archive
+  (#8): the archive keeps pages for good.
