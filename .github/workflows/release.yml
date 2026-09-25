@@ -1,0 +1,154 @@
+name: Release
+
+# Выпуск: по тегу vX.Y.Z собрать то, что люди скачивают и ставят, — архив
+# для Linux, пакет Flatpak и APK для Android — и выложить релизом на GitHub.
+# Ручной запуск (Run workflow) собирает всё то же без выкладки: так проверяют,
+# что выпуск соберётся, до того как поставлен тег. Старый тег не трогаем:
+# свежее — это новая версия, а не перезапись выпущенного.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: the tag names the version in Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Тег и версия расходятся — значит, забыли поднять одно из двух,
+          # и файлы вышли бы с чужим номером в имени.
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but Cargo.toml says $version"
+            exit 1
+          fi
+          # Без заметок релиз выйти не должен: их пишут до тега.
+          test -f "packaging/notes/v$version.md" ||
+            { echo "::error::no packaging/notes/v$version.md"; exit 1; }
+
+  tarball:
+    name: Linux — archive
+    needs: version
+    # Бинарник требует glibc не старее сборочной: 24.04, как и прежде.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install GTK 4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev
+      - run: packaging/tarball.sh "$PWD/dist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  flatpak:
+    name: Linux — Flatpak
+    needs: version
+    runs-on: ubuntu-latest
+    # Рантайм тот же, что в манифесте: GNOME 49.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      # Пакет собирается с `--runtime-repo` Flathub: у того, кто рантайма
+      # не держит, flatpak сам предложит его забрать.
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: brevier.flatpak
+          manifest-path: packaging/io.github.gurov.brevier.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          artifact-name: flatpak
+
+  android:
+    name: Android — APK
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      # Ключ выпуска живёт в секретах; в репозиторий он не едет. Gradle
+      # берёт его по BREVIER_SIGNING и без него выпуск не собирает.
+      - name: The signing key from the secrets
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD are not set"
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/signing"
+          mkdir -p "$dir"
+          printf '%s' "$KEYSTORE" | base64 -d > "$dir/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=brevier\n' \
+            "$dir/release.jks" "$PASSWORD" > "$dir/release.properties"
+          echo "BREVIER_SIGNING=$dir/release.properties" >> "$GITHUB_ENV"
+      # Одна ABI — телефонная. Имя файла с версией: brevier-X.Y.Z-arm64.apk.
+      - name: Build the APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease -Pabis=arm64-v8a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: android/app/build/outputs/apk/release/brevier-*.apk
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: [version, tarball, flatpak, android]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # Суммы — чтобы скачанное можно было сверить, не веря зеркалу на слово.
+      - name: Checksums
+        working-directory: dist
+        run: |
+          ls -l
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "Brevier $VERSION" \
+            --notes-file "packaging/notes/v$VERSION.md" \
+            --latest

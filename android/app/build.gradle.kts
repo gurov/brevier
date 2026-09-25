@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -52,6 +54,27 @@ val abis: List<String> = (findProperty("abis") as String?)
 
 val coreDir = layout.buildDirectory.dir("core")
 
+// Подпись выпуска. Ключ в репозиторий не едет: путь к файлу свойств
+// (`storeFile`, `storePassword`, `keyAlias`) называет переменная
+// BREVIER_SIGNING — на машине мейнтейнера это ~/Android/keys, в CI файл
+// собирается из секретов. Без неё выпуск не собирается вовсе: неподписанный
+// APK не поставить, а подписанный отладочным ключом раздавать нельзя.
+val signing: Properties? = System.getenv("BREVIER_SIGNING")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { path -> Properties().apply { file(path).inputStream().use { load(it) } } }
+
+// Имя файла — то, что человек скачает: brevier-0.2.0-arm64.apk, а не
+// app-release.apk. ABI в имени, когда она одна; отладочная сборка помечена.
+fun apkName(buildType: String): String {
+    val abi = when (abis) {
+        listOf("arm64-v8a") -> "-arm64"
+        listOf("x86_64") -> "-x86_64"
+        else -> ""
+    }
+    val debug = if (buildType == "debug") "-debug" else ""
+    return "brevier-$coreVersion$abi$debug.apk"
+}
+
 // Ядро собирает cargo, а не Gradle: это та же команда, что у канарейки в CI.
 val buildCore by tasks.registering(Exec::class) {
     description = "Builds the Brevier core as a shared library for each ABI"
@@ -87,11 +110,24 @@ android {
         jniLibs.srcDir(coreDir)
     }
 
+    signingConfigs {
+        if (signing != null) {
+            create("release") {
+                storeFile = file(signing.getProperty("storeFile"))
+                storePassword = signing.getProperty("storePassword")
+                keyAlias = signing.getProperty("keyAlias", "brevier")
+                // PKCS12 держит один пароль на хранилище и ключ.
+                keyPassword = signing.getProperty("keyPassword", storePassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
             // Без ProGuard: Kotlin-компонент проверяющего зовут по JNI,
             // и минификатор счёл бы его мёртвым кодом.
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -104,6 +140,21 @@ android {
 }
 
 tasks.named("preBuild") { dependsOn(buildCore) }
+
+@Suppress("DEPRECATION")
+android.applicationVariants.all {
+    val type = buildType.name
+    outputs.all {
+        (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName = apkName(type)
+    }
+}
+
+// Выпуск без ключа — сразу и словами, а не неподписанным файлом в конце.
+gradle.taskGraph.whenReady {
+    if (signing == null && allTasks.any { it.project == project && it.name.contains("Release") && it.name.startsWith("assemble") }) {
+        throw GradleException("A release is signed: set BREVIER_SIGNING to a properties file with storeFile, storePassword and keyAlias")
+    }
+}
 
 dependencies {
     // Версию подставляет правило выше — из Cargo.lock.
