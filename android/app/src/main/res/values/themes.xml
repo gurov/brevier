@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Тема системы — только рамка. Вид страницы задаёт ядро, а не она:
+         цвета и гарнитуры приложение ставит само. -->
+    <style name="Theme.Brevier" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/shelf</item>
+        <item name="android:colorAccent">#0d6a9e</item>
+        <item name="android:colorPrimary">@color/shelf</item>
+        <item name="android:textColorPrimary">@color/ink</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

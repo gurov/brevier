@@ -78,7 +78,7 @@ jobs:
           fi
 
   android:
-    name: the core still cross-compiles for Android
+    name: Android — the core cross-compiles and the app builds
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,10 +87,10 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add aarch64-linux-android
-      # Канарейка, а не сборка приложения: интерфейса под Android нет,
-      # и ядро — единственное, что туда поедет как есть. День, когда в тракт
-      # чтения заедет зависимость с X11, fontconfig или библиотекой хоста,
-      # должен быть виден здесь, а не когда за фронтенд возьмутся всерьёз.
+      # Сначала канарейка: ядро — то, что едет на телефон как есть. День,
+      # когда в тракт чтения заедет зависимость с X11, fontconfig или
+      # библиотекой хоста, должен быть виден здесь отдельной строкой, а не
+      # потеряться в выводе Gradle.
       - name: Point the C compiler and the linker at the NDK
         run: |
           ndk="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
@@ -113,3 +113,12 @@ jobs:
         run: >
           cargo rustc --lib --crate-type cdylib
           --target aarch64-linux-android --features typeset,save
+      # Потом само приложение (`android/`): Kotlin поверх того же ядра.
+      # Одна ABI — телефонная; эмуляторную x86_64 CI не гоняет.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: The app builds
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug -Pabis=arm64-v8a

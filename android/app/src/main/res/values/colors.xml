@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Бумага: `palette::PAPER_LIGHT` ядра. Здесь только ради иконки и первого
+         кадра до того, как приложение спросит цвета у ядра. -->
+    <color name="paper">#faf5ea</color>
+    <color name="shelf">#f3ecdd</color>
+    <color name="ink">#23201c</color>
+</resources>
