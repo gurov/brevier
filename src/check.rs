@@ -300,7 +300,7 @@ pub fn check(url: &str, ua: UserAgent) -> Result<Report, Error> {
                     let shown = crate::feed::parse(&page.body, &page.url)
                         .map(|feed| crate::feed::to_markdown(&feed))
                         .unwrap_or_else(|_| page.body.clone());
-                    served(&page.url, &shown, "an RSS or Atom feed", moved)
+                    served(&page.url, &shown, "a feed", moved)
                 }
             })
         }

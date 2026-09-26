@@ -6,7 +6,8 @@
 
 A browser for reading, and nothing else. It fetches a page, reduces it to Markdown on
 your own machine, and sets it in the typography *you* chose — not the one the site
-shipped. It also reads Markdown documentation straight out of git repositories.
+shipped. It also reads Markdown documentation straight out of git repositories, and feeds
+as lists of links.
 
 No JavaScript engine, no site CSS. The modern web ships a document wrapped in a program;
 Brevier keeps the document and throws the program away. The site gets a vote on the words.
@@ -16,8 +17,9 @@ Why it is built this way is in the [manifesto](MANIFESTO.md); what comes next, a
 has been decided, is in the [roadmap](ROADMAP.md) — every near-term item there is an open
 issue labelled `roadmap`.
 
-**Status: early.** The window runs on Linux; there is a Flatpak bundle and a tarball to
-build or download, nothing in a store yet, and screen readers work on Linux only (see
+**Status: early.** Brevier runs on Linux, as a window, and on Android, as an app over the
+same core. There is a Flatpak bundle, a tarball and an APK to download, nothing in a store
+yet, and screen readers are known to work on Linux only (see
 [What it does not do](#what-it-does-not-do)).
 
 ![An article in Brevier: text set on ivory paper in the reader's own measure, with the
@@ -55,8 +57,8 @@ bumping a dependency).
 
 What the sandbox changes, stated rather than discovered later: history, bookmarks and
 settings live in `~/.var/app/io.github.gurov.brevier/`; saving goes through the file
-portal; a local `.md` path cannot be opened, because the sandbox gets no filesystem access
-at all; and "Open in your browser" asks the portal, so the host picks.
+portal; a local path — a `.md`, a saved feed — cannot be opened, because the sandbox gets
+no filesystem access at all; and "Open in your browser" asks the portal, so the host picks.
 
 **A tarball**, for a machine that already has GTK 4 and would rather not have a sandbox —
 also in the [release](https://github.com/gurov/brevier/releases/latest), or built with
@@ -82,45 +84,23 @@ signature — the release key, whose SHA-256 fingerprint is
 ```
 
 Every file in a release is listed with its SHA-256 in `SHA256SUMS` next to it. Releases
-are built by CI from the tag (`.github/workflows/release.yml`), not on a laptop.
+are built by CI from the tag, not on a laptop. To build from source — the cli, the window
+or the Android app — see [CONTRIBUTING.md](CONTRIBUTING.md#building).
 
-## Build
+## Making it your browser
 
-Rust 1.88 or newer (edition 2024 needs 1.85; the image decoder's `slice::as_chunks` needs
-1.88). The `ui` feature needs GTK 4 development files.
-
-```sh
-cargo build --release                  # brevier — the cli
-cargo build --release --features ui    # brevier-ui — the window, on GTK4
-sudo apt install libgtk-4-dev build-essential   # Debian/Ubuntu, for the ui feature
-```
-
-`ui` pulls in image decoding and saving; the cli builds without either.
-
-## A desktop entry
-
-The icon ships inside the binary, so the window wears it on X11 with nothing installed. A
-launcher menu and a Wayland compositor pick the icon from the desktop entry and the app id
-instead — to install both for your user:
-
-```sh
-cargo install --path . --features ui
-install -Dm644 packaging/io.github.gurov.brevier.desktop \
-        ~/.local/share/applications/io.github.gurov.brevier.desktop
-install -Dm644 assets/brevier.svg \
-        ~/.local/share/icons/hicolor/scalable/apps/io.github.gurov.brevier.svg
-update-desktop-database ~/.local/share/applications
-```
+The desktop entry — installed by the Flatpak, by `install.sh`, or by hand — declares
+`http`, `https` and `feed://` links, Markdown, and RSS, Atom and JSON feed files, so
+Brevier turns up in "Open with". It does not make itself the default
+(`xdg-settings set default-web-browser io.github.gurov.brevier.desktop` if you want that).
+Made default it still lets you out — `Ctrl+O` hands the page to the first registered
+browser that is not Brevier, or, inside a Flatpak, to the portal. On Android, Settings has
+**Make default**, which opens the system's own dialog.
 
 The id is `io.github.gurov.brevier`, after the repository — the form Flathub's rules give a
-project on GitHub, since `brevier.dev` is not ours yet. The entry declares `http`, `https`
-and `text/markdown`, so Brevier turns up in "Open with"; it does not make itself the
-default (`xdg-settings set default-web-browser io.github.gurov.brevier.desktop` if you want
-that). Made default it still lets you out — `Ctrl+O` hands the page to the first registered
-browser that is not Brevier, or, inside a Flatpak, to the portal.
-
-If the entry shows up without its icon, the shell cached its icon themes before the
-directory existed: log out and back in, or restart the shell.
+project on GitHub, since `brevier.dev` is not ours yet. If the entry shows up in the menu
+without its icon, the shell cached its icon themes before the directory existed: log out
+and back in, or restart the shell.
 
 ## Use
 
@@ -145,7 +125,8 @@ brevier brevier:history                 # what you have read, by day
 brevier-ui <url> [<url>…]               # read in a window, one tab per address
 ```
 
-A pasted GitHub or GitLab file URL is understood too, and so is a path to a local `.md`.
+A pasted GitHub or GitLab file URL is understood too, and so is a `feed://` link, a path to
+a local `.md` or a saved feed.
 `--save` (in the `ui` build) writes `.md`, or a `.zip` of the text plus an `images/` folder
 when the page has pictures; `-o` names the file, and without it an existing file of the
 article's name stops the run rather than being overwritten.
@@ -174,7 +155,7 @@ the same report opens from the menu, **Check this page**, or at `brevier:check/<
 In CI it is a GitHub Action, built from this repository at the ref you name:
 
 ```yaml
-- uses: gurov/brevier@main     # or a release tag, once one carries the action
+- uses: gurov/brevier@v0.4.0   # a release tag, or @main
   with:
     urls: |
       https://example.com/
@@ -190,7 +171,7 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | | |
 |---|---|
 | `Enter` | open the address |
-| `Space`, `PageUp`/`PageDown` | page down / up |
+| `Space` / `Backspace`, `PageDown` / `PageUp` | page down / up |
 | arrows, `Home`/`End` | line, top, bottom |
 | `Ctrl+L` | focus the address bar |
 | `Ctrl+R`, `F5` | load the page afresh, past the saved copy |
@@ -199,7 +180,7 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Ctrl+D` | keep this page, or take it off again |
 | `Ctrl+Tab`, `Ctrl+PageUp`/`PageDown` | switch tabs |
 | `Ctrl+F` | find on page |
-| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | zoom the page in, out, back to 100% |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0`, `Ctrl`+wheel | zoom the page in, out, back to 100% |
 | `Ctrl+S` | save the article |
 | `Ctrl+O` | hand the page to your system browser |
 
@@ -221,8 +202,13 @@ the history.
   *lighter* than the text rather than bolder, because at a large size weight shouts instead
   of leading — plus zoom and the theme. A settings page for face, size and measure is on
   the roadmap.
+- **Typesetting by the page's language.** When a page says what language it is in, lines
+  break with hyphens by that language's patterns (English and Russian ship with Brevier),
+  and in Russian and Czech no line ends on a one-letter preposition. It is typesetting, not
+  editing: copying and find-on-page see the text without the soft hyphens, and the saved
+  Markdown is untouched.
 - **Ivory paper** (`#faf5ea`) instead of white, which glows on a screen; a warm dark theme
-  is a switch away in the menu.
+  is a switch away in Settings.
 - **Page zoom on the browser's ladder** (67…200%) scales the whole typographic model, not
   just the body size — so a line still holds about 65 characters at every step. It is one
   step for the window, shared across tabs and kept for the run only.
@@ -256,8 +242,33 @@ the history.
   time: every tab, its back and forward, the tab and the line you were on. Only the tab you
   were on is fetched at startup; the rest load the moment you switch to one.
 - **Pages you read are remembered, and the address bar suggests them** as you type. `Ctrl+H`
-  opens the list itself, grouped by day; a star (`Ctrl+D`) keeps a page, and the two lists
-  link to each other.
+  opens the list itself, grouped by day; a star (`Ctrl+D`) keeps a page, and the bookmarks
+  open from the menu.
+- **"Not secure" is marked; there is no padlock.** A page that came over plain `http` says
+  so in the address bar: anyone on the way could read and change it. A padlock is left out
+  on purpose — readers took it for "this site is trustworthy", when all it means is "the
+  channel is encrypted" — and a certificate the system does not trust is not opened at all.
+- **A page that cannot be shown says why**, in words — a certificate the system does not
+  trust, a site that wants a login, a page built by JavaScript — and offers **Open in your
+  browser**, the one way out that does not depend on remembering `Ctrl+O`.
+
+## On the phone
+
+The Android app is a second front-end over the same core, not a port of the window. The
+article is set in native text — not in a WebView — from the same page model, the same type
+scale and the same palette, so an article reads the same on both.
+
+- Tabs, the shelf, find on page, zoom (from the menu or with a pinch), saving as `.md` or
+  `.zip` through the system's save dialog, history, bookmarks, settings, the dark theme, and
+  a session that comes back. Back returns to the place you left.
+- It can be the default browser, and "Open in your browser" still finds the others.
+- It opens what other apps hand it: links, shared text with a link in it, `feed://` links,
+  and feed or Markdown files from Downloads or a file manager.
+- A long press on a link opens it in a new tab, copies it, or hands it to your browser.
+- With a keyboard attached, the window's shortcuts work: `Ctrl+L`, `T`, `W`, `F`, `S`, `H`,
+  `D`, `O`, and `Alt+←` / `Alt+→` for back and forward.
+
+It is in daily use on the maintainer's phone; it has not been tried with TalkBack yet.
 
 ## How well does it work
 
@@ -289,11 +300,13 @@ permanent background of this kind of program, not a task that finishes.
   pages that reach the extractor are readable), and the price would be hundreds of
   megabytes, seconds per article, non-deterministic output instead of byte-exact regression
   files, and the risk of handing the reader invented text in place of the author's.
-- **Accessibility outside Linux** — GTK4 speaks AT-SPI, so screen readers work on Linux
-  only; NVDA on Windows and VoiceOver on macOS see nothing here. That is the price of the
-  toolkit, stated plainly rather than by omission.
-- **A store listing** — not yet. A Flatpak bundle and a tarball are in Releases; Flathub is
-  on the roadmap, and with it the updates a bundle cannot deliver.
+- **Accessibility outside Linux** — GTK 4 speaks AT-SPI, so on the desktop screen readers
+  work on Linux only; NVDA on Windows and VoiceOver on macOS would see nothing, which is one
+  reason there are no builds for them yet. The Android app draws native text, which TalkBack
+  should read, but that has not been tested. The price of the toolkit, stated plainly rather
+  than by omission.
+- **A store listing** — not yet. A Flatpak bundle, a tarball and an APK are in Releases;
+  Flathub is on the roadmap, and with it the updates a bundle cannot deliver.
 - **Privacy** — not sold here. Sites may track a reader exactly as they always could.
 
 Known limitation: a table is a grid of widgets anchored in the text buffer, so find-on-page
@@ -303,7 +316,7 @@ and "copy everything" do not see its contents. The saved Markdown has it in full
 
 CommonMark + GFM, through `comrak` — "Markdown" without a dialect means nothing. One
 representation serves both modes, which is what makes saving nearly free; the price is what
-it cannot carry (tables nested in lists, definition lists, footnotes, sub/sup, ruby), and
+it cannot carry (tables nested in lists, definition lists, sub/sup, ruby), and
 that loss is also the noise removal this program is for.
 
 A site that serves Markdown is read exactly, no extraction in the way: `Accept:
@@ -324,10 +337,13 @@ History, open tabs and bookmarks are plain text, one line each, tab-separated:
 %LOCALAPPDATA%\Brevier\                 # Windows
 ```
 
+On Android the same files live in the app's own storage.
+
 Settings (theme, images, the shelf) are in `$XDG_CONFIG_HOME/brevier/settings.tsv`, and a
-cache goes to `$XDG_CACHE_HOME/brevier` — three directories, not one profile, because you
-carry the first with you, edit the second by hand, and throw the third away without
-looking. `BREVIER_DATA_DIR` moves all of them at once.
+cache goes to `$XDG_CACHE_HOME/brevier` — the fonts, and the week-long copies of the pages
+you read, capped at 64 MB of text and 256 MB of images. Three directories, not one
+profile, because you carry the first with you, edit the second by hand, and throw the third
+away without looking. `BREVIER_DATA_DIR` moves all of them at once.
 
 Text rather than a database: SQLite would mean a C library in a program that sells memory
 safety, and a reading history is thousands of lines, not millions. The file is yours —
@@ -342,19 +358,23 @@ it through a different window size, zoom or font.
 - **Not a crawler.** Brevier fetches the page you opened and what it takes to read it — its
   images, an alternate Markdown copy when offered, a dozen probes on a repository's CDN for
   where its documentation starts. It does not walk a site or fetch pages nobody asked for.
+- **One site is read through its feed.** reddit's pages are empty without JavaScript, so a
+  reddit thread or subreddit is fetched as its `.rss` instead — the one per-site rule so
+  far. reddit allows few requests in a row without an account; when it asks to slow down,
+  Brevier says so.
 - **The User-Agent is honest** — `Brevier/0.1`. Chosen by measurement, not principle: on our
   corpus a browser-shaped UA lost 7:0, every case a 403 from an anti-bot.
 - **TLS trust is delegated to the operating system** (`rustls` + `rustls-platform-verifier`).
   No bundled root store, no way to skip verification — a site signed by a CA your system
-  does not know will not open until that root is installed, exactly as `curl` behaves.
+  does not know will not open until that root is installed, exactly as `curl` behaves. On
+  Android the system also checks that a certificate has not been revoked, and a site whose
+  revocation list cannot be fetched does not open.
 
 ## Contributing
 
-Patches and bug reports are welcome. What is planned is in [ROADMAP.md](ROADMAP.md) and the
-issues labelled `roadmap`; smaller items carry `bug` or `enhancement`. `cargo test` and
-`cargo clippy --all-targets --features ui` should be clean, and any change to extraction or
-conversion needs a corpus run diffed against `corpus/expected/` before it is committed —
-those files exist to catch regressions, and they already have twice.
+Patches and bug reports are welcome. How the code is laid out, how to build it, and what a
+change needs before it is merged are in [CONTRIBUTING.md](CONTRIBUTING.md); what is
+planned is in the [roadmap](ROADMAP.md) and the issues labelled `roadmap`.
 
 ## License
 

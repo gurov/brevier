@@ -100,7 +100,7 @@ const HELP: &str = "\
 brevier-ui — the Brevier window: reading without JavaScript, in the typography
 you chose rather than the one the site shipped.
 
-Usage: brevier-ui [options] [<url|gh:owner/repo|path.md>…]
+Usage: brevier-ui [options] [<url|feed://…|gh:owner/repo|path>…]
 
 Every address opens in its own tab; without one the window starts on its intro
 page. Brevier is a single application: a second launch adds a window to the one
@@ -3257,8 +3257,8 @@ fn show_message(view: &gtk::TextView, headline: &str, detail: &str, offer: Optio
 
     // Кнопка, а не только Ctrl+O: на странице, где ничего не показалось,
     // читателю нужен выход, а не память о сочетании клавиш. Что предлагать
-    // её, решает ядро (`Failure::offer_browser`) — 403 не лечится ничем,
-    // а пустое извлечение лечится именно этим.
+    // её, решает ядро (`Failure::offer_browser`): при любом отказе, кроме
+    // адреса, который не разобрался, — там отдавать браузеру нечего.
     let Some(target) = offer else { return };
     buffer.insert(&mut end, "\n\n");
     let anchor = buffer.create_child_anchor(&mut end);

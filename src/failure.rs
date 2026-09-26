@@ -14,8 +14,11 @@ use crate::Error;
 /// Ошибка, переведённая с языка тракта на язык читателя.
 ///
 /// Разные причины требуют разных ответов: сертификат лечится установкой корня
-/// в систему, 403 не лечится ничем, а пустое извлечение — повод сразу
-/// предложить системный браузер.
+/// в систему, 403 — входом, которого у нас нет и не будет, пустое
+/// извлечение — скриптами. Системный браузер предлагаем при любом отказе,
+/// где есть что ему отдать: он умеет то, от чего Brevier отказался, и это
+/// единственный выход со страницы, которая не показалась. Не предлагаем
+/// только на адресе, который не разобрался, — отдавать нечего.
 #[derive(Debug, Clone)]
 pub struct Failure {
     pub headline: &'static str,
@@ -96,7 +99,7 @@ pub fn describe(error: &Error) -> Failure {
         ),
         Error::UnsupportedContentType(kind) => failure(
             "This is not a page",
-            format!("The server sent “{kind}”. Brevier reads html, markdown, plain text and RSS or Atom feeds; PDF, video and images are work for the system browser."),
+            format!("The server sent “{kind}”. Brevier reads html, markdown, plain text and RSS, Atom or JSON feeds; PDF, video and images are work for the system browser."),
             true,
         ),
         Error::TooLarge(limit) => failure(
@@ -106,14 +109,14 @@ pub fn describe(error: &Error) -> Failure {
         ),
         Error::EmptyExtraction => failure(
             "There is no article on this page",
-            "That is how feeds, catalogues and sites assembled by JavaScript look. Brevier shows an article or says plainly that there is none."
+            "That is how sites assembled by JavaScript look, and pages with nothing to read but a form. Brevier shows an article or a list of links, or says plainly that there is neither."
                 .to_owned(),
             true,
         ),
         Error::Convert(e) => failure("Could not make sense of the page", format!("{e}"), true),
         Error::Feed(e) => failure(
             "The feed cannot be read",
-            format!("It is RSS or Atom, but broken beyond what Brevier repairs: {e}."),
+            format!("It is a feed, but broken beyond what Brevier repairs: {e}."),
             true,
         ),
         Error::Media(what) => failure(

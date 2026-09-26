@@ -11,9 +11,10 @@ use brevier::{Address, address, extract, fetch, markdown};
 
 const HELP: &str = "\
 brevier — a JavaScript-free reader: fetches a page, extracts the article,
-prints it as Markdown (CommonMark + GFM).
+prints it as Markdown (CommonMark + GFM). A feed (RSS, Atom, JSON) prints as
+a list of links, and a feed that discusses one page as a thread.
 
-Usage: brevier [options] <url|gh:owner/repo|gl:owner/repo|brevier:history>
+Usage: brevier [options] <url|feed://…|gh:owner/repo|gl:owner/repo|path|brevier:history>
        brevier --check [--min <0..100>] [--badge <path>] <url>…
 
 Options:
