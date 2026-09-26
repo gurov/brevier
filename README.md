@@ -22,9 +22,10 @@ same core. There is a Flatpak bundle, a tarball and an APK to download, nothing 
 yet, and screen readers are known to work on Linux only (see
 [What it does not do](#what-it-does-not-do)).
 
-![An article in Brevier: text set on ivory paper in the reader's own measure, with the
-page's table of contents on the shelf at the right and the section being read marked in
-it](assets/screenshot-article.png)
+![An article in Brevier: an essay on keyboard latency set on ivory paper in the reader's
+own measure, hyphenated, its quotes ruled at the left; the shelf at the right lists the
+page's contents with the section being read marked, and the site's own links under
+them](assets/screenshot-article.png)
 
 ## Not a converter
 
@@ -136,11 +137,13 @@ an address handed to it while it runs — from the command line, or a link you c
 another program — opens as a tab in the window you already have, the way a browser does.
 Launching it with no address opens another window, which is how you ask for one.
 
-Below is `gh:gurov/brevier` — this very README, read out of the repository in the same type
-as any article, with its sections on the shelf:
+Below is a chapter of the Rust book, `gh:rust-lang/book/src/ch03-02-data-types.md`, read
+straight out of the repository in the same type as any article — the book's documentation
+and contributing guide on the shelf, above the chapter's contents:
 
-![The repository mode: this README rendered in Brevier, its headings listed on the shelf
-at the right](assets/screenshot-repository.png)
+![The repository mode: a chapter of the Rust book rendered in Brevier, with highlighted
+code; the shelf lists the repository's documentation, its contributing guide and its
+files, then the chapter's sections](assets/screenshot-repository.png)
 
 Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extracted,
 6 conversion (or a feed too broken to repair) — so a batch run can tell "the site refused"
@@ -150,7 +153,10 @@ from "extraction failed".
 
 `--check` scores a page 0 to 100 for a reader that runs no scripts, prints what to change
 and what each finding cost, and exits non-zero below `--min` (80 by default). In the window
-the same report opens from the menu, **Check this page**, or at `brevier:check/<url>`.
+the same report opens from the menu, **Check this page**, or at `brevier:check/<url>`:
+
+![The check of example.com inside Brevier: a score of 81 out of 100, the arithmetic behind
+it, and the findings by stage, each with what to change](assets/screenshot-check.png)
 
 In CI it is a GitHub Action, built from this repository at the ref you name:
 
@@ -252,6 +258,12 @@ the history.
   trust, a site that wants a login, a page built by JavaScript — and offers **Open in your
   browser**, the one way out that does not depend on remembering `Ctrl+O`.
 
+A feed opens as a list of links — here the Rust blog's, `blog.rust-lang.org/feed.xml`:
+
+![The Rust blog's feed in Brevier: each entry's title as a link, its date and author in
+italics, a few lines of its summary; the status line says it is a list of links, not an
+article](assets/screenshot-feed.png)
+
 ## On the phone
 
 The Android app is a second front-end over the same core, not a port of the window. The
@@ -269,6 +281,13 @@ scale and the same palette, so an article reads the same on both.
   `D`, `O`, and `Alt+←` / `Alt+→` for back and forward.
 
 It is in daily use on the maintainer's phone; it has not been tried with TalkBack yet.
+
+<p align="center">
+  <img src="assets/screenshot-phone-article.png" width="300"
+       alt="The same essay on a phone: the text hyphenated in the phone's column, the quotes ruled at the left">
+  <img src="assets/screenshot-phone-shelf.png" width="300"
+       alt="The phone in the dark theme with the shelf open over the article: the page's contents with the current section marked, the site's links under them">
+</p>
 
 ## How well does it work
 
