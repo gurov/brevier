@@ -1277,6 +1277,15 @@ mod tests {
     }
 
     #[test]
+    fn front_matter_is_not_drawn() {
+        let page = Page::of(&doc(
+            "---\ndescription: A page\ntitle: Its title\n---\n\n# Heading\n\nText.\n",
+        ));
+        assert_eq!(page.text, "Heading\nText.\n");
+        assert_eq!(page.anchors, vec![("heading".to_owned(), 0)]);
+    }
+
+    #[test]
     fn prose_is_typeset_but_headings_are_not() {
         let mut document = doc("## Разделение\n\nРазделение в лесу продолжается долго.\n");
         document.lang = Some("ru".to_owned());

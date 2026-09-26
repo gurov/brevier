@@ -320,11 +320,16 @@ fn open_file(path: &Path) -> Result<Document, Error> {
 }
 
 /// Заголовок документа — первый `# ` в тексте.
+/// Ищем в тексте после шапки YAML: строка `# …` в самой шапке — комментарий
+/// YAML, а не заголовок. Нет заголовка в тексте — берём `title:` из шапки.
 fn heading_of(markdown: &str) -> Option<String> {
-    markdown.lines().find_map(|line| {
-        line.strip_prefix("# ")
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-    })
+    markdown::body(markdown)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("# ")
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+        })
+        .or_else(|| markdown::front_matter_title(markdown))
 }

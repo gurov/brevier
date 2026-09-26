@@ -1391,6 +1391,51 @@ fn language_from_attrs(element: &Element) -> Option<String> {
 /// Диалект у продукта один, поэтому и настройки одни: этими же разбирает
 /// документ окно. Свой набор рядом расходится молча — так в окне уже жили
 /// списки задач, которые отрисовщик умеет рисовать, а разбор не включал.
+/// Граница шапки YAML: строка из трёх дефисов в начале документа.
+const FRONT_MATTER: &str = "---";
+
+/// Шапка YAML в начале документа, если она есть: её строки без границ
+/// и место, где кончается шапка.
+fn front_matter(md: &str) -> Option<(&str, usize)> {
+    let rest = md.strip_prefix(FRONT_MATTER)?;
+    let rest = rest
+        .strip_prefix("\r\n")
+        .or_else(|| rest.strip_prefix('\n'))?;
+    let start = md.len() - rest.len();
+    let mut at = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end() == FRONT_MATTER {
+            return Some((&rest[..at], start + at + line.len()));
+        }
+        at += line.len();
+    }
+    None
+}
+
+/// Текст документа без шапки YAML.
+pub fn body(md: &str) -> &str {
+    match front_matter(md) {
+        Some((_, end)) => &md[end..],
+        None => md,
+    }
+}
+
+/// Заголовок из шапки YAML (`title: …`) — у страниц Jekyll и Hugo он часто
+/// только там, а в тексте первого `#` нет вовсе.
+pub fn front_matter_title(md: &str) -> Option<String> {
+    let (head, _) = front_matter(md)?;
+    head.lines().find_map(|line| {
+        let value = line.strip_prefix("title:")?.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value)
+            .trim();
+        (!value.is_empty()).then(|| value.to_owned())
+    })
+}
+
 pub fn options() -> Options<'static> {
     let mut options = Options::default();
     options.extension.table = true;
@@ -1404,6 +1449,12 @@ pub fn options() -> Options<'static> {
     // Сноски: единый вид, к которому сводятся все веб-формы — см.
     // `extract::notes`. Без этого `[^1]` доехало бы до читателя текстом.
     options.extension.footnotes = true;
+    // Шапка YAML (`---` … `---` в начале файла) — метаданные генератора
+    // сайта, а не текст. Её носят страницы Jekyll и Hugo в репозиториях
+    // и markdown-двойники, которые сайты отдают сами. Без этого закрывающий
+    // `---` становился подчёркиванием заголовка, и вся шапка — `title:`,
+    // `description:` — приезжала читателю огромным заголовком.
+    options.extension.front_matter_delimiter = Some(FRONT_MATTER.to_owned());
     // Ширина колонки — дело рендерера и читателя, не файла: строка = абзац,
     // так диффы корпуса показывают правку, а не переливание переносов.
     options.render.width = 0;
@@ -1412,6 +1463,26 @@ pub fn options() -> Options<'static> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn front_matter_is_metadata_not_text() {
+        let md =
+            "---\ntitle: \"Hugo page\"\n# a YAML comment\ndescription: words\n---\n\nBody text.\n";
+        assert_eq!(body(md), "\nBody text.\n");
+        assert_eq!(front_matter_title(md).as_deref(), Some("Hugo page"));
+        // Черта в начале без закрывающей — не шапка, а обычная черта.
+        assert_eq!(body("---\ntext\n"), "---\ntext\n");
+        assert_eq!(front_matter_title("# Plain\n"), None);
+
+        // Разбор comrak шапку в текст не пускает.
+        let arena = comrak::Arena::new();
+        let root = comrak::parse_document(&arena, md, &options());
+        let headings = root
+            .descendants()
+            .filter(|node| matches!(node.data.borrow().value, NodeValue::Heading(_)))
+            .count();
+        assert_eq!(headings, 0);
+    }
 
     #[test]
     fn a_title_that_arrived_twice_is_printed_once() {

@@ -63,6 +63,11 @@ const TOC_LINES: i32 = 5;
 const TOC_CHARS: usize = 300;
 /// Сколько знаков влезает на корешок вкладки.
 const TAB_LABEL: usize = 24;
+/// Естественная ширина подписи в рамке картинки, в знаках. Подпись всё равно
+/// переносится по всей ширине рамки; число только не даёт ей просить больше.
+/// Без него переносимая метка GTK просит ширину всего текста в одну строку,
+/// и длинный `alt` раздвигал колонку за меру — у nngroup до края окна.
+const CAPTION_CHARS: i32 = 40;
 
 /// Докуда растёт список подсказок. Восемь строк в две строчки каждая —
 /// и ни пикселем больше: подсказка помогает выбрать, а не читать.
@@ -1489,7 +1494,12 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
     let view: gtk::TextView = article.upcast();
     view.set_editable(false);
     view.set_cursor_visible(false);
-    view.set_wrap_mode(gtk::WrapMode::Word);
+    // По словам, а слово длиннее строки — внутри него. Одних слов мало:
+    // адрес, отпечаток ключа, строка JSON в блоке кода не рвутся нигде,
+    // вылезают за меру, и вид становится шире своей колонки — сначала
+    // раздвигал её, а после начальной прокрутки сдвигал текст вбок, срезая
+    // начала строк. Мягкие переносы по языку остаются первыми кандидатами.
+    view.set_wrap_mode(gtk::WrapMode::WordChar);
     view.set_halign(gtk::Align::Center);
     view.set_top_margin(28);
     view.set_bottom_margin(80);
@@ -3783,6 +3793,12 @@ fn scroll_to(view: &gtk::TextView, offset: i32, align: f64) {
         None => buffer.create_mark(Some(JUMP), &place, true),
     };
     view.scroll_to_mark(&mark, 0.0, true, 0.0, align);
+    // Метку выравнивают и по горизонтали, а сбоку колонку не листают вовсе:
+    // строка списка с отступом, поставленная к левому краю, срезала бы
+    // начала строк всей колонки.
+    if let Some(sideways) = view.hadjustment() {
+        sideways.set_value(sideways.lower());
+    }
 }
 
 /// Прокрутка, которая доводит дело до конца.
@@ -4137,6 +4153,7 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
     button.set_tooltip_text(Some(&shot.source.display()));
     if let Some(text) = button.child().and_downcast::<gtk::Label>() {
         text.set_wrap(true);
+        text.set_max_width_chars(CAPTION_CHARS);
         text.set_justify(gtk::Justification::Center);
     }
     {
@@ -4225,6 +4242,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         let waiting = gtk::Label::builder()
             .label("loading the image…")
             .wrap(true)
+            .max_width_chars(CAPTION_CHARS)
             .build();
         waiting.add_css_class("caption");
         fill(frame, &waiting);
@@ -4371,6 +4389,7 @@ fn show_shot(shot: &Shot, raster: Raster) {
         let caption = gtk::Label::builder()
             .label(&shot.alt)
             .wrap(true)
+            .max_width_chars(CAPTION_CHARS)
             .xalign(if narrow { 0.5 } else { 0.0 })
             .justify(if narrow {
                 gtk::Justification::Center
