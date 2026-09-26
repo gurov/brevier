@@ -90,6 +90,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.0" date="2026-09-26" type="development">
+      <description>
+        <p>JSON feeds, feed:// links and feed files open like RSS and Atom. A
+          feed that discusses one page, such as a reddit thread or the comments
+          on a blog post, reads as a thread: the post in full, then every
+          comment with its author and date.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-09-26" type="development">
       <description>
         <p>An RSS or Atom feed opens as a list of links, each entry with its
