@@ -20,6 +20,9 @@ pub mod code;
 pub mod error;
 pub mod extract;
 pub mod failure;
+/// Ленты RSS и Atom: адрес ленты открывается списком ссылок с датами,
+/// а ленты, объявленные страницей, едут на полку.
+pub mod feed;
 pub mod fetch;
 pub mod history;
 /// Текст начальной страницы. В ядре по той же причине, что и `failure`.
@@ -86,6 +89,10 @@ pub struct Document {
     /// без JS страница остаётся набором ссылок, и с главной иначе некуда
     /// пойти. Показывать решает интерфейс.
     pub site: Vec<Link>,
+    /// Ленты, которые страница объявила в шапке (`<link rel="alternate"
+    /// type="application/rss+xml">`). Полка показывает их группой «This site
+    /// has a feed»: подписка — дело будущего, а открыть ленту можно сейчас.
+    pub feeds: Vec<Link>,
     /// Язык страницы (`<html lang>`), если объявлен. Окно берёт по нему
     /// переносы; без языка их нет.
     pub lang: Option<String>,
@@ -134,6 +141,7 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
         kind: Kind::Article,
         served: false,
         site: Vec::new(),
+        feeds: Vec::new(),
         lang: None,
     })
 }
@@ -153,12 +161,31 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             kind: Kind::Article,
             served: page.kind == ContentKind::Markdown,
             site: Vec::new(),
+            feeds: Vec::new(),
             // Родной текст без HTML — языка мы не знаем.
             lang: None,
             address,
         }),
         ContentKind::Html => from_html(&page.body, &page.url),
+        ContentKind::Feed => from_feed(&page.body, &page.url),
     }
+}
+
+/// Лента: список записей со ссылками и датами. Это «список ссылок», тот же
+/// вид, что у главной блога, — и так же не кладётся в недельную копию:
+/// ленту открывают ради нового.
+pub fn from_feed(xml: &str, url: &str) -> Result<Document, Error> {
+    let parsed = feed::parse(xml, url)?;
+    Ok(Document {
+        address: Address::Web(url.to_owned()),
+        title: parsed.title.clone(),
+        markdown: feed::to_markdown(&parsed),
+        kind: Kind::Listing,
+        served: false,
+        site: Vec::new(),
+        feeds: Vec::new(),
+        lang: None,
+    })
 }
 
 /// Страница, которая уже на руках: HTML пришёл не из сети, а из stdin
@@ -168,6 +195,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
     let article = extract::extract(html, url)?;
     let title = article.title.clone();
     let site = article.site.clone();
+    let feeds = article.feeds.clone();
     let lang = article.lang.clone();
     let reading = markdown::from_article(&article)?;
 
@@ -178,6 +206,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
         // тракт из сети (`fetch::readable`), а не этот путь.
         served: false,
         site,
+        feeds,
         lang,
         title: if title.trim().is_empty() {
             url.to_owned()
@@ -222,6 +251,7 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         // У репозитория своя навигация — точки входа в документацию,
         // и их ищет окно отдельно (`seek_entries`).
         site: Vec::new(),
+        feeds: Vec::new(),
         // README — родной markdown, `<html lang>` в нём нет.
         lang: None,
         address,
@@ -244,6 +274,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         kind: Kind::Article,
         served: false,
         site: Vec::new(),
+        feeds: Vec::new(),
         lang: None,
     })
 }

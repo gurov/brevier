@@ -96,7 +96,7 @@ pub fn describe(error: &Error) -> Failure {
         ),
         Error::UnsupportedContentType(kind) => failure(
             "This is not a page",
-            format!("The server sent “{kind}”. Brevier reads html, markdown and plain text; PDF, video and images are work for the system browser."),
+            format!("The server sent “{kind}”. Brevier reads html, markdown, plain text and RSS or Atom feeds; PDF, video and images are work for the system browser."),
             true,
         ),
         Error::TooLarge(limit) => failure(
@@ -111,6 +111,11 @@ pub fn describe(error: &Error) -> Failure {
             true,
         ),
         Error::Convert(e) => failure("Could not make sense of the page", format!("{e}"), true),
+        Error::Feed(e) => failure(
+            "The feed cannot be read",
+            format!("It is RSS or Atom, but broken beyond what Brevier repairs: {e}."),
+            true,
+        ),
         Error::Media(what) => failure(
             "The image cannot be shown",
             format!("{what}. The text of the article is not affected."),

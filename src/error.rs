@@ -28,6 +28,9 @@ pub enum Error {
     HostingLimit,
     /// HTML → Markdown.
     Convert(std::io::Error),
+    /// Лента RSS или Atom не разобралась: XML сломан сильнее, чем мы чиним,
+    /// или корень не тот.
+    Feed(String),
     /// Картинку не удалось разобрать: битые байты, неизвестный формат,
     /// размер за пределом. Отдельно от `Convert`, потому что лечится
     /// иначе: страница читается и без картинки.
@@ -47,7 +50,7 @@ impl Error {
             // Тот же код, что у http-статуса: для прогонов это отказ
             // сервера, а не наша поломка.
             Error::HostingLimit => 3,
-            Error::Convert(_) => 6,
+            Error::Convert(_) | Error::Feed(_) => 6,
             Error::Media(_) => 7,
         }
     }
@@ -67,6 +70,7 @@ impl fmt::Display for Error {
             Error::EmptyExtraction => write!(f, "no article found on the page"),
             Error::HostingLimit => write!(f, "the hosting API is rate limited"),
             Error::Convert(e) => write!(f, "html to markdown: {e}"),
+            Error::Feed(e) => write!(f, "feed: {e}"),
             Error::Media(e) => write!(f, "image: {e}"),
         }
     }

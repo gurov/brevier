@@ -836,7 +836,8 @@ const WEEKDAYS: [&str; 7] = [
     "Wednesday",
 ];
 
-const MONTHS: [&str; 12] = [
+/// Месяцы по-английски: язык интерфейса. Ими же ставит даты лента (`feed`).
+pub(crate) const MONTHS: [&str; 12] = [
     "January",
     "February",
     "March",

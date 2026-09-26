@@ -1817,6 +1817,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            feeds: Vec::new(),
             lang: None,
         };
 
@@ -1859,6 +1860,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            feeds: Vec::new(),
             lang: None,
         };
 
@@ -1896,6 +1898,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            feeds: Vec::new(),
             lang: None,
         };
 
@@ -1919,6 +1922,7 @@ mod tests {
             listing_html: None,
             notes: Default::default(),
             site: Vec::new(),
+            feeds: Vec::new(),
             lang: None,
         };
 

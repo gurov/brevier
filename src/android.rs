@@ -347,6 +347,7 @@ fn intro() -> String {
         kind: Kind::Article,
         served: false,
         site: Vec::new(),
+        feeds: Vec::new(),
         lang: None,
     };
     let mut out = String::from("{\"title\":");
@@ -473,21 +474,13 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
         out.push_str(",\"anchor\":");
         json_string(&mut out, &anchor);
     }
-    // Навигация сайта. Адрес разбираем нашим же разбором: ссылка на github
-    // из меню должна открыться режимом репозитория, как ссылка из текста.
-    out.push_str(",\"site\":[");
-    let mut first = true;
-    for link in &document.site {
-        let Ok(target) = address::parse(&link.address) else {
-            continue;
-        };
-        if !first {
-            out.push(',');
-        }
-        first = false;
-        entry_json(&mut out, &link.title, &target);
-    }
-    out.push(']');
+    // Навигация сайта и его ленты. Адрес разбираем нашим же разбором: ссылка
+    // на github из меню должна открыться режимом репозитория, как ссылка
+    // из текста.
+    out.push_str(",\"site\":");
+    links_json(&mut out, &document.site);
+    out.push_str(",\"feeds\":");
+    links_json(&mut out, &document.feeds);
     if let Some(directory) = repo::directory_of(&document.address) {
         out.push_str(",\"directory\":");
         entry_json(&mut out, "Files in this directory", &directory);
@@ -496,6 +489,22 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
     out.push_str(&page.to_json());
     out.push('}');
     out
+}
+
+fn links_json(out: &mut String, links: &[crate::Link]) {
+    out.push('[');
+    let mut first = true;
+    for link in links {
+        let Ok(target) = address::parse(&link.address) else {
+            continue;
+        };
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        entry_json(out, &link.title, &target);
+    }
+    out.push(']');
 }
 
 fn entry_json(out: &mut String, title: &str, address: &Address) {

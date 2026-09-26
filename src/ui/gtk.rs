@@ -291,6 +291,8 @@ struct Tab {
     /// Навигация сайта: его меню и подвал. Свойство страницы, а не вкладки,
     /// — у каждого сайта своё.
     site: Vec<Entry>,
+    /// Ленты, объявленные страницей. Тоже свойство страницы.
+    feeds: Vec<Entry>,
     /// Точки входа в документацию проекта. Свойство репозитория, а не файла:
     /// при переходе между файлами одного проекта заново не ищутся.
     entries: Vec<Entry>,
@@ -1079,6 +1081,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             anchors: Vec::new(),
             shots: Vec::new(),
             site: Vec::new(),
+            feeds: Vec::new(),
             entries: Vec::new(),
             entries_for: None,
             document: None,
@@ -1533,6 +1536,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             anchors: Vec::new(),
             shots: Vec::new(),
             site: Vec::new(),
+            feeds: Vec::new(),
             entries: Vec::new(),
             entries_for: None,
             document: None,
@@ -2517,6 +2521,7 @@ fn show_document(
         tab.anchors = page.anchors;
         tab.shots = page.shots.clone();
         tab.site = site_rows(&document.site);
+        tab.feeds = site_rows(&document.feeds);
         tab.document = Some(document.clone());
         tab.zoom_seen = seen;
     }
@@ -2563,7 +2568,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
     let Some(index) = index else { return };
 
-    let (address, here, can_back, can_forward, marks, entries, site, title, kept) = {
+    let (address, here, can_back, can_forward, marks, entries, site, feeds, title, kept) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.get(index) else {
             return;
@@ -2585,6 +2590,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             tab.marks.clone(),
             tab.entries.clone(),
             tab.site.clone(),
+            tab.feeds.clone(),
             tab.label.text().to_string(),
             kept,
         )
@@ -2610,7 +2616,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         format!("{title} — Brevier")
     }));
 
-    let shelf = fill_contents(&ui.contents, &marks, &entries, here.as_ref(), &site);
+    let shelf = fill_contents(&ui.contents, &marks, &entries, here.as_ref(), &feeds, &site);
     let empty = shelf.is_empty();
     state.borrow_mut().shelf = shelf;
     ui.show_contents.set_sensitive(!empty);
@@ -3277,6 +3283,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         kind: brevier::Kind::Article,
         served: false,
         site: Vec::new(),
+        feeds: Vec::new(),
         lang: None,
     };
     dress(state, view);
@@ -3835,9 +3842,10 @@ fn jump(view: &gtk::TextView, anchors: &[(String, usize)], want: &str) -> bool {
 /// Показать оглавление и связать строки с местами в тексте.
 /// Заполнить полку и сказать, что делает каждая её строка.
 ///
-/// Групп две: точки входа в документацию проекта и оглавление открытой
-/// страницы. Проект стоит выше — ради него режим репозитория и затевался,
-/// а оглавление длинное и увело бы эти две-три строки под сгиб.
+/// Групп четыре: точки входа в документацию проекта, оглавление открытой
+/// страницы, ленты сайта и его навигация. Проект стоит выше — ради него
+/// режим репозитория и затевался, а оглавление длинное и увело бы эти
+/// две-три строки под сгиб.
 ///
 /// Группа проекта подписана всегда: её строки уводят со страницы, и знать
 /// об этом читатель должен до нажатия. Оглавление подписывается только
@@ -3848,6 +3856,7 @@ fn fill_contents(
     marks: &[page::Mark],
     entries: &[Entry],
     here: Option<&Entry>,
+    feeds: &[Entry],
     site: &[Entry],
 ) -> Vec<Row> {
     while let Some(child) = list.first_child() {
@@ -3884,6 +3893,20 @@ fn fill_contents(
         shelf.push(Row::Jump(mark.offset as i32));
     }
 
+    // Ленты сайта — между оглавлением и меню. Подписаны всегда: строка уводит
+    // со страницы. Выше меню, потому что меню бывает в полсотни строк,
+    // а лента — одна-две, и под ним её бы не нашли.
+    if !feeds.is_empty() {
+        list.append(&group(feed_group(feeds.len())));
+        shelf.push(Row::Header);
+    }
+    for entry in feeds {
+        let (row, label) = shelf_row(&entry.title, 0);
+        label.set_tooltip_text(Some(&entry.address.display()));
+        list.append(&row);
+        shelf.push(Row::Open(entry.address.clone()));
+    }
+
     // Навигация сайта идёт последней и всегда подписана: её строки уводят
     // со страницы, и знать об этом читатель должен до нажатия. Ниже
     // оглавления потому, что оглавление — про то, что читают сейчас,
@@ -3901,6 +3924,15 @@ fn fill_contents(
     }
 
     shelf
+}
+
+/// Подпись группы лент: так она и сказана в роадмапе — «This site has a feed».
+fn feed_group(count: usize) -> &'static str {
+    if count == 1 {
+        "This site has a feed"
+    } else {
+        "This site has feeds"
+    }
 }
 
 /// Навигация сайта строками полки.

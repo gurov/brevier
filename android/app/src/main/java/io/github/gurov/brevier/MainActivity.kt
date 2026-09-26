@@ -686,8 +686,9 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
-     * Полка: проект, оглавление, сайт. Группа проекта и группа сайта подписаны
-     * всегда; оглавление подписывается только под проектом.
+     * Полка: проект, оглавление, ленты, сайт. Группы проекта, лент и сайта
+     * подписаны всегда — их строки уводят со страницы; оглавление подписывается
+     * только под проектом. Ленты выше меню: меню бывает в полсотни строк.
      */
     private fun fillShelf(tab: Tab, shown: Loaded?) {
         val rows = mutableListOf<ShelfRow>()
@@ -699,6 +700,11 @@ class MainActivity : Activity(), ArticleHost {
         }
         if (project.isNotEmpty() && marks.isNotEmpty()) rows += ShelfRow.Header("On this page")
         marks.forEach { rows += ShelfRow.Jump(it.title, it.level, it.at, it.heading) }
+        val feeds = shown?.feeds ?: emptyList()
+        if (feeds.isNotEmpty()) {
+            rows += ShelfRow.Header(if (feeds.size == 1) "This site has a feed" else "This site has feeds")
+            feeds.forEach { rows += ShelfRow.Open(it.title, it.address, dim = false) }
+        }
         val site = shown?.site ?: emptyList()
         if (site.isNotEmpty()) {
             rows += ShelfRow.Header("On this site")

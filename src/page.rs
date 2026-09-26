@@ -1105,6 +1105,7 @@ mod tests {
             kind: Kind::Article,
             served: false,
             site: Vec::new(),
+            feeds: Vec::new(),
             lang: None,
         }
     }

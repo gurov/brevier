@@ -291,3 +291,62 @@ fn check_takes_a_list_and_draws_the_lowest_score() {
     assert!(lowest < 100);
     assert!(svg.contains(&format!(">{lowest}</text>")), "{svg}");
 }
+
+const FEED: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"><channel><title>Лента блога</title><link>/</link>
+<item><title>Первая запись</title><link>/posts/1</link>
+<pubDate>Fri, 25 Sep 2026 10:00:00 +0300</pubDate>
+<description>&lt;p&gt;Подводка первой записи.&lt;/p&gt;</description></item>
+</channel></rss>"#;
+
+#[test]
+fn a_feed_opens_as_a_list_of_links_under_any_of_its_types() {
+    let base = serve(vec![
+        route("/rss", "application/rss+xml", FEED),
+        route("/xml", "text/xml; charset=utf-8", FEED),
+        // Сервер ошибся с типом: лента видна по телу.
+        route("/html", "text/html", FEED),
+    ]);
+    for path in ["/rss", "/xml", "/html"] {
+        let out = brevier(&[&format!("{base}{path}")]);
+        assert_eq!(out.status.code(), Some(0), "{path}");
+        assert_eq!(
+            stdout(&out),
+            format!(
+                "# Лента блога\n\n*[127.0.0.1]({base}/)*\n\n## [Первая запись]({base}/posts/1)\n\n\
+                 *25 September 2026*\n\nПодводка первой записи.\n"
+            ),
+            "{path}"
+        );
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("a feed"), "{path}: {err}");
+    }
+}
+
+#[test]
+fn a_feed_names_its_encoding_in_the_declaration() {
+    // koi8-r, а заголовок ответа о кодировке молчит — как у старых русских лент.
+    let mut body = b"<?xml version=\"1.0\" encoding=\"koi8-r\"?><rss><channel><title>".to_vec();
+    body.extend_from_slice(&[0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4]);
+    body.extend_from_slice(b"</title></channel></rss>");
+    let base = serve(vec![Route {
+        path: "/koi",
+        content_type: "application/rss+xml",
+        body,
+    }]);
+    let out = stdout(&brevier(&[&format!("{base}/koi")]));
+    assert!(out.starts_with("# Привет\n"), "{out}");
+}
+
+#[test]
+fn xml_that_is_not_a_feed_is_refused_like_any_other_type() {
+    let base = serve(vec![route(
+        "/sitemap.xml",
+        "application/xml",
+        r#"<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>"#,
+    )]);
+    let out = brevier(&[&format!("{base}/sitemap.xml")]);
+    assert_eq!(out.status.code(), Some(4));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("application/xml"), "{err}");
+}

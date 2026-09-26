@@ -13,6 +13,7 @@ use ureq::{Body, ResponseExt};
 use url::Url;
 
 use crate::error::Error;
+use crate::feed;
 
 /// Потолок на тело ответа. Читалка, а не качалка: страница, не влезающая
 /// в 8 МиБ, почти наверняка не статья.
@@ -76,6 +77,10 @@ pub enum ContentKind {
     /// `text/markdown` (RFC 7763) — родной формат, конвертация не нужна.
     Markdown,
     Text,
+    /// Лента RSS или Atom. Отдают её под полудюжиной типов, а общий
+    /// `application/xml` бывает чем угодно, поэтому решает первый элемент
+    /// тела (`feed::is_feed`), а тип — лишь повод посмотреть.
+    Feed,
 }
 
 impl ContentKind {
@@ -84,6 +89,11 @@ impl ContentKind {
             "text/html" | "application/xhtml+xml" => Some(ContentKind::Html),
             "text/markdown" | "text/x-markdown" => Some(ContentKind::Markdown),
             "text/plain" => Some(ContentKind::Text),
+            "application/rss+xml"
+            | "application/atom+xml"
+            | "application/rdf+xml"
+            | "application/xml"
+            | "text/xml" => Some(ContentKind::Feed),
             _ => None,
         }
     }
@@ -204,15 +214,37 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         .mime_type()
         .unwrap_or("text/html")
         .to_ascii_lowercase();
-    let kind = ContentKind::from_mime(&mime).ok_or(Error::UnsupportedContentType(mime))?;
+    let kind = ContentKind::from_mime(&mime).ok_or(Error::UnsupportedContentType(mime.clone()))?;
 
-    // read_to_string перекодирует из charset заголовка (фича `charset`):
-    // cp1251 и прочий доюникодный веб никуда не делся.
-    let body = res
-        .body_mut()
-        .with_config()
-        .limit(MAX_BODY)
-        .read_to_string()?;
+    let (kind, body) = if kind == ContentKind::Feed {
+        // XML читаем байтами: кодировку ленты чаще называет её собственное
+        // объявление, чем заголовок ответа, а `read_to_string` знает только
+        // заголовок.
+        let charset = res.body().charset().map(str::to_owned);
+        let bytes = res.body_mut().with_config().limit(MAX_BODY).read_to_vec()?;
+        let body = feed::decode(&bytes, charset.as_deref());
+        // `application/xml` оказался не лентой — это не текст для чтения.
+        if !feed::is_feed(&body) {
+            return Err(Error::UnsupportedContentType(mime));
+        }
+        (kind, body)
+    } else {
+        // read_to_string перекодирует из charset заголовка (фича `charset`):
+        // cp1251 и прочий доюникодный веб никуда не делся.
+        let body = res
+            .body_mut()
+            .with_config()
+            .limit(MAX_BODY)
+            .read_to_string()?;
+        // Ленту отдают и `text/html`, и `text/plain` (сырые файлы хостингов):
+        // по телу видно, что это она.
+        let kind = if feed::is_feed(&body) {
+            ContentKind::Feed
+        } else {
+            kind
+        };
+        (kind, body)
+    };
 
     Ok(Page {
         url: final_url,

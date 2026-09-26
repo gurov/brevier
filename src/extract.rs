@@ -34,6 +34,8 @@ pub struct Article {
     /// Навигация самого сайта: то, что лежит в его шапке, меню и подвале.
     /// Не текст статьи и в него не идёт — см. [`site`].
     pub site: Vec<Link>,
+    /// Ленты, объявленные в шапке, — см. [`crate::feed::advertised`].
+    pub feeds: Vec<Link>,
     /// Язык страницы из `lang` на `<html>`, если он объявлен. Нужен окну
     /// для переносов (`typeset`); без него переносов нет, и `--check` про
     /// это говорит. Разбор по элементам (`lang` на абзаце) — на будущее.
@@ -150,6 +152,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
     let navigation = site(&doc, url);
+    let feeds = crate::feed::advertised(&doc, url);
     let listing = listing(&doc, url);
     // Язык страницы — до того, как `Readability` заберёт документ себе.
     let lang = html_lang(&doc);
@@ -203,6 +206,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         listing_html,
         notes,
         site: navigation,
+        feeds,
         lang,
     })
 }

@@ -270,7 +270,12 @@ fn run(args: &Args) -> Result<String, Error> {
         io::stdin()
             .read_to_string(&mut html)
             .map_err(Error::Convert)?;
-        page_text(&html, &args.url, args)?
+        // Лента на руках идёт тем же трактом, что из сети.
+        if brevier::feed::is_feed(&html) {
+            feed_text(&html, &args.url)?
+        } else {
+            page_text(&html, &args.url, args)?
+        }
     } else {
         match direct(args) {
             // Репозиторий читается своим трактом: конвертировать нечего,
@@ -306,6 +311,9 @@ fn run(args: &Args) -> Result<String, Error> {
                     // Простой текст markdown-ом не является — отдаём как есть.
                     ContentKind::Text => page.body,
                     ContentKind::Html => page_text(&page.body, &page.url, args)?,
+                    // Лента — список ссылок, и `--raw`, `--html`, `--nav`
+                    // про неё спросить нечего: отдаём её как читателю.
+                    ContentKind::Feed => feed_text(&page.body, &page.url)?,
                 }
             }
         }
@@ -317,6 +325,14 @@ fn run(args: &Args) -> Result<String, Error> {
         return Ok(out);
     }
     Ok(text)
+}
+
+/// Лента в том виде, в каком её печатают. Что это список, а не статья,
+/// говорим в stderr — stdout остаётся документу.
+fn feed_text(xml: &str, url: &str) -> Result<String, Error> {
+    let document = brevier::from_feed(xml, url)?;
+    eprintln!("brevier: a feed, shown as a list of links");
+    Ok(document.markdown)
 }
 
 /// Страница в том виде, в каком её печатают: тракт один и для скачанного

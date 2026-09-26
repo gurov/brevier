@@ -254,6 +254,13 @@ fn write_page(key: &str, document: &Document, now: SystemTime) -> String {
             field(&link.title)
         ));
     }
+    for link in &document.feeds {
+        out.push_str(&format!(
+            "feed\t{}\t{}\n",
+            field(&link.address),
+            field(&link.title)
+        ));
+    }
     out.push('\n');
     out.push_str(&document.markdown);
     out
@@ -275,6 +282,7 @@ fn read_page(text: &str, expected: &str) -> Option<Saved> {
     let mut served = false;
     let mut lang = None;
     let mut site = Vec::new();
+    let mut feeds = Vec::new();
     for line in lines {
         let (name, value) = line.split_once('\t')?;
         match name {
@@ -292,12 +300,17 @@ fn read_page(text: &str, expected: &str) -> Option<Saved> {
             "title" => title = value.to_owned(),
             "served" => served = value == "1",
             "lang" => lang = Some(value.to_owned()),
-            "site" => {
+            "site" | "feed" => {
                 let (address, title) = value.split_once('\t')?;
-                site.push(Link {
+                let link = Link {
                     title: title.to_owned(),
                     address: address.to_owned(),
-                });
+                };
+                if name == "site" {
+                    site.push(link);
+                } else {
+                    feeds.push(link);
+                }
             }
             _ => {}
         }
@@ -314,6 +327,7 @@ fn read_page(text: &str, expected: &str) -> Option<Saved> {
             kind: Kind::Article,
             served,
             site,
+            feeds,
             lang,
         },
         saved: UNIX_EPOCH + Duration::from_secs(saved?),
@@ -396,6 +410,10 @@ mod tests {
                 title: "Home".to_owned(),
                 address: "https://e.com/".to_owned(),
             }],
+            feeds: vec![Link {
+                title: "Blog » Feed".to_owned(),
+                address: "https://e.com/feed/".to_owned(),
+            }],
             lang: Some("ru".to_owned()),
         }
     }
@@ -417,6 +435,8 @@ mod tests {
         assert!(document.served);
         assert_eq!(document.lang.as_deref(), Some("ru"));
         assert_eq!(document.site, article("").site);
+        // Ленты страницы — тоже: полка из копии та же, что из сети.
+        assert_eq!(document.feeds, article("").feeds);
         // Решётка — дело читателя: страница та же.
         assert!(
             cache

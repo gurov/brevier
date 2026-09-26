@@ -106,6 +106,8 @@ class Loaded(
     /** Решётка из адреса, уже приведённая: куда прокрутить после загрузки. */
     val anchor: String?,
     val site: List<Entry>,
+    /** Ленты, объявленные страницей: на полке — группой «This site has a feed». */
+    val feeds: List<Entry>,
     val directory: Entry?,
     /** Проект репозитория: точки входа в документацию принадлежат ему. */
     val project: String?,
@@ -132,6 +134,7 @@ class Loaded(
                 internal = json.optBoolean("internal"),
                 anchor = json.text("anchor"),
                 site = json.optJSONArray("site")?.map { entry(it as JSONObject) } ?: emptyList(),
+                feeds = json.optJSONArray("feeds")?.map { entry(it as JSONObject) } ?: emptyList(),
                 directory = json.optJSONObject("directory")?.let(::entry),
                 project = json.text("project"),
                 check = json.text("check"),

@@ -294,6 +294,14 @@ pub fn check(url: &str, ua: UserAgent) -> Result<Report, Error> {
                 ContentKind::Html => from_html(&page.body, &page.url, Access::Measured(moved)),
                 ContentKind::Markdown => served(&page.url, &page.body, "Markdown", moved),
                 ContentKind::Text => served(&page.url, &page.body, "plain text", moved),
+                // Лента — точный текст сайта, как и markdown. В превью — то,
+                // что увидит читатель: список записей, а не сырой XML.
+                ContentKind::Feed => {
+                    let shown = crate::feed::parse(&page.body, &page.url)
+                        .map(|feed| crate::feed::to_markdown(&feed))
+                        .unwrap_or_else(|_| page.body.clone());
+                    served(&page.url, &shown, "an RSS or Atom feed", moved)
+                }
             })
         }
         Err(error) => match access_finding(&error) {
@@ -366,6 +374,7 @@ fn access_finding(error: &Error) -> Option<Finding> {
         | Error::UnsupportedScheme(_)
         | Error::EmptyExtraction
         | Error::Convert(_)
+        | Error::Feed(_)
         | Error::Media(_) => return None,
     };
     Some(note(id, seen))

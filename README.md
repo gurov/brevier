@@ -126,6 +126,7 @@ directory existed: log out and back in, or restart the shell.
 
 ```sh
 brevier https://example.com/article     # Markdown on stdout
+brevier https://example.com/feed.xml    # an RSS or Atom feed, as a list of links
 brevier gh:rust-lang/book               # a repository's README
 brevier gh:rust-lang/book/src           # the README of a directory inside it
 brevier gh:rust-lang/book/src/          # …or what the directory holds, listed
@@ -161,7 +162,8 @@ as any article, with its sections on the shelf:
 at the right](assets/screenshot-repository.png)
 
 Exit codes: 1 bad url, 2 network, 3 http status, 4 content type, 5 nothing extracted,
-6 conversion — so a batch run can tell "the site refused" from "extraction failed".
+6 conversion (or a feed too broken to repair) — so a batch run can tell "the site refused"
+from "extraction failed".
 
 ### Checking your own site
 
@@ -230,8 +232,9 @@ the history.
 - **Fonts ship inside the binary** — Noto Sans and Noto Sans Mono, under the OFL. If the
   operating system picked the type, the promise would not hold on any of the three.
 - **A shelf on the right:** a repository's documentation on top, the page's table of
-  contents under it with the section under your eyes marked as you scroll, the site's own
-  menu below that. Its width is yours, by dragging the divider.
+  contents under it with the section under your eyes marked as you scroll, then the feeds
+  the page advertises ("This site has a feed"), and the site's own menu below that. Its
+  width is yours, by dragging the divider.
 - **Directories are browsable** — a trailing slash (`gh:owner/repo/docs/`) or the shelf's
   "Files in this directory" lists what is there, so a README that links to nothing is not a
   dead end. This is the one place the repository mode asks the hosting's API, and only when
@@ -242,6 +245,8 @@ the history.
   line of text is drawn as a canvas; an illustration gets its own line and a caption.
 - **A page that is a list of links** (a blog front page, a section of a site) is shown as a
   list, and the status line says so, instead of pretending there was an article to find.
+  An RSS or Atom feed opens the same way: each entry a link, with its date, its author and
+  a couple of lines of its summary, in the order the feed gives them.
 - **Tabs come back.** Close the window with five things half-read and they are there next
   time: every tab, its back and forward, the tab and the line you were on. Only the tab you
   were on is fetched at startup; the rest load the moment you switch to one.

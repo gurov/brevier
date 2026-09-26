@@ -38,6 +38,9 @@ save = ["dep:zip", "images"]
 comrak = { version = "0.55", default-features = false }
 dom_query = "0.28"
 dom_smoothie = "0.18.1"
+# Лента в чужой кодировке (koi8-r, cp1251 в объявлении XML): тот же крейт,
+# которым `ureq` перекодирует страницы, — в сборке он и так есть.
+encoding_rs = "0.8"
 # `v4_10` — ради родного диалога подтверждения (`GtkAlertDialog`). GTK 4.10
 # вышел в марте 2023; требовать его дешевле, чем городить своё окно с двумя
 # кнопками, которое ещё и доступность потеряет.
@@ -46,6 +49,8 @@ htmd = "0.5.5"
 hyphenation = { version = "0.8", optional = true, default-features = false, features = ["embed_en-us"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
 resvg = { version = "0.48.1", optional = true }
+# Ленты RSS и Atom: разбор XML без зависимостей. Та же версия, что тянет `resvg`.
+roxmltree = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
 url = "2.5.8"
