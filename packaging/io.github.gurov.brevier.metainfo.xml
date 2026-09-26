@@ -90,6 +90,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.4.1" date="2026-09-26" type="development">
+      <description>
+        <p>The text keeps to its measure: a long image description or a word
+          longer than the line no longer widens the column or cuts off the
+          starts of lines. Markdown that opens with YAML front matter no longer
+          shows it as a heading.</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-09-26" type="development">
       <description>
         <p>JSON feeds, feed:// links and feed files open like RSS and Atom. A
