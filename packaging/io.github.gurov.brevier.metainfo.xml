@@ -90,6 +90,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.3.0" date="2026-09-26" type="development">
+      <description>
+        <p>An RSS or Atom feed opens as a list of links, each entry with its
+          date, author and a short summary; a page that advertises feeds lists
+          them on the shelf. The window draws articles from the same page model
+          as the Android app.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-09-25" type="development">
       <description>
         <p>An article opened again within a week comes from a copy on disk,
