@@ -131,7 +131,8 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun handle(intent: Intent?) {
         val asked = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.dataString
+            Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "content" }?.let(::copyIn)
+                ?: intent.dataString
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let(::firstLink)
             else -> null
         } ?: return
@@ -143,6 +144,38 @@ class MainActivity : Activity(), ArticleHost {
         // а не заводит рядом вторую.
         val blank = currentTab()?.takeIf { it.current() == null && !it.loading }
         if (blank != null) open(blank, address, remember = true) else newTab(address)
+    }
+
+    /**
+     * Файл снаружи — лента или markdown из загрузок, из файлового менеджера.
+     * Ядро открывает файл путём, а Android отдаёт поток (`content://`), поэтому
+     * кладём копию в кэш приложения и открываем её. Имя оставляем прежним:
+     * по нему видно, что открыто, а ядро узнаёт ленту по содержимому.
+     * Потолок тот же, что у страницы из сети.
+     */
+    private fun copyIn(uri: Uri): String? {
+        val name = runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull() ?: uri.lastPathSegment ?: "opened"
+        val safe = name.replace(Regex("""[/\\:\u0000]"""), "_").take(120)
+        val target = File(File(cacheDir, "opened").apply { mkdirs() }, safe)
+        return runCatching {
+            contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_FILE) error("too big")
+                        output.write(buffer, 0, read)
+                    }
+                }
+                target.absolutePath
+            }
+        }.getOrNull()
     }
 
     /** «Поделиться» приносит текст вокруг ссылки — берём саму ссылку. */
@@ -1258,6 +1291,8 @@ class MainActivity : Activity(), ArticleHost {
         /** Куда по высоте окна ставить заголовок, к которому прыгнули. */
         const val ANCHOR_ALIGN = 0.1f
         const val LISTING = "A list of links, not an article — pick one to read."
+        /** Потолок файла снаружи — тот же, что у тела страницы из сети. */
+        const val MAX_FILE = 8L * 1024 * 1024
         const val SERVED_MARKDOWN = "Served as Markdown by the site — the author's exact text."
         const val INSECURE = "Not secure: this page came over plain http, so anyone on the way can read and change it."
     }

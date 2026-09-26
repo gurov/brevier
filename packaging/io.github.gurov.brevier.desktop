@@ -9,5 +9,5 @@ Terminal=false
 StartupNotify=true
 StartupWMClass=brevier-ui
 Categories=Network;WebBrowser;
-MimeType=x-scheme-handler/http;x-scheme-handler/https;text/markdown;text/x-markdown;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/feed;text/markdown;text/x-markdown;application/rss+xml;application/atom+xml;application/feed+json;
 Keywords=web;browser;reader;markdown;article;

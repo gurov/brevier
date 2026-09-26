@@ -12,6 +12,9 @@
 //! объявления, голый `&` в заголовке. Такую ленту чиним и разбираем второй
 //! раз — читатели лент прощают это все, и отказ тут был бы придиркой.
 //!
+//! JSON Feed (jsonfeed.org) — та же лента в JSON: разбирается своим
+//! разборщиком (`crate::json`) и показывается тем же видом.
+//!
 //! Здесь же — ленты, которые страница объявила в шапке: их показывает полка
 //! («This site has a feed»).
 
@@ -22,6 +25,7 @@ use url::Url;
 
 use crate::error::Error;
 use crate::extract::Link;
+use crate::json::{self, Value};
 use crate::outline::{clip, lead};
 use crate::store::MONTHS;
 
@@ -66,6 +70,9 @@ pub struct Entry {
     pub author: Option<String>,
     /// Подводка простым текстом, уже укороченная.
     pub summary: Option<String>,
+    /// Запись целиком, HTML-ом, — если лента её несёт. Нужна треду: там
+    /// реплику читают, а не выбирают, и укорачивать её нельзя.
+    pub content: Option<String>,
 }
 
 /// Лента ли это — по первому элементу документа.
@@ -76,10 +83,25 @@ pub struct Entry {
 /// комментарии и DOCTYPE пропускаем, первый элемент — `rss`, `feed`
 /// или `rdf:RDF`. HTML-страница начинается с `html`, и сюда не попадёт.
 pub fn is_feed(body: &str) -> bool {
+    if is_json(body) {
+        // JSON Feed называет себя сам, в поле `version`, и обычно первым
+        // полем; смотрим в начало, не разбирая документ целиком.
+        let head = body
+            .char_indices()
+            .nth(4096)
+            .map_or(body, |(at, _)| &body[..at]);
+        return head.contains("jsonfeed.org/version");
+    }
     root_name(body).is_some_and(|name| {
         let local = name.rsplit(':').next().unwrap_or(name);
         matches!(local, "rss" | "feed" | "RDF")
     })
+}
+
+fn is_json(body: &str) -> bool {
+    body.trim_start_matches('\u{feff}')
+        .trim_start()
+        .starts_with('{')
 }
 
 fn root_name(body: &str) -> Option<&str> {
@@ -137,7 +159,33 @@ fn declared(bytes: &[u8]) -> Option<String> {
 
 /// Разобрать ленту. `url` — откуда она пришла: от него разворачиваются
 /// относительные адреса записей.
-pub fn parse(xml: &str, url: &str) -> Result<Feed, Error> {
+///
+/// Лента с диска (`url` — путь к файлу) адреса в сети не знает; тогда
+/// относительные ссылки разворачиваются от адреса, который лента назвала
+/// своим (`rel="self"`, `feed_url`), — а без него остаются без ссылки.
+pub fn parse(body: &str, url: &str) -> Result<Feed, Error> {
+    let base = Url::parse(url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"));
+    let feed = if is_json(body) {
+        json_feed(body, base)?
+    } else {
+        xml_feed(body, base)?
+    };
+    Ok(Feed {
+        title: if feed.title.is_empty() {
+            Url::parse(url)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+                .unwrap_or_else(|| url.to_owned())
+        } else {
+            feed.title
+        },
+        ..feed
+    })
+}
+
+fn xml_feed(xml: &str, base: Option<Url>) -> Result<Feed, Error> {
     let repaired: String;
     let doc = match Document::parse_with_options(xml, options()) {
         Ok(doc) => doc,
@@ -149,25 +197,103 @@ pub fn parse(xml: &str, url: &str) -> Result<Feed, Error> {
     };
 
     let root = doc.root_element();
-    let base = base_of(root, Url::parse(url).ok());
     let channel = own(root, "channel").unwrap_or(root);
-    let feed = match root.tag_name().name() {
+    let base = base.or_else(|| self_link(channel).and_then(|href| Url::parse(href).ok()));
+    let base = base_of(root, base);
+    Ok(match root.tag_name().name() {
         "rss" => rss(channel, channel, base.as_ref()),
         // RSS 1.0: записи — соседи канала, а не его дети.
         "RDF" => rss(channel, root, base.as_ref()),
         "feed" => atom(root, base.as_ref()),
         other => return Err(Error::Feed(format!("`<{other}>` is not RSS or Atom"))),
-    };
-    Ok(Feed {
-        title: if feed.title.is_empty() {
-            base.as_ref()
-                .and_then(|url| url.host_str().map(str::to_owned))
-                .unwrap_or_else(|| url.to_owned())
-        } else {
-            feed.title
-        },
-        ..feed
     })
+}
+
+/// Адрес, который лента назвала своим: `<link rel="self">` у Atom и он же
+/// под именем `atom:link` в канале RSS.
+fn self_link<'a>(node: Node<'a, '_>) -> Option<&'a str> {
+    node.children()
+        .filter(|child| child.is_element() && child.tag_name().name() == "link")
+        .find(|link| link.attribute("rel") == Some("self"))
+        .and_then(|link| link.attribute("href"))
+}
+
+/// JSON Feed 1.0 и 1.1: те же поля, что у RSS, только названы прямо.
+fn json_feed(body: &str, base: Option<Url>) -> Result<Feed, Error> {
+    let root = json::parse(body).ok_or_else(|| Error::Feed("not valid JSON".to_owned()))?;
+    if !root
+        .text("version")
+        .is_some_and(|version| version.contains("jsonfeed.org/version"))
+    {
+        return Err(Error::Feed("JSON, but not a JSON Feed".to_owned()));
+    }
+    let base = base.or_else(|| root.text("feed_url").and_then(|url| Url::parse(url).ok()));
+    let base = base.as_ref();
+
+    let entries = root
+        .get("items")
+        .map(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .map(|item| {
+            // `content_text` — простой текст: в HTML его превращает экранирование.
+            let content = item.text("content_html").map(str::to_owned).or_else(|| {
+                item.text("content_text")
+                    .map(|text| format!("<p>{}</p>", escape_html(text)))
+            });
+            let summary = item
+                .text("summary")
+                .map(clean)
+                .or_else(|| content.as_deref().map(html_text))
+                .map(|text| shorten(&text, SUMMARY_CHARS));
+            Entry {
+                title: item.text("title").map(plain_title),
+                link: item
+                    .text("url")
+                    .or_else(|| item.text("external_url"))
+                    .and_then(|link| resolve(base, link)),
+                date: item
+                    .text("date_published")
+                    .or_else(|| item.text("date_modified"))
+                    .map(date_text),
+                author: json_author(item).or_else(|| json_author(&root)),
+                summary,
+                content,
+            }
+            .tidy()
+        })
+        .collect();
+
+    Ok(Feed {
+        title: root.text("title").map(clean).unwrap_or_default(),
+        site: root
+            .text("home_page_url")
+            .and_then(|link| resolve(base, link)),
+        about: root
+            .text("description")
+            .map(|text| shorten(&clean(text), ABOUT_CHARS)),
+        entries,
+    })
+}
+
+/// Автор JSON Feed: `authors` у версии 1.1, `author` у 1.0.
+fn json_author(node: &Value) -> Option<String> {
+    let names: Vec<&str> = node
+        .get("authors")
+        .map(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .chain(node.get("author"))
+        .filter_map(|author| author.text("name"))
+        .collect();
+    (!names.is_empty()).then(|| clean(&names.join(", ")))
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace("\n\n", "</p><p>")
 }
 
 fn options<'input>() -> ParsingOptions<'input> {
@@ -297,6 +423,11 @@ fn rss_entry(item: Node, base: Option<&Url>) -> Entry {
     let summary = own(item, "description")
         .or_else(|| module(item, CONTENT, "encoded"))
         .map(|node| shorten(&html_text(&raw_text(node)), SUMMARY_CHARS));
+    // Целиком — `content:encoded`, если он есть: `description` бывает
+    // выжимкой.
+    let content = module(item, CONTENT, "encoded")
+        .or_else(|| own(item, "description"))
+        .map(raw_text);
 
     Entry {
         title: own(item, "title").map(|node| plain_title(&raw_text(node))),
@@ -304,6 +435,7 @@ fn rss_entry(item: Node, base: Option<&Url>) -> Entry {
         date,
         author,
         summary,
+        content,
     }
     .tidy()
 }
@@ -324,6 +456,9 @@ fn atom(root: Node, base: Option<&Url>) -> Feed {
             let summary = child(entry, "summary")
                 .or_else(|| child(entry, "content"))
                 .map(|node| shorten(&atom_text(node), SUMMARY_CHARS));
+            let content = child(entry, "content")
+                .or_else(|| child(entry, "summary"))
+                .map(atom_html);
             Entry {
                 title: child(entry, "title").map(|node| clean(&atom_text(node))),
                 link: atom_link(entry, ns).and_then(|href| resolve(base.as_ref(), href)),
@@ -332,6 +467,7 @@ fn atom(root: Node, base: Option<&Url>) -> Feed {
                     .and_then(|author| child(author, "name"))
                     .map(text_of),
                 summary,
+                content,
             }
             .tidy()
         })
@@ -374,6 +510,31 @@ fn atom_text(node: Node) -> String {
     match node.attribute("type") {
         Some("html") | Some("text/html") => html_text(&raw_text(node)),
         _ => clean(&raw_text(node)),
+    }
+}
+
+/// Текстовая конструкция Atom HTML-ом — для треда, где реплику показывают
+/// целиком. `xhtml` приходит деревом; сериализатора у нас нет, и абзацы
+/// собираются из текста — разметку внутри реплики xhtml теряет.
+fn atom_html(node: Node) -> String {
+    match node.attribute("type") {
+        Some("html") | Some("text/html") => raw_text(node),
+        Some("xhtml") => {
+            let paragraphs: Vec<String> = node
+                .descendants()
+                .filter(|child| {
+                    child.is_element()
+                        && matches!(child.tag_name().name(), "p" | "li" | "blockquote" | "pre")
+                })
+                .map(|child| format!("<p>{}</p>", escape_html(&text_of(child))))
+                .collect();
+            if paragraphs.is_empty() {
+                format!("<p>{}</p>", escape_html(&text_of(node)))
+            } else {
+                paragraphs.concat()
+            }
+        }
+        _ => format!("<p>{}</p>", escape_html(&raw_text(node))),
     }
 }
 
@@ -566,14 +727,58 @@ impl Entry {
             date: keep(self.date),
             author: keep(self.author),
             summary: keep(self.summary),
+            content: keep(self.content),
         }
     }
 }
 
-/// Лента markdown-ом: заголовок, строка о ленте, дальше записи — заголовок
-/// ссылкой, дата и автор курсивом, подводка абзацем. Записи — заголовки
-/// второго уровня, поэтому полка показывает их оглавлением.
+/// Обсуждение одной страницы, а не лента: пост и реплики к нему.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Thread {
+    /// Страница, которую обсуждают, — без решётки.
+    pub page: String,
+    /// Первая запись — сам пост (reddit), а не первая реплика (WordPress).
+    pub post: bool,
+}
+
+/// Тред ли это — по форме, а не по хосту. Лента обсуждения ведёт все записи
+/// на одну страницу: у reddit реплика лежит ниже поста
+/// (`…/comments/id/slug/` → `…/comments/id/slug/abc123/`), у WordPress —
+/// на той же странице под решёткой (`…/post/#comment-12`). У обычной ленты
+/// записи ведут на разные страницы, и под первую остальные не попадают.
+pub fn thread(feed: &Feed) -> Option<Thread> {
+    let links: Vec<&str> = feed
+        .entries
+        .iter()
+        .map(|entry| entry.link.as_deref())
+        .collect::<Option<_>>()?;
+    let (first, rest) = links.split_first()?;
+    if rest.is_empty() {
+        return None;
+    }
+    let bare = |link: &str| link.split('#').next().unwrap_or(link).to_owned();
+    let page = bare(first);
+    let below = format!("{}/", page.trim_end_matches('/'));
+    let same_or_below = |link: &&str| {
+        let link = bare(link);
+        link == page || link.starts_with(&below)
+    };
+    if !rest.iter().all(same_or_below) {
+        return None;
+    }
+    // Пост — это первая запись, если она сама страница, а реплики под ней.
+    let post = !first.contains('#') && rest.iter().all(|link| bare(link) != page);
+    Some(Thread { page, post })
+}
+
+/// Лента markdown-ом. Обычная лента — список ссылок: заголовок, строка
+/// о ленте, дальше записи — заголовок ссылкой, дата и автор курсивом,
+/// подводка абзацем; записи — заголовки второго уровня, поэтому полка
+/// показывает их оглавлением. Лента обсуждения — тред (см. [`thread`]).
 pub fn to_markdown(feed: &Feed) -> String {
+    if let Some(thread) = thread(feed) {
+        return thread_markdown(feed, &thread);
+    }
     let mut out = format!("# {}\n\n", heading(&feed.title));
 
     let mut about = Vec::new();
@@ -629,6 +834,105 @@ pub fn to_markdown(feed: &Feed) -> String {
     out.truncate(out.trim_end().len());
     out.push('\n');
     out
+}
+
+/// Тред markdown-ом: пост целиком, дальше реплики — автор, дата ссылкой
+/// на саму реплику, текст целиком. Вложенности лента не даёт, и это сказано
+/// словами: иначе ответ на ответ выглядел бы новой репликой без объяснений.
+fn thread_markdown(feed: &Feed, thread: &Thread) -> String {
+    let (post, replies) = match feed.entries.split_first() {
+        Some((first, rest)) if thread.post => (Some(first), rest),
+        _ => (None, &feed.entries[..]),
+    };
+    let title = post
+        .and_then(|post| post.title.clone())
+        .unwrap_or_else(|| feed.title.clone());
+    let mut out = format!("# {}\n\n", heading(&title));
+
+    let host = Url::parse(&thread.page)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| thread.page.clone());
+    let mut meta: Vec<String> = post
+        .map(|post| [&post.date, &post.author])
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|text| inline(text))
+        .collect();
+    meta.push(format!(
+        "[{}]({})",
+        inline(&host),
+        destination(&thread.page)
+    ));
+    out.push_str(&format!("*{}*\n\n", meta.join(" · ")));
+    if let Some(body) = post.and_then(|post| body_markdown(post, &thread.page)) {
+        out.push_str(&body);
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&match replies.len() {
+        0 => "## No comments yet\n\n".to_owned(),
+        1 => "## 1 comment\n\n".to_owned(),
+        count => format!("## {count} comments\n\n"),
+    });
+    if replies.len() > 1 {
+        out.push_str("*In the feed's order, flat: the feed does not say who answers whom.*\n\n");
+    }
+    for reply in replies {
+        let who = reply
+            .author
+            .as_deref()
+            .map(inline)
+            .unwrap_or_else(|| "Anonymous".to_owned());
+        let when = reply.date.as_deref().unwrap_or("link");
+        match &reply.link {
+            Some(link) => out.push_str(&format!(
+                "**{who}** · [{}]({})\n\n",
+                inline(when),
+                destination(link)
+            )),
+            None => out.push_str(&format!("**{who}** · {}\n\n", inline(when))),
+        }
+        if let Some(body) = body_markdown(reply, &thread.page) {
+            out.push_str(&body);
+            out.push_str("\n\n");
+        }
+    }
+    out.truncate(out.trim_end().len());
+    out.push('\n');
+    out
+}
+
+/// Текст реплики markdown-ом: целиком, со ссылками, развёрнутыми от страницы.
+fn body_markdown(entry: &Entry, page: &str) -> Option<String> {
+    let html = match &entry.content {
+        Some(html) => crate::hosts::reply_html(html),
+        None => format!("<p>{}</p>", escape_html(entry.summary.as_deref()?)),
+    };
+    let doc = dom_query::Document::fragment(html.as_str());
+    let base = Url::parse(page).ok();
+    for (selector, attribute) in [("a[href]", "href"), ("img[src]", "src")] {
+        for node in doc.select(selector).nodes() {
+            if let Some(value) = node.attr(attribute)
+                && let Some(absolute) = resolve(base.as_ref(), &value)
+            {
+                node.set_attr(attribute, &absolute);
+            }
+        }
+    }
+    let html = doc.select("body").html().to_string();
+    let html = if html.is_empty() {
+        doc.html().to_string()
+    } else {
+        html
+    };
+    let markdown = crate::markdown::from_html(&html)
+        .ok()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| block(&html_text(&html)));
+    (!markdown.trim().is_empty()).then_some(markdown)
 }
 
 /// Экранировать то, что markdown принял бы за разметку внутри строки.
@@ -703,6 +1007,7 @@ pub fn advertised(doc: &dom_query::Document, url: &str) -> Vec<Link> {
         let fallback = match kind.split(';').next().unwrap_or_default().trim() {
             "application/rss+xml" => "RSS feed",
             "application/atom+xml" => "Atom feed",
+            "application/feed+json" => "JSON feed",
             _ => continue,
         };
         let Some(address) = node
@@ -913,6 +1218,124 @@ mod tests {
         assert_eq!(block("- not a list"), "\\- not a list");
         assert_eq!(heading("C#"), "C\\#");
         assert_eq!(destination("https://e.org/a (b)"), "<https://e.org/a (b)>");
+    }
+
+    const JSON_FEED: &str = r#"{
+        "version": "https://jsonfeed.org/version/1.1",
+        "title": "My JSON blog",
+        "home_page_url": "https://example.net/",
+        "feed_url": "https://example.net/feed.json",
+        "authors": [{"name": "Kim"}],
+        "items": [
+            {"id": "2", "url": "/posts/two", "title": "Second \ud83d\ude00",
+             "content_html": "<p>Full <b>text</b> here.</p>",
+             "date_published": "2026-09-20T08:00:00-07:00"},
+            {"id": "1", "external_url": "https://elsewhere.org/x",
+             "content_text": "Plain text only.\n\nSecond paragraph.",
+             "authors": [{"name": "Lee"}, {"name": "Max"}]}
+        ]
+    }"#;
+
+    #[test]
+    fn json_feed_reads_like_the_others() {
+        assert!(is_feed(JSON_FEED));
+        assert!(!is_feed(r#"{"type": "FeatureCollection"}"#));
+        // С диска: адреса в сети нет, относительные ссылки — от `feed_url`.
+        let feed = parse(JSON_FEED, "/home/me/feed.json").unwrap();
+        assert_eq!(feed.title, "My JSON blog");
+        assert_eq!(feed.site.as_deref(), Some("https://example.net/"));
+        let first = &feed.entries[0];
+        assert_eq!(first.title.as_deref(), Some("Second 😀"));
+        assert_eq!(first.link.as_deref(), Some("https://example.net/posts/two"));
+        assert_eq!(first.date.as_deref(), Some("20 September 2026"));
+        // Автор записи не назван — берётся автор ленты.
+        assert_eq!(first.author.as_deref(), Some("Kim"));
+        assert_eq!(first.summary.as_deref(), Some("Full text here."));
+        let second = &feed.entries[1];
+        assert_eq!(second.link.as_deref(), Some("https://elsewhere.org/x"));
+        assert_eq!(second.author.as_deref(), Some("Lee, Max"));
+        assert_eq!(
+            second.content.as_deref(),
+            Some("<p>Plain text only.</p><p>Second paragraph.</p>")
+        );
+
+        assert!(matches!(
+            parse(r#"{"version": "1"}"#, "https://e.org/"),
+            Err(Error::Feed(_))
+        ));
+    }
+
+    #[test]
+    fn a_feed_from_disk_resolves_links_from_its_self_link() {
+        let atom = r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>T</title>
+            <link rel="self" href="https://example.com/blog/feed.atom"/>
+            <entry><title>E</title><link href="posts/e.html"/></entry></feed>"#;
+        let feed = parse(atom, "/tmp/feed.atom").unwrap();
+        assert_eq!(
+            feed.entries[0].link.as_deref(),
+            Some("https://example.com/blog/posts/e.html")
+        );
+        // Без адреса вовсе: относительная ссылка остаётся без ссылки,
+        // а заголовок ленты — имя файла, если своего нет.
+        let bare = r#"<rss><channel><item><title>A</title><link>/a</link></item></channel></rss>"#;
+        let feed = parse(bare, "/tmp/bare.rss").unwrap();
+        assert_eq!(feed.entries[0].link, None);
+        assert_eq!(feed.title, "/tmp/bare.rss");
+    }
+
+    #[test]
+    fn a_discussion_feed_is_a_thread_by_its_form() {
+        // reddit: пост — сама страница треда, реплики — под ней.
+        let reddit = r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>ignored</title>
+          <entry><title>The post</title><author><name>/u/op</name></author>
+            <link href="https://www.reddit.com/r/x/comments/abc/the_post/"/>
+            <published>2026-09-19T13:59:48+00:00</published>
+            <content type="html">&lt;div class="md"&gt;&lt;p&gt;Body with &lt;a href="/r/x"&gt;a link&lt;/a&gt;.&lt;/p&gt;&lt;/div&gt; submitted by &lt;a href="/u/op"&gt;/u/op&lt;/a&gt;</content></entry>
+          <entry><title>/u/a on The post</title><author><name>/u/a</name></author>
+            <link href="https://www.reddit.com/r/x/comments/abc/the_post/c1/"/>
+            <updated>2026-09-19T14:00:00+00:00</updated>
+            <content type="html">&lt;div class="md"&gt;&lt;p&gt;First *reply*.&lt;/p&gt;&lt;/div&gt;</content></entry>
+          <entry><title>/u/b on The post</title><author><name>/u/b</name></author>
+            <link href="https://www.reddit.com/r/x/comments/abc/the_post/c2/"/>
+            <content type="html">&lt;div class="md"&gt;&lt;p&gt;Second.&lt;/p&gt;&lt;/div&gt;</content></entry>
+        </feed>"#;
+        let feed = parse(reddit, "https://www.reddit.com/r/x/comments/abc/the_post/").unwrap();
+        assert_eq!(
+            thread(&feed),
+            Some(Thread {
+                page: "https://www.reddit.com/r/x/comments/abc/the_post/".to_owned(),
+                post: true
+            })
+        );
+        let markdown = to_markdown(&feed);
+        assert!(markdown.starts_with(
+            "# The post\n\n*19 September 2026 · /u/op · [www.reddit.com](https://www.reddit.com/r/x/comments/abc/the_post/)*\n\n\
+             Body with [a link](https://www.reddit.com/r/x).\n\n## 2 comments\n\n"
+        ), "{markdown}");
+        assert!(markdown.contains(
+            "**/u/a** · [19 September 2026](https://www.reddit.com/r/x/comments/abc/the_post/c1/)\n\nFirst \\*reply\\*."
+        ), "{markdown}");
+        assert!(!markdown.contains("submitted by"));
+
+        // WordPress: одни реплики, все на странице поста под решёткой.
+        let wordpress = r#"<rss><channel><title>Comments on: A post</title>
+          <item><title>By: Ann</title><link>https://blog.example/a-post/#comment-1</link>
+            <description>Nice.</description></item>
+          <item><title>By: Bob</title><link>https://blog.example/a-post/comment-page-2/#comment-9</link>
+            <description>Agreed.</description></item></channel></rss>"#;
+        let feed = parse(wordpress, "https://blog.example/a-post/feed/").unwrap();
+        assert_eq!(
+            thread(&feed),
+            Some(Thread {
+                page: "https://blog.example/a-post/".to_owned(),
+                post: false
+            })
+        );
+        assert!(to_markdown(&feed).starts_with("# Comments on: A post\n\n"));
+
+        // Обычная лента: записи на разных страницах — это не тред.
+        let feed = parse(RSS, "https://example.org/feed.xml").unwrap();
+        assert_eq!(thread(&feed), None);
     }
 
     #[test]

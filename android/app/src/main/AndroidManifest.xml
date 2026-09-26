@@ -42,6 +42,28 @@
                 <data android:scheme="http" />
                 <data android:scheme="https" />
             </intent-filter>
+            <!-- Ссылка «подписаться» (`feed://…`): адрес ленты, её Brevier читает. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="feed" />
+            </intent-filter>
+            <!-- Файл: лента или markdown из загрузок и файлового менеджера.
+                 `text/xml` — потому что так приходит скачанная `rss.xml`;
+                 XML, который не лента, ядро отвергнет страницей отказа. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/rss+xml" />
+                <data android:mimeType="application/atom+xml" />
+                <data android:mimeType="application/feed+json" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+            </intent-filter>
             <!-- «Поделиться» ссылкой из любого приложения. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

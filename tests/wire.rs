@@ -350,3 +350,65 @@ fn xml_that_is_not_a_feed_is_refused_like_any_other_type() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("application/xml"), "{err}");
 }
+
+#[test]
+fn a_feed_file_on_disk_opens_like_one_from_the_network() {
+    let dir = std::env::temp_dir().join(format!("brevier-wire-feed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let feed = dir.join("saved.rss");
+    std::fs::write(
+        &feed,
+        FEED.replace("<link>/</link>", "<link>https://blog.example/</link>")
+            .replace(
+                "<link>/posts/1</link>",
+                "<link>https://blog.example/posts/1</link>",
+            ),
+    )
+    .unwrap();
+    let out = brevier(&[feed.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        stdout(&out).contains("## [Первая запись](https://blog.example/posts/1)"),
+        "{}",
+        stdout(&out)
+    );
+
+    // XML, который не лента, исходником не показываем.
+    let sitemap = dir.join("sitemap.xml");
+    std::fs::write(&sitemap, "<?xml version=\"1.0\"?><urlset/>").unwrap();
+    let out = brevier(&[sitemap.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(4));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_json_feed_is_read_under_plain_json() {
+    let base = serve(vec![route(
+        "/feed.json",
+        "application/json",
+        r#"{"version": "https://jsonfeed.org/version/1.1", "title": "JSON blog",
+            "items": [{"id": "1", "url": "/p/1", "title": "One", "date_published": "2026-09-01T10:00:00Z"}]}"#,
+    )]);
+    let out = brevier(&[&format!("{base}/feed.json")]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        stdout(&out),
+        format!("# JSON blog\n\n## [One]({base}/p/1)\n\n*1 September 2026*\n")
+    );
+    // JSON, который не лента, — прежний отказ по типу.
+    let base = serve(vec![route("/api", "application/json", r#"{"ok": true}"#)]);
+    assert_eq!(brevier(&[&format!("{base}/api")]).status.code(), Some(4));
+}
+
+#[test]
+fn a_feed_link_names_the_feed_itself() {
+    let base = serve(vec![route("/rss", "application/rss+xml", FEED)]);
+    // `feed:http://…` — старая ссылка «подписаться»: это та же лента.
+    let out = brevier(&[&format!("feed:{base}/rss")]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        stdout(&out).starts_with("# Лента блога\n"),
+        "{}",
+        stdout(&out)
+    );
+}

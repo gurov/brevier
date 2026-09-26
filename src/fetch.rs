@@ -77,9 +77,10 @@ pub enum ContentKind {
     /// `text/markdown` (RFC 7763) — родной формат, конвертация не нужна.
     Markdown,
     Text,
-    /// Лента RSS или Atom. Отдают её под полудюжиной типов, а общий
-    /// `application/xml` бывает чем угодно, поэтому решает первый элемент
-    /// тела (`feed::is_feed`), а тип — лишь повод посмотреть.
+    /// Лента RSS, Atom или JSON Feed. Отдают её под полудюжиной типов,
+    /// а общие `application/xml` и `application/json` бывают чем угодно,
+    /// поэтому решает начало тела (`feed::is_feed`), а тип — лишь повод
+    /// посмотреть.
     Feed,
 }
 
@@ -93,7 +94,10 @@ impl ContentKind {
             | "application/atom+xml"
             | "application/rdf+xml"
             | "application/xml"
-            | "text/xml" => Some(ContentKind::Feed),
+            | "text/xml"
+            // JSON Feed: свой тип есть, но чаще отдают просто JSON.
+            | "application/feed+json"
+            | "application/json" => Some(ContentKind::Feed),
             _ => None,
         }
     }
@@ -156,6 +160,24 @@ pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
 /// с ней. `--check`, `--raw`, `--html`, `--links` и `--nav` сюда не ходят —
 /// им нужен сам HTML, а не его замена.
 pub fn readable(url: &str, ua: UserAgent) -> Result<Page, Error> {
+    // Хост из таблицы (`hosts`): страницу читаем её лентой. Адрес остаётся
+    // тем, что открывали, — как и у markdown-двойника.
+    if let Some(feed) = crate::hosts::feed_for(url) {
+        match fetch(&feed, ua) {
+            Ok(page) if page.kind == ContentKind::Feed => {
+                return Ok(Page {
+                    url: url.to_owned(),
+                    ..page
+                });
+            }
+            // Лимит — ответ про сайт целиком: страница ответила бы тем же
+            // или пустой заглушкой, а читателю честнее «подождите».
+            Err(Error::HttpStatus(429)) => return Err(Error::HttpStatus(429)),
+            // Ленты у страницы нет (тред удалён, адрес не тот) — идём
+            // за самой страницей, как шли без таблицы.
+            _ => {}
+        }
+    }
     let page = fetch(url, ua)?;
     let Some(alternate) = alternate_markdown(&page) else {
         return Ok(page);

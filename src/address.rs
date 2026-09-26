@@ -316,6 +316,21 @@ pub fn parse(input: &str) -> Result<Address, Error> {
     if let Some((scheme, rest)) = split_scheme(text) {
         return match scheme {
             "http" | "https" => Ok(from_url(text, rest)),
+            // `feed:` — старая схема ссылок «подписаться»: `feed://host/path`
+            // или `feed:https://host/path`. Это адрес ленты, и мы её читаем.
+            // Без явной схемы — https: сайты, живущие на одном http, переезд
+            // с https делают сами, а обратное небезопасно.
+            "feed" => {
+                let inner = rest.trim_start();
+                if inner.starts_with("http://") || inner.starts_with("https://") {
+                    parse(inner)
+                } else if let Some(rest) = inner.strip_prefix("//") {
+                    let url = format!("https://{rest}");
+                    Ok(from_url(&url, rest))
+                } else {
+                    Err(Error::BadUrl(text.to_owned()))
+                }
+            }
             "file" => Ok(Address::File(PathBuf::from(
                 rest.trim_start_matches("//").to_owned(),
             ))),
@@ -456,11 +471,34 @@ fn looks_like_path(text: &str) -> bool {
         || text.starts_with("./")
         || text.starts_with("../")
         || text.starts_with('~')
-        || (text.ends_with(".md") && !text.contains(' ') && PathBuf::from(text).exists())
+        || (FILE_KINDS.iter().any(|kind| text.ends_with(kind))
+            && !text.contains(' ')
+            && PathBuf::from(text).exists())
 }
+
+/// Что открываем файлом, если его напечатали без пути: markdown и ленты.
+/// Имя вида `feed.xml` без проверки на диске было бы доменом.
+const FILE_KINDS: &[&str] = &[".md", ".rss", ".atom", ".xml", ".json"];
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_feed_link_is_the_address_of_a_feed() {
+        assert_eq!(
+            parse("feed://example.org/rss.xml").unwrap(),
+            Address::Web("https://example.org/rss.xml".to_owned())
+        );
+        assert_eq!(
+            parse("feed:https://example.org/atom").unwrap(),
+            Address::Web("https://example.org/atom".to_owned())
+        );
+        assert_eq!(
+            parse("feed:http://example.org/atom").unwrap(),
+            Address::Web("http://example.org/atom".to_owned())
+        );
+        assert!(matches!(parse("feed:nonsense"), Err(Error::BadUrl(_))));
+    }
 
     #[test]
     fn our_own_page_has_an_address_like_everything_else() {

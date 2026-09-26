@@ -331,7 +331,11 @@ fn run(args: &Args) -> Result<String, Error> {
 /// говорим в stderr — stdout остаётся документу.
 fn feed_text(xml: &str, url: &str) -> Result<String, Error> {
     let document = brevier::from_feed(xml, url)?;
-    eprintln!("brevier: a feed, shown as a list of links");
+    if document.kind == markdown::Kind::Listing {
+        eprintln!("brevier: a feed, shown as a list of links");
+    } else {
+        eprintln!("brevier: a discussion feed, shown as a thread");
+    }
     Ok(document.markdown)
 }
 
@@ -378,6 +382,18 @@ fn direct(args: &Args) -> Option<Address> {
     match address::parse(&args.url) {
         Ok(address @ (Address::Repo(_) | Address::Internal(_) | Address::File(_))) => Some(address),
         _ => None,
+    }
+}
+
+/// `feed://host/path` — старая ссылка «подписаться» — это адрес ленты
+/// в вебе. Приводим её здесь: веб-адрес cli отдаёт загрузке как напечатан.
+fn plain_url(arg: String) -> String {
+    if !arg.starts_with("feed:") {
+        return arg;
+    }
+    match address::parse(&arg) {
+        Ok(Address::Web(url)) => url,
+        _ => arg,
     }
 }
 
@@ -482,8 +498,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
             _ if arg.starts_with('-') && arg != "-" => {
                 return Parsed::Usage(format!("unknown option `{arg}`"));
             }
-            _ if url.is_none() => url = Some(arg),
-            _ => more.push(arg),
+            _ if url.is_none() => url = Some(plain_url(arg)),
+            _ => more.push(plain_url(arg)),
         }
     }
 

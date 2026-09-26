@@ -25,8 +25,13 @@ pub mod failure;
 pub mod feed;
 pub mod fetch;
 pub mod history;
+/// Правила под хост — одной небольшой таблицей: сейчас reddit, чьи
+/// страницы читаются через ленту.
+pub mod hosts;
 /// Текст начальной страницы. В ядре по той же причине, что и `failure`.
 pub mod intro;
+/// JSON в дерево — своим разбором, для JSON Feed.
+pub mod json;
 pub mod markdown;
 /// Картинки. За фичей `images`: корпусу M0 декодеры не нужны, а лишний
 /// код в бинарнике про безопасность — лишняя поверхность.
@@ -173,14 +178,25 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
 
 /// Лента: список записей со ссылками и датами. Это «список ссылок», тот же
 /// вид, что у главной блога, — и так же не кладётся в недельную копию:
-/// ленту открывают ради нового.
+/// ленту открывают ради нового. Лента обсуждения одной страницы — тред,
+/// его читают, а не выбирают из него: это статья.
 pub fn from_feed(xml: &str, url: &str) -> Result<Document, Error> {
     let parsed = feed::parse(xml, url)?;
+    let thread = feed::thread(&parsed);
+    let title = thread
+        .as_ref()
+        .filter(|thread| thread.post)
+        .and_then(|_| parsed.entries.first()?.title.clone())
+        .unwrap_or_else(|| parsed.title.clone());
     Ok(Document {
         address: Address::Web(url.to_owned()),
-        title: parsed.title.clone(),
+        title,
         markdown: feed::to_markdown(&parsed),
-        kind: Kind::Listing,
+        kind: if thread.is_some() {
+            Kind::Article
+        } else {
+            Kind::Listing
+        },
         served: false,
         site: Vec::new(),
         feeds: Vec::new(),
@@ -259,7 +275,31 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
 }
 
 fn open_file(path: &Path) -> Result<Document, Error> {
-    let body = std::fs::read_to_string(path).map_err(Error::Convert)?;
+    let bytes = std::fs::read(path).map_err(Error::Convert)?;
+    // Лента на диске: скачанная, сохранённая, открытая из файлового
+    // менеджера. Кодировку она называет сама, в объявлении XML.
+    let decoded = feed::decode(&bytes, None);
+    if feed::is_feed(&decoded) {
+        let mut document = from_feed(&decoded, &path.display().to_string())?;
+        document.address = Address::File(path.to_path_buf());
+        return Ok(document);
+    }
+    // XML и JSON, которые не лента, — не текст для чтения: показывать их
+    // исходником значило бы выдать разметку за статью.
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
+    if let Some(kind @ ("xml" | "rss" | "atom" | "json")) = extension.as_deref() {
+        let mime = if kind == "json" {
+            "application/json"
+        } else {
+            "application/xml"
+        };
+        return Err(Error::UnsupportedContentType(mime.to_owned()));
+    }
+    let body = String::from_utf8(bytes).map_err(|error| {
+        Error::Convert(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    })?;
     let title = heading_of(&body)
         .or_else(|| {
             path.file_name()
