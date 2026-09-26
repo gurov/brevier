@@ -4,13 +4,13 @@
 //! Это то, что ядро отдаёт интерфейсу вместо строки markdown. Раньше обход
 //! дерева жил в окне (`Writer` в `src/ui/gtk.rs`) и сразу писал в буфер GTK;
 //! второму интерфейсу пришлось бы повторить его целиком — и два вида одной
-//! статьи разошлись бы с первой же правки. Теперь обход здесь, а интерфейс
-//! только переводит имена стилей в свои средства: теги буфера у GTK, спаны
-//! у Android.
+//! статьи разошлись бы с первой же правки. Теперь обход здесь, один на оба
+//! интерфейса, а интерфейс только переводит имена стилей в свои средства:
+//! теги буфера у GTK, спаны у Android. Правка вида статьи — правка здесь.
 //!
 //! Имена стилей те же, что у тегов окна (`body`, `h2`, `list1`, `quote1`,
-//! `codeblock`, `kw`…): это и есть контракт, и десктопу переезд на модель
-//! стоит замены `put` на применение уже готовых участков.
+//! `codeblock`, `kw`…): это и есть контракт — окно накладывает участок тегом
+//! с тем же именем.
 //!
 //! Смещения — в символах (скалярах Unicode), как у `GtkTextBuffer`. Android
 //! считает в единицах UTF-16; перевод делает [`Page::to_json`].
@@ -621,7 +621,9 @@ impl Writer<'_> {
                 styles.push(Style::Heading(level));
                 let (start, from) = self.here();
                 self.inlines(node, &styles);
-                let title = self.page.text[from..].to_owned();
+                // Знак объекта — место формулы в строке, а не буква: в подпись
+                // на полке он попал бы квадратиком.
+                let title = without_objects(&self.page.text[from..]);
                 self.page.anchors.push((anchor(&title), start));
                 self.marks.push(Mark {
                     level,
@@ -638,7 +640,7 @@ impl Writer<'_> {
                 self.inlines(node, &styles);
                 // Веха берётся по чистому тексту: проза уже с мягкими
                 // переносами, а они и раздули бы длину, и попали бы в подпись.
-                let text = typeset::plain(&self.page.text[from..]);
+                let text = typeset::plain(&without_objects(&self.page.text[from..]));
                 // Вехой может быть только настоящий абзац: у короткой
                 // строки начало ничего не говорит.
                 if text.chars().count() >= 120 {
@@ -896,6 +898,12 @@ impl Writer<'_> {
             }
         }
     }
+}
+
+/// Текст без знаков объекта — для подписей на полке. Так же текст отдаёт
+/// и буфер GTK (`text` без скрытого): картинки в нём нет.
+fn without_objects(text: &str) -> String {
+    text.chars().filter(|ch| *ch != OBJECT).collect()
 }
 
 /// Ячейка таблицы: курсив, полужирный, код и ссылки — в свой маленький текст.
@@ -1244,6 +1252,27 @@ mod tests {
             .map(|mark| mark.title.as_str())
             .collect();
         assert_eq!(titles, vec!["Первый", "Второй", "Третий"]);
+    }
+
+    #[test]
+    fn a_formula_does_not_leak_into_shelf_titles() {
+        let lead = "начало абзаца, которое станет вехой на полке, потому что заголовков \
+здесь нет, а абзац длинный и тянется на несколько строк нашей меры.";
+        // Каждый абзац начинается с формулы: какой бы из них ни стал вехой,
+        // знак объекта перед его первым словом.
+        let text = vec![format!("![{{b}}](https://e.org/b.svg) {lead}"); 30].join("\n\n");
+        let page = Page::of(&doc(&format!(
+            "## Сумма ![{{x}}](https://e.org/x.svg) ряда\n\n{text}\n"
+        )));
+        assert_eq!(page.anchors[0], ("сумма-ряда".to_owned(), 0));
+        assert!(!page.contents.is_empty());
+        for mark in &page.contents {
+            assert!(
+                mark.title.trim_start().starts_with("начало абзаца"),
+                "{:?}",
+                mark.title
+            );
+        }
     }
 
     #[test]

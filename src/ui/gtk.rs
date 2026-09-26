@@ -26,17 +26,15 @@ use gtk::pango;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow};
 
-use comrak::nodes::{ListType, NodeValue, TableAlignment};
-
 use brevier::address::{self, Address, Internal, Repo};
-use brevier::code;
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
     ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, HANG, HEADING_WEIGHTS, HEADINGS, INDENT,
-    LINE_HEIGHT, MAX_WAYPOINTS, MEASURE, MIN_HEADINGS, NOTE_HANG, NOTE_INDENT, NOTE_SIZE,
-    NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE, TEXT_SIZE, ZOOM_NORMAL, ZOOM_STEPS, anchor, clip, lead,
+    LINE_HEIGHT, MEASURE, NOTE_HANG, NOTE_INDENT, NOTE_SIZE, NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE,
+    TEXT_SIZE, ZOOM_NORMAL, ZOOM_STEPS, clip,
 };
+use brevier::page::{self, Block};
 use brevier::palette::{
     FOUND, FOUND_HERE, FOUND_INK, INK_DARK, INK_LIGHT, PAPER_DARK, PAPER_LIGHT, SHELF_DARK,
     SHELF_LIGHT, colors, rgb,
@@ -63,12 +61,6 @@ const TOC_LINES: i32 = 5;
 /// Длиннее этого заголовок в полку не отдаём вовсе: раскладывать абзац,
 /// от которого видно пять строк, незачем.
 const TOC_CHARS: usize = 300;
-/// Короче этого оглавление не нужно: страница и так вся под рукой.
-const MIN_DOC_CHARS: i32 = 4000;
-/// Во сколько знаков текста обходится картинка в колонку. Нужно там, где
-/// длину страницы меряют знаками: в буфере у картинки один символ якоря,
-/// а места она занимает с треть экрана.
-const IMAGE_CHARS: i32 = 500;
 /// Сколько знаков влезает на корешок вкладки.
 const TAB_LABEL: usize = 24;
 
@@ -93,18 +85,10 @@ const SERVED_MARKDOWN: &str = "Served as Markdown by the site — the author's e
 const INSECURE_ICON: &str = "channel-insecure-symbolic";
 const INSECURE: &str =
     "Not secure: this page came over plain http, so anyone on the way can read and change it.";
-/// Сколько совпадений подсвечиваем. Дальше это уже не поиск, а заливка.
-const MAX_HITS: usize = 2000;
 /// Метка, которой прокручивают буфер: одна на все прыжки.
 const JUMP: &str = "brevier-jump";
 /// Сколько кадров ждём, пока картинки и таблицы займут своё место.
 const SETTLE_FRAMES: u8 = 45;
-/// Глубже этого вложенные списки не отступают: место кончается.
-const LIST_LEVELS: i32 = 3;
-/// Столько уровней цитаты различимы линейкой. Дальше отступ съедает
-/// саму реплику — ровно поэтому и конвертер не отступает глубже
-/// (`markdown::MAX_NEST`).
-const QUOTE_LEVELS: i32 = 3;
 /// Куда по высоте окна ставить заголовок, к которому прыгнули: вплотную
 /// к кромке он выглядит обрезанным.
 const ANCHOR_ALIGN: f64 = 0.1;
@@ -297,11 +281,11 @@ struct Tab {
     label: gtk::Label,
     history: History,
     /// Ссылки в тексте: где начинается, где кончается, куда ведёт.
-    links: Vec<Link>,
+    links: Vec<page::Link>,
     /// Куда прыгать по оглавлению — смещения в буфере, а не доли высоты.
-    marks: Vec<Mark>,
+    marks: Vec<page::Mark>,
     /// Якоря заголовков: по ним находится место для ссылки вида `#anchor`.
-    anchors: Vec<(String, i32)>,
+    anchors: Vec<(String, usize)>,
     /// Места картинок в тексте.
     shots: Vec<Shot>,
     /// Навигация сайта: его меню и подвал. Свойство страницы, а не вкладки,
@@ -462,6 +446,18 @@ enum Slot {
     Canvas(Formula),
 }
 
+impl Shot {
+    fn new(source: &Source, alt: &str, inline: bool, slot: Slot) -> Self {
+        Shot {
+            source: source.clone(),
+            alt: alt.to_owned(),
+            inline,
+            slot,
+            busy: Rc::new(Cell::new(false)),
+        }
+    }
+}
+
 impl Slot {
     fn frame(&self) -> Option<&gtk::Box> {
         match self {
@@ -475,12 +471,6 @@ impl State {
     fn find(&mut self, id: u64) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|tab| tab.id == id)
     }
-}
-
-struct Link {
-    start: i32,
-    end: i32,
-    target: String,
 }
 
 /// Точка входа в документацию проекта: строка полки, ведущая в другой файл.
@@ -499,16 +489,6 @@ enum Row {
     Open(Address),
     /// Подпись над группой, а не строка: нажать её нельзя.
     Header,
-}
-
-/// Строка оглавления: что показать и куда это в буфере.
-#[derive(Clone)]
-struct Mark {
-    level: u8,
-    title: String,
-    offset: i32,
-    /// Настоящий заголовок автора или веха, которую поставили мы.
-    heading: bool,
 }
 
 fn build(app: &Application, start: Vec<String>) {
@@ -1642,7 +1622,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
                 // по буферу: место заголовка мы знаем точно.
                 let here = tab.history.current().map(Address::display);
                 if plain
-                    && let Some(fragment) = fragment_of(&target, here.as_deref())
+                    && let Some(fragment) = page::fragment_of(&target, here.as_deref())
                     && jump(&view, &tab.anchors, &fragment)
                 {
                     return;
@@ -2354,7 +2334,7 @@ fn open_with(
 ) {
     // Решётку в адресе запоминаем здесь: серверу её не отправляют, и в адресе
     // загруженного документа её уже не будет.
-    let anchor = anchor_of(&address);
+    let anchor = page::anchor_in(&address);
     // Ключ кэша — тот адрес, которым по вкладке и ходят «назад/вперёд».
     // Внутренние страницы (сама история) не кэшируем: они обязаны показывать
     // то, что на диске, а не слепок момента.
@@ -3245,10 +3225,15 @@ fn use_bundled_fonts() {
 }
 
 /// Ссылка под точкой окна, если она там есть.
-fn link_at<'a>(view: &gtk::TextView, links: &'a [Link], x: f64, y: f64) -> Option<&'a Link> {
+fn link_at<'a>(
+    view: &gtk::TextView,
+    links: &'a [page::Link],
+    x: f64,
+    y: f64,
+) -> Option<&'a page::Link> {
     let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
     let (iter, _) = view.iter_at_position(bx, by)?;
-    let offset = iter.offset();
+    let offset = iter.offset() as usize;
     links
         .iter()
         .find(|link| offset >= link.start && offset < link.end)
@@ -3429,7 +3414,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
     // Поле слева пошире обычного: в нём стоит линейка, которую рисует
     // виджет статьи. Уровень вложенности — свой отступ и своя линейка:
     // на треде обсуждения ответ на ответ иначе неотличим от новой реплики.
-    for level in 1..=QUOTE_LEVELS {
+    for level in 1..=page::QUOTE_LEVELS {
         style(
             buffer,
             &format!("quote{level}"),
@@ -3442,7 +3427,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
 
     // Список: маркер выступает влево, перенос строки встаёт под текст,
     // а не под маркер. Уровни вложенности — свой отступ каждому.
-    for level in 1..=LIST_LEVELS {
+    for level in 1..=page::LIST_LEVELS {
         style(
             buffer,
             &format!("list{level}"),
@@ -3522,89 +3507,256 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
     );
 }
 
-/// Разложить статью по буферу. Возвращает ссылки с их местами в тексте —
-/// по ним потом опознаётся клик.
-struct Page {
-    links: Vec<Link>,
-    marks: Vec<Mark>,
-    anchors: Vec<(String, i32)>,
+/// Что остаётся у окна после отрисовки статьи. Ссылки, оглавление и якоря
+/// приходят из модели ядра как есть; картинки и ячейки таблиц — виджеты,
+/// которые окно поставило само.
+struct Drawn {
+    links: Vec<page::Link>,
+    marks: Vec<page::Mark>,
+    anchors: Vec<(String, usize)>,
     shots: Vec<Shot>,
     cells: Vec<gtk::Label>,
 }
 
-/// Заголовок ли это по набору тегов. Типографику в заголовки не пускаем:
-/// их текст в буфере — источник якорей и оглавления.
-fn is_heading(tags: &[&str]) -> bool {
-    tags.iter()
-        .any(|tag| matches!(*tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6"))
-}
-
-fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Page {
-    use comrak::{Arena, parse_document};
+/// Разложить статью по буферу.
+///
+/// Раскладывает ядро (`page::Page`), окно только переводит её в свои
+/// средства: имя стиля — это имя тега, знак объекта — якорь виджета или
+/// холст формулы. Оба занимают в буфере ровно один символ, как знак объекта
+/// в модели, поэтому смещения модели остаются смещениями буфера. `target` —
+/// якорь, уже приведённый (`page::anchor_in`).
+fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Drawn {
+    let page = page::Page::of(document);
 
     let buffer = view.buffer();
     buffer.set_text("");
 
-    let arena = Arena::new();
-    let root = parse_document(&arena, &document.markdown, &brevier::markdown::options());
-
-    let mut links = Vec::new();
-    let mut marks = Vec::new();
-    let mut anchors = Vec::new();
     let mut shots = Vec::new();
     let mut cells = Vec::new();
-    // Словарь переносов грузим один раз на страницу, не на слово. `None` —
-    // язык неизвестен или ему нечего делать: тогда текст идёт как есть.
-    let typesetter = document
-        .lang
-        .as_deref()
-        .and_then(brevier::typeset::Typesetter::for_language);
-    let mut writer = Writer {
-        buffer: &buffer,
-        view,
-        base: &document.address,
-        links: &mut links,
-        marks: &mut marks,
-        anchors: &mut anchors,
-        shots: &mut shots,
-        cells: &mut cells,
-        depth: 0,
-        quotes: 0,
-        typeset: typesetter.as_ref(),
-    };
-
-    for node in root.children() {
-        writer.block(node, &[]);
+    let mut end = buffer.end_iter();
+    let mut rest = page.text.as_str();
+    let mut at = 0;
+    for placed in &page.blocks {
+        let (before, after) = split_chars(rest, placed.at - at);
+        buffer.insert(&mut end, before);
+        match &placed.block {
+            // Холст, а не виджет: сотня виджетов в строках текста рвала
+            // прокрутку (см. шапку `formula.rs`).
+            Block::Image {
+                source,
+                alt,
+                inline: true,
+            } => {
+                let canvas = Formula::new();
+                buffer.insert_paintable(&mut end, &canvas);
+                shots.push(Shot::new(source, alt, true, Slot::Canvas(canvas)));
+            }
+            Block::Image {
+                source,
+                alt,
+                inline: false,
+            } => {
+                let frame = frame_at(view, &mut end);
+                shots.push(Shot::new(source, alt, false, Slot::Frame(frame)));
+            }
+            Block::Table(table) => {
+                let frame = frame_at(view, &mut end);
+                frame.add_css_class("table");
+                frame.append(&grid(table, &mut cells));
+            }
+        }
+        rest = after.strip_prefix(page::OBJECT).unwrap_or(after);
+        at = placed.at + 1;
     }
-    // Картинка занимает экран, но в буфере это один символ якоря: страница
-    // из десяти карточек с фотографиями «коротка» по знакам и осталась бы
-    // без оглавления. Считаем картинке её место — примерно в треть экрана.
-    let space = buffer.char_count() + shots.len() as i32 * IMAGE_CHARS;
-    let marks = contents_of(marks, space);
+    buffer.insert(&mut end, rest);
+
+    // Теги — по участкам модели. Приоритет тегов GTK задан порядком их
+    // заведения, а не наложения, поэтому накладывать можно в любом порядке.
+    let table = buffer.tag_table();
+    let mut known: HashMap<page::Style, Option<gtk::TextTag>> = HashMap::new();
+    for run in &page.runs {
+        let from = buffer.iter_at_offset(run.start as i32);
+        let to = buffer.iter_at_offset(run.end as i32);
+        for style in &run.styles {
+            let tag = known
+                .entry(*style)
+                .or_insert_with(|| table.lookup(&style.name()));
+            if let Some(tag) = tag {
+                buffer.apply_tag(tag, &from, &to);
+            }
+        }
+    }
 
     // Новая статья начинается сначала — или с того места, на которое указывала
     // решётка в адресе. Через `idle`, потому что в момент вставки текста
     // у виджета ещё нет раскладки и прокручивать ему некуда.
     buffer.place_cursor(&buffer.start_iter());
-    let target = target.map(anchor);
-    let places = anchors.clone();
+    let offset = target
+        .and_then(|want| page.anchors.iter().find(|(name, _)| name == want))
+        .map(|(_, offset)| *offset as i32);
     let view = view.clone();
-    glib::idle_add_local_once(move || {
-        let offset = target
-            .and_then(|want| places.iter().find(|(name, _)| *name == want))
-            .map(|(_, offset)| *offset);
-        match offset {
-            Some(offset) => settle(&view, offset, ANCHOR_ALIGN),
-            None => scroll_to(&view, 0, 0.0),
-        }
+    glib::idle_add_local_once(move || match offset {
+        Some(offset) => settle(&view, offset, ANCHOR_ALIGN),
+        None => scroll_to(&view, 0, 0.0),
     });
-    Page {
-        links,
-        marks,
-        anchors,
+    Drawn {
+        links: page.links,
+        marks: page.contents,
+        anchors: page.anchors,
         shots,
         cells,
     }
+}
+
+/// Разрезать строку после `count` символов: смещения модели в символах,
+/// а срез у `str` — в байтах.
+fn split_chars(text: &str, count: usize) -> (&str, &str) {
+    let byte = text
+        .char_indices()
+        .nth(count)
+        .map_or(text.len(), |(byte, _)| byte);
+    text.split_at(byte)
+}
+
+/// Место под виджет в тексте — якорь с рамкой в меру.
+///
+/// Своя строка у картинки и таблицы уже есть: переводы строк вокруг знака
+/// объекта ставит модель.
+fn frame_at(view: &gtk::TextView, end: &mut gtk::TextIter) -> gtk::Box {
+    let place = view.buffer().create_child_anchor(end);
+    let frame = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .width_request(measure_px())
+        .build();
+    view.add_child_at_anchor(&frame, &place);
+    frame
+}
+
+/// Таблица — сетка виджетов на якоре.
+///
+/// Текстом её не набрать: в буфере нет колонок, и раньше строки
+/// склеивались палками в моноширинном — читать это нельзя. Цена решения
+/// записана честно: текст таблицы лежит в виджетах, а не в буфере,
+/// поэтому поиск по странице и «скопировать всё» её не видят. В markdown
+/// при сохранении таблица цела.
+fn grid(table: &page::Table, cells: &mut Vec<gtk::Label>) -> gtk::Grid {
+    let columns = table
+        .rows
+        .iter()
+        .map(|row| row.cells.len())
+        .max()
+        .unwrap_or(1);
+
+    let grid = gtk::Grid::builder()
+        .column_spacing(20)
+        .row_spacing(7)
+        .hexpand(true)
+        .build();
+    let mut line = 0;
+    for row in &table.rows {
+        for (column, content) in row.cells.iter().enumerate() {
+            let cell = gtk::Label::builder()
+                .wrap(true)
+                .wrap_mode(pango::WrapMode::WordChar)
+                .max_width_chars(30)
+                .valign(gtk::Align::Start)
+                .selectable(true)
+                .can_focus(false)
+                .build();
+            cell.set_markup(&markup_of(content));
+            // Выравнивание берём из самой таблицы: колонка чисел, объявленная
+            // правой, должна стоять справа.
+            let align = match table.alignments.get(column) {
+                Some(page::Align::Right) => 1.0,
+                Some(page::Align::Center) => 0.5,
+                _ => 0.0,
+            };
+            cell.set_xalign(align);
+            // Остаток меры отдаём последнему столбцу: обычно там текст,
+            // а не число, и ему перенос дороже.
+            cell.set_hexpand(column + 1 == columns);
+            cell.add_css_class(if row.header { "th" } else { "td" });
+            grid.attach(&cell, column as i32, line, 1, 1);
+            cells.push(cell);
+        }
+        line += 1;
+        if row.header {
+            let rule = gtk::Separator::new(gtk::Orientation::Horizontal);
+            grid.attach(&rule, 0, line, columns as i32, 1);
+            line += 1;
+        }
+    }
+    grid
+}
+
+/// Ячейка таблицы разметкой Pango: курсив, полужирный, код и ссылки.
+///
+/// `GtkLabel` понимает подмножество разметки и сам делает ссылки живыми —
+/// иначе пришлось бы городить виджет на каждую ячейку. Участки модели плоские,
+/// а разметка вложенная: стили участка идут от внешнего к внутреннему,
+/// поэтому держим стопку открытых и закрываем только то, что кончилось, —
+/// курсив вокруг ссылки остаётся одним `<i>`, а не рвётся на три.
+fn markup_of(cell: &page::Cell) -> String {
+    // Ссылка опознаётся номером, а не адресом: две соседние ссылки
+    // на одно место — всё равно две ссылки.
+    let link_at = |offset: usize| {
+        cell.links
+            .iter()
+            .position(|link| link.start <= offset && offset < link.end)
+    };
+    let mut out = String::new();
+    let mut open: Vec<(page::Style, Option<usize>)> = Vec::new();
+    let close = |out: &mut String, (style, _): &(page::Style, Option<usize>)| {
+        out.push_str(match style {
+            page::Style::Em => "</i>",
+            page::Style::Strong => "</b>",
+            page::Style::Code => "</tt>",
+            page::Style::Link => "</a>",
+            _ => "",
+        });
+    };
+    for run in &cell.runs {
+        let wanted: Vec<(page::Style, Option<usize>)> = run
+            .styles
+            .iter()
+            .map(|style| {
+                let link = (*style == page::Style::Link)
+                    .then(|| link_at(run.start))
+                    .flatten();
+                (*style, link)
+            })
+            .collect();
+        let common = open.iter().zip(&wanted).take_while(|(a, b)| a == b).count();
+        while open.len() > common {
+            let last = open.pop().unwrap();
+            close(&mut out, &last);
+        }
+        for (style, link) in &wanted[common..] {
+            match style {
+                page::Style::Em => out.push_str("<i>"),
+                page::Style::Strong => out.push_str("<b>"),
+                page::Style::Code => out.push_str("<tt>"),
+                page::Style::Link => {
+                    let href = link.map_or("", |index| cell.links[index].target.as_str());
+                    out.push_str(&format!("<a href=\"{}\">", glib::markup_escape_text(href)));
+                }
+                _ => {}
+            }
+            open.push((*style, *link));
+        }
+        let text: String = cell
+            .text
+            .chars()
+            .skip(run.start)
+            .take(run.end - run.start)
+            .collect();
+        out.push_str(&glib::markup_escape_text(&text));
+    }
+    while let Some(last) = open.pop() {
+        close(&mut out, &last);
+    }
+    out
 }
 
 /// Прокрутить к месту в буфере.
@@ -3669,83 +3821,15 @@ fn settle(view: &gtk::TextView, offset: i32, align: f64) {
     });
 }
 
-/// Ссылка внутрь открытой страницы: `#anchor` или полный адрес с решёткой,
-/// совпадающий с тем, что уже открыто.
-fn fragment_of(target: &str, here: Option<&str>) -> Option<String> {
-    if let Some(fragment) = target.strip_prefix('#') {
-        return (!fragment.is_empty()).then(|| fragment.to_owned());
-    }
-    let (page, fragment) = target.split_once('#')?;
-    let here = here?;
-    let here = here.split('#').next().unwrap_or(here);
-    (!fragment.is_empty() && page.trim_end_matches('/') == here.trim_end_matches('/'))
-        .then(|| fragment.to_owned())
-}
-
-/// Прыгнуть к якорю. `false` значит «такого заголовка на странице нет» —
-/// тогда ссылка отрабатывает как обычная.
-fn jump(view: &gtk::TextView, anchors: &[(String, i32)], fragment: &str) -> bool {
-    let want = anchor(fragment);
-    let Some((_, offset)) = anchors.iter().find(|(name, _)| *name == want) else {
+/// Прыгнуть к якорю — уже приведённому (`page::fragment_of`). `false`
+/// значит «такого заголовка на странице нет» — тогда ссылка отрабатывает
+/// как обычная.
+fn jump(view: &gtk::TextView, anchors: &[(String, usize)], want: &str) -> bool {
+    let Some((_, offset)) = anchors.iter().find(|(name, _)| name == want) else {
         return false;
     };
-    settle(view, *offset, ANCHOR_ALIGN);
+    settle(view, *offset as i32, ANCHOR_ALIGN);
     true
-}
-
-/// Решётка в адресе, если она там есть.
-fn anchor_of(address: &Address) -> Option<String> {
-    match address {
-        Address::Web(url) => url
-            .split_once('#')
-            .map(|(_, fragment)| fragment.to_owned())
-            .filter(|fragment| !fragment.is_empty()),
-        _ => None,
-    }
-}
-
-/// Оглавление из того, что встретилось при отрисовке.
-///
-/// Заголовки берём как есть — их место в буфере известно точно, поэтому
-/// прыжок попадает в заголовок, а не примерно туда. Если заголовков мало,
-/// вехами служат начала абзацев, расставленные по документу примерно
-/// поровну. Короткая страница не получает оглавления вовсе.
-fn contents_of(marks: Vec<Mark>, total: i32) -> Vec<Mark> {
-    if total < MIN_DOC_CHARS {
-        return Vec::new();
-    }
-
-    let mut headings: Vec<Mark> = marks.iter().filter(|mark| mark.heading).cloned().collect();
-    // Название статьи — не раздел: оно и так наверху.
-    if matches!(headings.first(), Some(first) if first.level == 1 && first.offset == 0) {
-        headings.remove(0);
-    }
-    if headings.len() >= MIN_HEADINGS {
-        return headings;
-    }
-
-    let leads: Vec<&Mark> = marks.iter().filter(|mark| !mark.heading).collect();
-    if leads.is_empty() {
-        return Vec::new();
-    }
-    let wanted = ((total / MIN_DOC_CHARS.max(1)) as usize + 1).clamp(2, MAX_WAYPOINTS);
-
-    let mut chosen: Vec<Mark> = Vec::with_capacity(wanted);
-    let mut taken = 0usize;
-    for step in 0..wanted {
-        let target = total * (step as i32 * 2 + 1) / (wanted as i32 * 2);
-        let Some((index, mark)) = leads
-            .iter()
-            .enumerate()
-            .skip(taken)
-            .min_by_key(|(_, mark)| (mark.offset - target).abs())
-        else {
-            break;
-        };
-        taken = index + 1;
-        chosen.push((*mark).clone());
-    }
-    chosen
 }
 
 /// Показать оглавление и связать строки с местами в тексте.
@@ -3761,7 +3845,7 @@ fn contents_of(marks: Vec<Mark>, total: i32) -> Vec<Mark> {
 /// ничего не объясняет.
 fn fill_contents(
     list: &gtk::ListBox,
-    marks: &[Mark],
+    marks: &[page::Mark],
     entries: &[Entry],
     here: Option<&Entry>,
     site: &[Entry],
@@ -3797,7 +3881,7 @@ fn fill_contents(
         }
         list.append(&row);
         // Точное попадание: смещение в буфере, а не доля высоты.
-        shelf.push(Row::Jump(mark.offset));
+        shelf.push(Row::Jump(mark.offset as i32));
     }
 
     // Навигация сайта идёт последней и всегда подписана: её строки уводят
@@ -3968,454 +4052,6 @@ fn same_project(a: &Repo, b: &Repo) -> bool {
     a.host == b.host && a.owner == b.owner && a.name == b.name
 }
 
-struct Writer<'a> {
-    buffer: &'a gtk::TextBuffer,
-    /// Нужен только ради картинок: виджет на якоре живёт в нём, а не в буфере.
-    view: &'a gtk::TextView,
-    /// Адрес документа: от него разворачиваются относительные ссылки картинок.
-    base: &'a Address,
-    links: &'a mut Vec<Link>,
-    marks: &'a mut Vec<Mark>,
-    anchors: &'a mut Vec<(String, i32)>,
-    shots: &'a mut Vec<Shot>,
-    /// Ячейки таблиц: ссылки внутри них живут в разметке `GtkLabel`,
-    /// и вешать на них переход приходится снаружи.
-    cells: &'a mut Vec<gtk::Label>,
-    /// Глубина вложенности списка: от неё отступ пункта.
-    depth: i32,
-    /// Глубина вложенности цитаты: от неё отступ и место линейки.
-    quotes: i32,
-    /// Типографика по языку страницы, если он известен. Расставляет мягкие
-    /// переносы и клеит однобуквенные предлоги — только в прозе, не в коде
-    /// и не в заголовках (иначе поехали бы якоря, что считаются по тексту
-    /// буфера). Словарь загружен один раз, на всю отрисовку.
-    typeset: Option<&'a brevier::typeset::Typesetter>,
-}
-
-impl Writer<'_> {
-    fn put(&mut self, text: &str, tags: &[&str]) {
-        let mut end = self.buffer.end_iter();
-        if tags.is_empty() {
-            self.buffer.insert(&mut end, text);
-        } else {
-            self.buffer.insert_with_tags_by_name(&mut end, text, tags);
-        }
-    }
-
-    fn offset(&self) -> i32 {
-        self.buffer.end_iter().offset()
-    }
-
-    /// Что вставили с этого места — заголовок или начало абзаца.
-    fn text_since(&self, start: i32) -> String {
-        let from = self.buffer.iter_at_offset(start);
-        let to = self.buffer.end_iter();
-        self.buffer.text(&from, &to, false).to_string()
-    }
-
-    /// Таблица — сетка виджетов на якоре.
-    ///
-    /// Текстом её не набрать: в буфере нет колонок, и раньше строки
-    /// склеивались палками в моноширинном — читать это нельзя. Цена решения
-    /// записана честно: текст таблицы лежит в виджетах, а не в буфере,
-    /// поэтому поиск по странице и «скопировать всё» её не видят. В markdown
-    /// при сохранении таблица цела.
-    fn table<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, alignments: &[TableAlignment]) {
-        let mut rows: Vec<(bool, Vec<String>)> = Vec::new();
-        for row in node.children() {
-            let NodeValue::TableRow(header) = row.data.borrow().value else {
-                continue;
-            };
-            let cells: Vec<String> = row.children().map(markup_of).collect();
-            if !cells.is_empty() {
-                rows.push((header, cells));
-            }
-        }
-        if rows.is_empty() {
-            return;
-        }
-        let columns = rows.iter().map(|(_, cells)| cells.len()).max().unwrap_or(1);
-
-        let grid = gtk::Grid::builder()
-            .column_spacing(20)
-            .row_spacing(7)
-            .hexpand(true)
-            .build();
-        let mut line = 0;
-        for (header, cells) in &rows {
-            for (column, markup) in cells.iter().enumerate() {
-                let cell = gtk::Label::builder()
-                    .wrap(true)
-                    .wrap_mode(pango::WrapMode::WordChar)
-                    .max_width_chars(30)
-                    .valign(gtk::Align::Start)
-                    .selectable(true)
-                    .can_focus(false)
-                    .build();
-                cell.set_markup(markup);
-                // Выравнивание берём из самой таблицы: колонка чисел, объявленная
-                // правой, должна стоять справа.
-                let align = match alignments.get(column) {
-                    Some(TableAlignment::Right) => 1.0,
-                    Some(TableAlignment::Center) => 0.5,
-                    _ => 0.0,
-                };
-                cell.set_xalign(align);
-                // Остаток меры отдаём последнему столбцу: обычно там текст,
-                // а не число, и ему перенос дороже.
-                cell.set_hexpand(column + 1 == columns);
-                cell.add_css_class(if *header { "th" } else { "td" });
-                grid.attach(&cell, column as i32, line, 1, 1);
-                self.cells.push(cell);
-            }
-            line += 1;
-            if *header {
-                let rule = gtk::Separator::new(gtk::Orientation::Horizontal);
-                grid.attach(&rule, 0, line, columns as i32, 1);
-                line += 1;
-            }
-        }
-
-        let frame = self.anchor();
-        frame.add_css_class("table");
-        frame.append(&grid);
-    }
-
-    /// Поставить в текст место под картинку.
-    ///
-    /// Картинка — блок: своя строка сверху и снизу. Внутри абзаца её ставят
-    /// редко, а разорванная надвое строка читается плохо.
-    fn shot(&mut self, source: Source, alt: String, inline: bool) {
-        let slot = if inline {
-            // Холст, а не виджет: он занимает тот же один символ, поэтому
-            // смещения ссылок, заголовков и поиска не едут, — а сотня
-            // виджетов в строках текста рвала прокрутку.
-            let canvas = Formula::new();
-            let mut end = self.buffer.end_iter();
-            self.buffer.insert_paintable(&mut end, &canvas);
-            Slot::Canvas(canvas)
-        } else {
-            Slot::Frame(self.anchor())
-        };
-        self.shots.push(Shot {
-            source,
-            alt,
-            inline,
-            slot,
-            busy: Rc::new(Cell::new(false)),
-        });
-    }
-
-    /// Место под виджет в тексте: своя строка, рамка в меру.
-    ///
-    /// Картинка и таблица — блоки: строка с ними своя. Внутри абзаца их ставят
-    /// редко, а разорванная надвое строка читается плохо.
-    fn anchor(&mut self) -> gtk::Box {
-        if !self.buffer.end_iter().starts_line() {
-            self.put("\n", &[]);
-        }
-        let mut end = self.buffer.end_iter();
-        let place = self.buffer.create_child_anchor(&mut end);
-
-        let frame = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(4)
-            .width_request(measure_px())
-            .build();
-        self.view.add_child_at_anchor(&frame, &place);
-        self.put("\n", &["body"]);
-        frame
-    }
-
-    fn block<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, outer: &[&str]) {
-        match &node.data.borrow().value {
-            NodeValue::Heading(heading) => {
-                let level = usize::from(heading.level).clamp(1, 6);
-                let name = format!("h{level}");
-                let mut tags = outer.to_vec();
-                tags.push(&name);
-                let start = self.offset();
-                self.inlines(node, &tags);
-                let title = self.text_since(start);
-                self.anchors.push((anchor(&title), start));
-                self.marks.push(Mark {
-                    level: level as u8,
-                    title,
-                    offset: start,
-                    heading: true,
-                });
-                self.put("\n", &[]);
-            }
-            NodeValue::Paragraph => {
-                let mut tags = outer.to_vec();
-                tags.push("body");
-                let start = self.offset();
-                self.inlines(node, &tags);
-                // Веха берётся по чистому тексту: в буфере проза уже с мягкими
-                // переносами, а они и раздули бы длину, и попали бы в подпись
-                // вехи на полке.
-                let text = brevier::typeset::plain(&self.text_since(start));
-                // Вехой может быть только настоящий абзац: у короткой
-                // строки начало ничего не говорит.
-                if text.chars().count() >= 120 {
-                    self.marks.push(Mark {
-                        level: 1,
-                        title: lead(&text),
-                        offset: start,
-                        heading: false,
-                    });
-                }
-                self.put("\n", &["body"]);
-            }
-            NodeValue::CodeBlock(code) => {
-                let text = code.literal.trim_end_matches('\n');
-                self.put("\n", &["pad"]);
-
-                let mut at = 0;
-                for span in code::spans(text, &code.info) {
-                    if span.start > at {
-                        self.put(&text[at..span.start], &["codeblock"]);
-                    }
-                    let paint = match span.kind {
-                        code::Kind::Comment => "com",
-                        code::Kind::Literal => "lit",
-                        code::Kind::Number => "num",
-                        code::Kind::Keyword => "kw",
-                    };
-                    self.put(&text[span.start..span.end], &["codeblock", paint]);
-                    at = span.end;
-                }
-                if at < text.len() {
-                    self.put(&text[at..], &["codeblock"]);
-                }
-
-                self.put("\n", &["codeblock"]);
-                self.put("\n", &["pad"]);
-            }
-            NodeValue::BlockQuote => {
-                self.quotes += 1;
-                let level = format!("quote{}", self.quotes.min(QUOTE_LEVELS));
-                let mut tags = outer.to_vec();
-                tags.push(&level);
-                for child in node.children() {
-                    self.block(child, &tags);
-                }
-                self.quotes -= 1;
-            }
-            // Оповещение (`> [!NOTE]`) — та же цитата, но с подписью,
-            // чем она является. Github рисует её коробкой в цвет; цвет
-            // тут был бы чужой типографикой, а подпись — смыслом.
-            NodeValue::Alert(alert) => {
-                self.quotes += 1;
-                let level = format!("quote{}", self.quotes.min(QUOTE_LEVELS));
-                let mut tags = outer.to_vec();
-                tags.push(&level);
-
-                let title = alert
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| alert.alert_type.default_title().to_owned());
-                let mut titled = tags.clone();
-                titled.push("alert");
-                self.put(&title, &titled);
-                self.put("\n", &titled);
-
-                for child in node.children() {
-                    self.block(child, &tags);
-                }
-                self.quotes -= 1;
-            }
-            NodeValue::List(list) => {
-                let ordered = matches!(list.list_type, ListType::Ordered);
-                let mut number = list.start;
-
-                self.depth += 1;
-                let level = format!("list{}", self.depth.min(LIST_LEVELS));
-                for item in node.children() {
-                    let mut tags = outer.to_vec();
-                    tags.push("body");
-                    tags.push(&level);
-
-                    let marker = match &item.data.borrow().value {
-                        // Пункт списка задач: галочка вместо маркера — так его
-                        // и рисуют везде, где markdown вообще про них знает.
-                        NodeValue::TaskItem(done) => {
-                            if done.symbol.is_some() {
-                                "☑  ".to_owned()
-                            } else {
-                                "☐  ".to_owned()
-                            }
-                        }
-                        _ if ordered => {
-                            let marker = format!("{number}.  ");
-                            number += 1;
-                            marker
-                        }
-                        _ => "•  ".to_owned(),
-                    };
-                    self.put(&marker, &tags);
-
-                    let start = self.offset();
-                    for child in item.children() {
-                        match &child.data.borrow().value {
-                            NodeValue::Paragraph => {
-                                self.inlines(child, &tags);
-                                self.put("\n", &tags);
-                            }
-                            // Вложенный список, блок кода или цитата внутри
-                            // пункта — обычный блок, только глубже.
-                            _ => self.block(child, outer),
-                        }
-                    }
-                    if self.offset() == start {
-                        self.put("\n", &tags);
-                    }
-                }
-                self.depth -= 1;
-
-                if self.depth == 0 {
-                    self.put("\n", &["body"]);
-                }
-            }
-            NodeValue::FootnoteDefinition(note) => {
-                let mut tags = outer.to_vec();
-                tags.push("body");
-                tags.push("note");
-                let start = self.offset();
-                self.anchors
-                    .push((anchor(&format!("fn-{}", note.name)), start));
-
-                let mut marker = tags.clone();
-                marker.push("dim");
-                self.put(&format!("{}.  ", note.name), &marker);
-
-                for child in node.children() {
-                    match &child.data.borrow().value {
-                        NodeValue::Paragraph => {
-                            self.inlines(child, &tags);
-                            self.put(" ", &tags);
-                        }
-                        _ => self.block(child, outer),
-                    }
-                }
-
-                // Дорога назад. Без неё сноска — тупик: истории внутри
-                // страницы нет, и читатель возвращается прокруткой наугад.
-                let back = self.offset();
-                let mut arrow = tags.clone();
-                arrow.push("link");
-                // Стрелка простая, а не «↩»: у той есть эмодзи-вариант,
-                // и система рисует её цветной картинкой посреди текста.
-                self.put("↑", &arrow);
-                self.links.push(Link {
-                    start: back,
-                    end: self.offset(),
-                    target: format!("#fnref-{}", note.name),
-                });
-                self.put("\n", &tags);
-            }
-            NodeValue::ThematicBreak => self.put("* * *\n\n", &["dim"]),
-            NodeValue::Table(table) => {
-                let alignments = table.alignments.clone();
-                self.table(node, &alignments);
-            }
-            _ => {
-                for child in node.children() {
-                    self.block(child, outer);
-                }
-            }
-        }
-    }
-
-    fn inlines<'n>(&mut self, node: &'n comrak::nodes::AstNode<'n>, tags: &[&str]) {
-        for child in node.children() {
-            match &child.data.borrow().value {
-                NodeValue::Text(text) => match self.typeset {
-                    // Проза: переносы и неразрывные пробелы. Заголовки мимо —
-                    // по их тексту в буфере считаются якоря и оглавление,
-                    // и мягкий перенос сломал бы совпадение якоря.
-                    Some(ts) if !is_heading(tags) => {
-                        let shaped = ts.shape(text);
-                        self.put(&shaped, tags);
-                    }
-                    _ => self.put(text, tags),
-                },
-                NodeValue::Code(code) => {
-                    let mut with = tags.to_vec();
-                    with.push("code");
-                    self.put(&code.literal, &with);
-                }
-                NodeValue::Emph => {
-                    let mut with = tags.to_vec();
-                    with.push("em");
-                    self.inlines(child, &with);
-                }
-                NodeValue::Strong => {
-                    let mut with = tags.to_vec();
-                    with.push("strong");
-                    self.inlines(child, &with);
-                }
-                NodeValue::Link(link) => {
-                    let start = self.offset();
-                    let mut with = tags.to_vec();
-                    with.push("link");
-                    self.inlines(child, &with);
-                    let end = self.offset();
-                    self.links.push(Link {
-                        start,
-                        end,
-                        target: link.url.clone(),
-                    });
-                }
-                NodeValue::Image(image) => {
-                    let alt = plain_text(child).trim().to_owned();
-                    // Картинка одна в абзаце — иллюстрация; окружённая
-                    // текстом — часть строки. Вторым способом в вебе набирают
-                    // формулы: википедия печатает их картинками MathJax.
-                    let inline = !stands_alone(child);
-                    match media::resolve(self.base, &image.url) {
-                        Some(source) => self.shot(source, alt, inline),
-                        // Чего сами не достанем (`data:`, `blob:`) — оставляем
-                        // строкой: честнее пустой рамки.
-                        None => {
-                            let mut with = tags.to_vec();
-                            with.push("dim");
-                            let label = if alt.is_empty() {
-                                "[image]".to_owned()
-                            } else {
-                                format!("[image: {alt}]")
-                            };
-                            self.put(&label, &with);
-                        }
-                    }
-                }
-                // Сноска: метка ведёт вниз, к тексту сноски, и обратно —
-                // за это отвечает якорь, поставленный здесь же.
-                NodeValue::FootnoteReference(note) => {
-                    let start = self.offset();
-                    let mut with = tags.to_vec();
-                    with.push("noteref");
-                    with.push("link");
-                    self.put(&note.name, &with);
-                    let end = self.offset();
-                    // Якорь ставится на первой ссылке: к ней и возвращает
-                    // стрелка снизу, если на сноску ссылались не раз.
-                    self.anchors
-                        .push((anchor(&format!("fnref-{}", note.name)), start));
-                    self.links.push(Link {
-                        start,
-                        end,
-                        target: format!("#fn-{}", note.name),
-                    });
-                }
-                NodeValue::SoftBreak => self.put(" ", tags),
-                NodeValue::LineBreak => self.put("\n", tags),
-                _ => self.inlines(child, tags),
-            }
-        }
-    }
-}
-
 // ── картинки ────────────────────────────────────────────────────────────────
 
 /// Заглушка на месте картинки: нажмёшь — загрузится.
@@ -4433,7 +4069,7 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
         let layout = waiting.then(|| {
             let view = view_of(state, id);
             let layout = match &view {
-                Some(view) => view.create_pango_layout(Some(&formula(&shot.alt))),
+                Some(view) => view.create_pango_layout(Some(&page::formula(&shot.alt))),
                 None => return None,
             };
             layout.set_font_description(Some(&pango::FontDescription::from_string(&format!(
@@ -4642,24 +4278,6 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
             }
         }
     });
-}
-
-/// Исходник формулы из `alt`: MathJax заворачивает его в `{\displaystyle …}`,
-/// и читателю эта обёртка не нужна.
-fn formula(alt: &str) -> String {
-    let text = alt.trim();
-    let inner = text
-        .strip_prefix('{')
-        .and_then(|text| text.strip_suffix('}'))
-        .map(|text| text.trim())
-        .and_then(|text| text.strip_prefix("\\displaystyle").or(Some(text)))
-        .unwrap_or(text);
-    let inner = inner.trim();
-    if inner.is_empty() {
-        "formula".to_owned()
-    } else {
-        inner.to_owned()
-    }
 }
 
 /// Показать разобранную картинку с подписью.
@@ -4939,66 +4557,10 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
 fn hits_of(buffer: &gtk::TextBuffer, needle: &str) -> Vec<(i32, i32)> {
     let (start, end) = buffer.bounds();
     let full = buffer.text(&start, &end, true);
-    plain_hits(&full, needle)
-}
-
-/// Совпадения по «чистому» тексту буфера: без мягких переносов и с обычным
-/// пробелом вместо неразрывного, — иначе «в лесу» не нашлось бы в
-/// «в\u{a0}ле\u{ad}су». Ведём карту «индекс чистого символа → смещение
-/// в буфере», чтобы вернуть найденное на место. Регистр не важен, как и
-/// раньше. Отдельной чистой функцией — чтобы проверять без живого буфера.
-fn plain_hits(full: &str, needle: &str) -> Vec<(i32, i32)> {
-    let wanted: Vec<char> = brevier::typeset::plain(needle)
-        .chars()
-        .map(lower1)
-        .collect();
-    if wanted.is_empty() {
-        return Vec::new();
-    }
-
-    let mut plain: Vec<char> = Vec::with_capacity(full.len());
-    let mut map: Vec<i32> = Vec::with_capacity(full.len());
-    for (offset, ch) in full.chars().enumerate() {
-        match ch {
-            // Мягкий перенос и якорь виджета в поиске не участвуют — так же,
-            // как их пропускал прежний TEXT_ONLY.
-            '\u{00AD}' | '\u{FFFC}' => {}
-            '\u{00A0}' => {
-                plain.push(' ');
-                map.push(offset as i32);
-            }
-            _ => {
-                plain.push(lower1(ch));
-                map.push(offset as i32);
-            }
-        }
-    }
-
-    let mut hits = Vec::new();
-    let mut i = 0;
-    while i + wanted.len() <= plain.len() {
-        if plain[i..i + wanted.len()] == wanted[..] {
-            // Конец — сразу за последним совпавшим символом буфера: так
-            // подсветка накрывает и мягкий перенос внутри слова, если он там.
-            let from = map[i];
-            let to = map[i + wanted.len() - 1] + 1;
-            hits.push((from, to));
-            if hits.len() >= MAX_HITS {
-                break;
-            }
-            i += wanted.len();
-        } else {
-            i += 1;
-        }
-    }
-    hits
-}
-
-/// Первый символ нижнего регистра — для регистронезависимого поиска, один
-/// к одному, чтобы карта смещений не разъехалась. Расширяющиеся отображения
-/// (редкие) сводим к первому символу.
-fn lower1(ch: char) -> char {
-    ch.to_lowercase().next().unwrap_or(ch)
+    page::hits(&full, needle)
+        .into_iter()
+        .map(|(from, to)| (from as i32, to as i32))
+        .collect()
 }
 
 /// Первое совпадение, которое читатель уже видит или увидит ниже.
@@ -5013,51 +4575,6 @@ fn first_visible(view: &gtk::TextView, hits: &[(i32, i32)]) -> usize {
         .unwrap_or(0)
 }
 
-/// Стоит ли картинка в абзаце одна.
-///
-/// Соседи-пробелы не в счёт: `![схема](url)` на своей строке приходит
-/// с переводами строк по краям, и это всё равно иллюстрация.
-fn stands_alone<'n>(image: &'n comrak::nodes::AstNode<'n>) -> bool {
-    let empty = |node: Option<&'n comrak::nodes::AstNode<'n>>| match node {
-        None => true,
-        Some(node) => match &node.data.borrow().value {
-            NodeValue::Text(text) => text.trim().is_empty(),
-            NodeValue::SoftBreak | NodeValue::LineBreak => true,
-            _ => false,
-        },
-    };
-    empty(image.previous_sibling()) && empty(image.next_sibling())
-}
-
-/// Ячейка таблицы разметкой Pango: курсив, полужирный, код и ссылки.
-///
-/// `GtkLabel` понимает подмножество разметки и сам делает ссылки живыми —
-/// иначе пришлось бы городить виджет на каждую ячейку.
-fn markup_of<'n>(node: &'n comrak::nodes::AstNode<'n>) -> String {
-    let mut out = String::new();
-    for child in node.children() {
-        match &child.data.borrow().value {
-            NodeValue::Text(text) => out.push_str(&glib::markup_escape_text(text)),
-            NodeValue::Code(code) => {
-                out.push_str("<tt>");
-                out.push_str(&glib::markup_escape_text(&code.literal));
-                out.push_str("</tt>");
-            }
-            NodeValue::Emph => out.push_str(&format!("<i>{}</i>", markup_of(child))),
-            NodeValue::Strong => out.push_str(&format!("<b>{}</b>", markup_of(child))),
-            NodeValue::Link(link) => out.push_str(&format!(
-                "<a href=\"{}\">{}</a>",
-                glib::markup_escape_text(&link.url),
-                markup_of(child)
-            )),
-            NodeValue::Image(_) => out.push_str(&glib::markup_escape_text(&plain_text(child))),
-            NodeValue::SoftBreak | NodeValue::LineBreak => out.push(' '),
-            _ => out.push_str(&markup_of(child)),
-        }
-    }
-    out
-}
-
 /// Ссылка в ячейке ведёт туда же, куда вела бы в тексте.
 fn follow_cell_links(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, cell: &gtk::Label) {
     let ui = ui.clone();
@@ -5069,7 +4586,7 @@ fn follow_cell_links(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, cell: &gtk::L
                 Some(tab) => {
                     let here = tab.history.current().map(Address::display);
                     let view = tab.view.clone();
-                    fragment_of(target, here.as_deref())
+                    page::fragment_of(target, here.as_deref())
                         .is_some_and(|fragment| jump(&view, &tab.anchors, &fragment))
                 }
                 None => false,
@@ -5082,44 +4599,12 @@ fn follow_cell_links(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, cell: &gtk::L
     });
 }
 
-/// Текст узла без разметки — для подписей картинок и ячеек таблицы.
-fn plain_text<'n>(node: &'n comrak::nodes::AstNode<'n>) -> String {
-    let mut out = String::new();
-    for child in node.descendants() {
-        match &child.data.borrow().value {
-            NodeValue::Text(text) => out.push_str(text),
-            NodeValue::Code(code) => out.push_str(&code.literal),
-            NodeValue::SoftBreak | NodeValue::LineBreak => out.push(' '),
-            _ => {}
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    #[test]
-    fn find_looks_through_soft_hyphens_and_nbsp() {
-        // Буфер с мягким переносом внутри слова и неразрывными пробелами
-        // после предлогов — ровно то, что кладёт в буфер типографика.
-        // Смещения (по символам): я=0 nbsp=1 и=2 д=3 у=4 ' '=5 в=6 nbsp=7
-        // л=8 е=9 shy=10 с=11 у=12.
-        let buffer = "я\u{00A0}иду в\u{00A0}ле\u{00AD}су";
-
-        // «в лесу» с обычным пробелом находит «в\u{a0}ле\u{ad}су»; подсветка
-        // (6..13) накрывает и неразрывный пробел, и мягкий перенос внутри.
-        assert_eq!(plain_hits(buffer, "в лесу"), vec![(6, 13)], "{buffer:?}");
-        // Регистр не важен, а перенос внутри слова поиску не мешает.
-        assert_eq!(plain_hits(buffer, "ЛЕСУ"), vec![(8, 13)]);
-        // Пустой запрос — пусто; чего нет — не находится.
-        assert!(plain_hits(buffer, "").is_empty());
-        assert!(plain_hits(buffer, "море").is_empty());
     }
 
     #[test]
