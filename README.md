@@ -6,8 +6,8 @@
 
 A browser for reading, and nothing else. It fetches a page, reduces it to Markdown on
 your own machine, and sets it in the typography *you* chose — not the one the site
-shipped. It also reads Markdown documentation straight out of git repositories, and feeds
-as lists of links.
+shipped. It also reads Markdown documentation straight out of git repositories, reads feeds
+as lists of links, and searches the web from the address bar.
 
 No JavaScript engine, no site CSS. The modern web ships a document wrapped in a program;
 Brevier keeps the document and throws the program away. The site gets a vote on the words.
@@ -44,7 +44,7 @@ Nothing is in a store yet — builds for Linux and Android in the
 which distribution is underneath:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.4.1/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.5.0/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -66,8 +66,8 @@ also in the [release](https://github.com/gurov/brevier/releases/latest), or buil
 `packaging/tarball.sh`:
 
 ```sh
-tar xf brevier-0.4.1-x86_64-linux.tar.gz
-cd brevier-0.4.1-x86_64-linux && ./install.sh
+tar xf brevier-0.5.0-x86_64-linux.tar.gz
+cd brevier-0.5.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` puts the binaries, the desktop entry, the icon and the licenses under
@@ -75,7 +75,7 @@ cd brevier-0.4.1-x86_64-linux && ./install.sh
 (`libgtk-4-1` on Debian and Ubuntu) and a glibc no older than the build machine's.
 
 **Android** (7.0 and later, 64-bit ARM — any phone from the last several years): download
-[`brevier-0.4.1-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.4.1/brevier-0.4.1-arm64.apk)
+[`brevier-0.5.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.5.0/brevier-0.5.0-arm64.apk)
 on the phone and open it; Android asks once to allow installing apps from the browser or
 file manager you opened it with. Updates install over it as long as they carry the same
 signature — the release key, whose SHA-256 fingerprint is
@@ -122,6 +122,8 @@ brevier --stdin <url> < page.html       # HTML you already have; the url is
                                         # where it came from, for its links
 brevier --save <url>                    # write it to a file instead of stdout
 brevier brevier:history                 # what you have read, by day
+brevier "borrow checker"                # not an address: a search, results as links
+brevier "?danluu.com"                   # a leading ? searches for anything
 
 brevier-ui <url> [<url>…]               # read in a window, one tab per address
 ```
@@ -161,7 +163,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action, built from this repository at the ref you name:
 
 ```yaml
-- uses: gurov/brevier@v0.4.1   # a release tag, or @main
+- uses: gurov/brevier@v0.5.0   # a release tag, or @main
   with:
     urls: |
       https://example.com/
@@ -235,6 +237,20 @@ the history.
 - **Images load right away, and a switch turns them off** — the decoder is the one serious
   attack surface once JavaScript is gone, and closing it should be possible. A formula in a
   line of text is drawn as a canvas; an illustration gets its own line and a caption.
+- **The address bar searches.** Anything that is not an address — a few words, a question,
+  one word without a dot — goes to DuckDuckGo Lite, and the results come back as a list of
+  links, the same view as a feed: the title, the site, a couple of lines. A leading `?`
+  searches for anything, `?danluu.com` included; `localhost` and `name:port` stay addresses.
+  When DuckDuckGo takes a search for a bot and shows a puzzle instead of results, Brevier
+  says so and offers **Open in your browser** — it does not solve puzzles.
+- **Verse is set as verse.** A poem marked line by line — FictionBook's `<v>` and `<stanza>`,
+  which many e-libraries keep, or `verse`/`stanza`/`poem` classes — keeps its lines; stanzas
+  are parted by an empty line, a line too long for the measure wraps with a hanging indent,
+  and no line is hyphenated.
+- **The start page remembers.** A new tab shows the five pages you read last, one line each,
+  and a link to the whole history; on a first run there is nothing to show, so nothing is
+  shown. Back on a tab's first page leads to it, so a tab opened from a link is never a dead
+  end.
 - **A page that is a list of links** (a blog front page, a section of a site) is shown as a
   list, and the status line says so, instead of pretending there was an article to find.
   An RSS, Atom or JSON feed opens the same way: each entry a link, with its date, its
@@ -277,6 +293,8 @@ scale and the same palette, so an article reads the same on both.
 - It opens what other apps hand it: links, shared text with a link in it, `feed://` links,
   and feed or Markdown files from Downloads or a file manager.
 - A long press on a link opens it in a new tab, copies it, or hands it to your browser.
+- A very long page — a whole novel on one page — shows its first screen at once, and the
+  rest is laid out a piece at a time while you read.
 - With a keyboard attached, the window's shortcuts work: `Ctrl+L`, `T`, `W`, `F`, `S`, `H`,
   `D`, `O`, and `Alt+←` / `Alt+→` for back and forward.
 
@@ -377,10 +395,13 @@ it through a different window size, zoom or font.
 - **Not a crawler.** Brevier fetches the page you opened and what it takes to read it — its
   images, an alternate Markdown copy when offered, a dozen probes on a repository's CDN for
   where its documentation starts. It does not walk a site or fetch pages nobody asked for.
-- **One site is read through its feed.** reddit's pages are empty without JavaScript, so a
-  reddit thread or subreddit is fetched as its `.rss` instead — the one per-site rule so
-  far. reddit allows few requests in a row without an account; when it asks to slow down,
-  Brevier says so.
+- **Two per-site rules, and no more so far.** reddit's pages are empty without JavaScript,
+  so a reddit thread or subreddit is fetched as its `.rss` instead; reddit allows few
+  requests in a row without an account, and when it asks to slow down, Brevier says so.
+  A search goes to DuckDuckGo Lite — the one engine that answers a plain GET with plain
+  HTML, without a key — and its results page is read by its own rule, links unwrapped from
+  DuckDuckGo's click counter so they lead straight to the sites. The query leaves your
+  machine for DuckDuckGo, as it would from any browser's search box.
 - **The User-Agent is honest** — `Brevier/0.1`. Chosen by measurement, not principle: on our
   corpus a browser-shaped UA lost 7:0, every case a 403 from an anti-bot.
 - **TLS trust is delegated to the operating system** (`rustls` + `rustls-platform-verifier`).

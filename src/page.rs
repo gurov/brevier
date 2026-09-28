@@ -51,6 +51,12 @@ pub const OBJECT: char = '\u{FFFC}';
 pub enum Style {
     /// Проза: кегль текста и воздух между строками.
     Body,
+    /// Строфа: строки того же кегля, что и проза, но плотнее и с висячим
+    /// отступом на переносе длинной строки — печатная вёрстка стиха, а не
+    /// абзац (#21). Признаётся по форме — жёсткий перенос внутри абзаца
+    /// (`NodeValue::LineBreak`), который в обычной прозе почти не встречается,
+    /// а после `extract::verse` это ровно строки стихотворения.
+    Verse,
     /// Заголовок, уровень 1..=6.
     Heading(u8),
     Em,
@@ -85,6 +91,7 @@ impl Style {
     pub fn name(self) -> String {
         match self {
             Style::Body => "body".to_owned(),
+            Style::Verse => "verse".to_owned(),
             Style::Heading(level) => format!("h{level}"),
             Style::Em => "em".to_owned(),
             Style::Strong => "strong".to_owned(),
@@ -107,6 +114,10 @@ impl Style {
 
     fn is_heading(self) -> bool {
         matches!(self, Style::Heading(_))
+    }
+
+    fn is_verse(self) -> bool {
+        matches!(self, Style::Verse)
     }
 }
 
@@ -634,8 +645,16 @@ impl Writer<'_> {
                 self.put("\n", &[]);
             }
             NodeValue::Paragraph => {
+                // Строфа опознаётся по форме: жёсткий перенос внутри абзаца
+                // почти никогда не бывает в обычной прозе, а после
+                // `extract::verse` это ровно строки стихотворения.
+                let body = if is_verse(node) {
+                    Style::Verse
+                } else {
+                    Style::Body
+                };
                 let mut styles = outer.to_vec();
-                styles.push(Style::Body);
+                styles.push(body);
                 let (start, from) = self.here();
                 self.inlines(node, &styles);
                 // Веха берётся по чистому тексту: проза уже с мягкими
@@ -651,7 +670,13 @@ impl Writer<'_> {
                         heading: false,
                     });
                 }
-                self.put("\n", &[Style::Body]);
+                self.put("\n", &[body]);
+                // Строфу от следующей строфы и от прозы отделяет пустая
+                // строка, как в печатной вёрстке стиха: каждая строка стиха
+                // уже свой абзац буфера, и воздуха абзаца на это не хватит.
+                if body == Style::Verse && node.next_sibling().is_some() {
+                    self.put("\n", &[Style::Verse]);
+                }
             }
             NodeValue::CodeBlock(code) => {
                 let text = code.literal.trim_end_matches('\n');
@@ -818,8 +843,14 @@ impl Writer<'_> {
                 NodeValue::Text(text) => match self.typeset {
                     // Проза: переносы и неразрывные пробелы. Заголовки мимо —
                     // по их тексту считаются якоря и оглавление, и мягкий
-                    // перенос сломал бы совпадение якоря.
-                    Some(ts) if !styles.iter().any(|style| style.is_heading()) => {
+                    // перенос сломал бы совпадение якоря. Стих мимо тоже:
+                    // короткая строка переносов почти не просит, а перенос
+                    // посреди строки стиха выглядит чужеродно (#21).
+                    Some(ts)
+                        if !styles
+                            .iter()
+                            .any(|style| style.is_heading() || style.is_verse()) =>
+                    {
                         let shaped = ts.shape(text);
                         self.put(&shaped, styles);
                     }
@@ -905,6 +936,34 @@ impl Writer<'_> {
 fn without_objects(text: &str) -> String {
     text.chars().filter(|ch| *ch != OBJECT).collect()
 }
+
+/// Абзац — стих: жёсткие переносы делят его на строки, и строки в основном
+/// короткие (#21). `extract::verse` склеивает строфу ровно этим знаком.
+///
+/// Одного переноса мало: `<br>` в живом вебе ставят и между длинными
+/// строками прозы (цитата у fs.blog, «заголовок пункта» и описание под ним
+/// у nngroup), и вёрстка стиха — без переносов по слогам и с висячим
+/// отступом — такой прозе чужая. Строка стиха редко длиннее
+/// [`VERSE_LINE`] знаков, строка прозы между `<br>` — почти всегда длиннее.
+fn is_verse<'n>(node: &'n AstNode<'n>) -> bool {
+    let mut lines = vec![0usize];
+    for child in node.children() {
+        match &child.data.borrow().value {
+            NodeValue::LineBreak => lines.push(0),
+            _ => {
+                if let Some(last) = lines.last_mut() {
+                    *last += plain_text(child).chars().count();
+                }
+            }
+        }
+    }
+    lines.retain(|&chars| chars > 0);
+    let short = lines.iter().filter(|&&chars| chars <= VERSE_LINE).count();
+    lines.len() >= 2 && short * 4 >= lines.len() * 3
+}
+
+/// Самая длинная строка, которую ещё считаем строкой стиха.
+const VERSE_LINE: usize = 60;
 
 /// Ячейка таблицы: курсив, полужирный, код и ссылки — в свой маленький текст.
 fn cell_of<'n>(node: &'n AstNode<'n>) -> Cell {
@@ -1294,6 +1353,80 @@ mod tests {
         assert_eq!(heading, "Разделение");
         assert!(page.text.contains("в\u{a0}ле"), "{:?}", page.text);
         assert!(page.text.contains('\u{ad}'), "{:?}", page.text);
+    }
+
+    /// Проза между `<br>` — не стих: строки длинные.
+    #[test]
+    fn long_lines_with_hard_breaks_stay_prose() {
+        let long = "Having no funding was a huge advantage for me, and a year after I started the dot-com boom happened.";
+        let page = Page::of(&doc(&format!("{long}\\\n{long}\n")));
+        assert_eq!(styles_at(&page, 0), vec!["body"]);
+        // Две строки — уже строфа, если они короткие.
+        let page = Page::of(&doc(
+            "На берегу пустынных волн\\\nСтоял он, дум великих полн,\n",
+        ));
+        assert_eq!(styles_at(&page, 0), vec!["verse"]);
+        // Одна строка с переносом на конце — не строфа.
+        let page = Page::of(&doc("Коротко.\n"));
+        assert_eq!(styles_at(&page, 0), vec!["body"]);
+    }
+
+    #[test]
+    fn verse_is_its_own_style_and_is_not_typeset() {
+        let mut document = doc("Разделение в лесу.  \nПродолжается долго.\n\n\
+             Обычный текст: разделение в лесу продолжается долго.\n");
+        document.lang = Some("ru".to_owned());
+        let page = Page::of(&document);
+        let lines: Vec<&str> = page.text.lines().collect();
+
+        // Строфа без переносов и без неразрывных пробелов (#21)…
+        assert_eq!(lines[..2], ["Разделение в лесу.", "Продолжается долго."]);
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "Продолжается")),
+            vec!["verse"]
+        );
+        // Строфу от прозы отделяет пустая строка…
+        assert_eq!(lines[2], "");
+        // …а проза рядом типографится, как раньше.
+        let prose = lines[3];
+        let prose_at = lines[0].chars().count() + lines[1].chars().count() + 3;
+        assert_eq!(styles_at(&page, prose_at), vec!["body"]);
+        assert!(prose.contains("в\u{a0}ле"), "{prose:?}");
+        assert!(prose.contains('\u{ad}'), "{prose:?}");
+    }
+
+    /// Сквозь весь тракт: стих из веба — строки FictionBook и строки через
+    /// `<br>` — доезжает до модели страницы строфой, строка к строке.
+    #[test]
+    fn verse_from_the_web_reaches_the_page_line_by_line() {
+        let prose = "Кеннет Эрроу доказал теорему о невозможности коллективного \
+            выбора, и это перевернуло теорию общественного благосостояния. \
+            Ниже разбирается, что именно утверждает теорема и почему её \
+            следствия так неудобны для любой процедуры голосования.";
+        let shapes = [
+            "<z><o></o><v>На берегу пустынных волн</v><c></c>\n\
+             <v>Стоял он, дум великих полн,</v><c></c></z>",
+            "<div class=\"poem\"><p>На берегу пустынных волн<br>\n\
+             Стоял он, дум великих полн,</p></div>",
+        ];
+        for shape in shapes {
+            let html = format!(
+                "<html><body><article><h1>Стихи</h1><p>{prose}</p>{shape}<p>{prose}</p></article></body></html>"
+            );
+            let document = crate::from_html(&html, "https://example.org/a").unwrap();
+            let page = Page::of(&document);
+            assert!(
+                page.text
+                    .contains("На берегу пустынных волн\nСтоял он, дум великих полн,\n"),
+                "{shape}: {:?}",
+                page.text
+            );
+            assert_eq!(
+                styles_at(&page, offset_of(&page, "Стоял")),
+                vec!["verse"],
+                "{shape}"
+            );
+        }
     }
 
     #[test]

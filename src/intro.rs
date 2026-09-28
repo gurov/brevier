@@ -7,9 +7,25 @@
 //! показывает читателю ровно ту типографику, которую продукт обещает.
 //!
 //! Коротко по существу: читатель открыл окно, чтобы читать, а не изучать
-//! программу.
+//! программу. Вернувшемуся читателю нужнее всего то, где он был, — поэтому
+//! сверху недавнее, а рассказ о программе под ним (#27).
+
+use crate::store::Store;
 
 pub const TITLE: &str = "Brevier";
+
+/// Начальная страница целиком: недавнее из журнала, если оно есть, и под
+/// ним рассказ о программе. `touch` — вариант для сенсорного экрана.
+/// Собирается на каждый показ: журнал растёт, пока окно открыто.
+pub fn page(store: &Store, touch: bool) -> String {
+    let about = if touch { TOUCH } else { MARKDOWN };
+    let recent = store.recent_page();
+    if recent.is_empty() {
+        about.to_owned()
+    } else {
+        format!("{recent}\n{about}")
+    }
+}
 
 pub const MARKDOWN: &str = "\
 # Brevier
@@ -63,3 +79,36 @@ The list button at the top is the contents; find on page, zoom, history and
 bookmarks are in the menu. Pinch the page to change its size; long-press
 a link to open it in a new tab.
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address::Address;
+
+    fn journal(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "brevier-intro-{}-{name}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join("history.tsv")
+    }
+
+    #[test]
+    fn a_first_run_gets_the_introduction_alone() {
+        let store = Store::at(journal("first"));
+        assert_eq!(page(&store, false), MARKDOWN);
+        assert_eq!(page(&store, true), TOUCH);
+    }
+
+    #[test]
+    fn recent_pages_stand_above_the_introduction() {
+        let mut store = Store::at(journal("back"));
+        store.record(&Address::Web("https://sive.rs/".to_owned()), "sivers", 0);
+        let text = page(&store, true);
+        assert!(text.starts_with("### Recently read\n\n- [sivers](https://sive.rs/)\n"));
+        assert!(text.find("(brevier:history)").unwrap() < text.find("# Brevier").unwrap());
+        assert!(text.ends_with(TOUCH));
+    }
+}

@@ -35,6 +35,9 @@ pub enum Error {
     /// размер за пределом. Отдельно от `Convert`, потому что лечится
     /// иначе: страница читается и без картинки.
     Media(String),
+    /// Поисковик принял нас за бота и вместо выдачи показал загадку (#25).
+    /// Отдельно от пустой выдачи: лечится браузером или ожиданием.
+    SearchChallenge,
 }
 
 impl Error {
@@ -49,7 +52,7 @@ impl Error {
             Error::EmptyExtraction => 5,
             // Тот же код, что у http-статуса: для прогонов это отказ
             // сервера, а не наша поломка.
-            Error::HostingLimit => 3,
+            Error::HostingLimit | Error::SearchChallenge => 3,
             Error::Convert(_) | Error::Feed(_) => 6,
             Error::Media(_) => 7,
         }
@@ -72,6 +75,9 @@ impl fmt::Display for Error {
             Error::Convert(e) => write!(f, "html to markdown: {e}"),
             Error::Feed(e) => write!(f, "feed: {e}"),
             Error::Media(e) => write!(f, "image: {e}"),
+            Error::SearchChallenge => {
+                write!(f, "the search engine asked to prove a human is searching")
+            }
         }
     }
 }

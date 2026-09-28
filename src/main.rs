@@ -347,6 +347,12 @@ fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
     if args.raw {
         return markdown::from_html(html);
     }
+    // Выдача поисковика разбирается своим правилом, не извлечением.
+    if !args.html && !args.nav && brevier::hosts::search_query(url).is_some() {
+        let document = brevier::from_search(html, url)?;
+        eprintln!("brevier: search results, shown as a list of links");
+        return Ok(document.markdown);
+    }
 
     let article = extract::extract(html, url)?;
     if args.html {
@@ -389,11 +395,11 @@ fn direct(args: &Args) -> Option<Address> {
 /// `feed://host/path` — старая ссылка «подписаться» — это адрес ленты
 /// в вебе. Приводим её здесь: веб-адрес cli отдаёт загрузке как напечатан.
 fn plain_url(arg: String) -> String {
-    if !arg.starts_with("feed:") {
-        return arg;
-    }
     match address::parse(&arg) {
-        Ok(Address::Web(url)) => url,
+        Ok(Address::Web(url)) if arg.starts_with("feed:") => url,
+        // Не адрес — запрос (#25): `brevier "borrow checker"` ищет,
+        // как искала бы адресная строка окна.
+        Ok(Address::Web(url)) if brevier::hosts::search_query(&url).is_some() => url,
         _ => arg,
     }
 }

@@ -29,8 +29,11 @@ mostly in Russian; write yours in whatever language you are most exact in.
 - **`src/ui/`** — `brevier-ui`, the window, on GTK 4 (the `ui` feature).
 - **`android/`** — the Android app: Kotlin over the core, through one JNI entry point
   (`src/android.rs`) that answers in JSON. No androidx.
-- **`src/hosts.rs`** — the per-host rules, in one small table. Everything else is ruled by
-  the shape of a page, never by its site.
+- **`src/hosts.rs`** — the per-host rules, in one small table: reddit read through its
+  feed, and the search engine's results page. Everything else is ruled by the shape of a
+  page, never by its site. The results page is tested against a saved copy in
+  `tests/fixtures/`; when DuckDuckGo changes its markup, that test fails instead of the
+  reader.
 - **`corpus/`** — the regression corpus, its expected outputs and the scripts that measure.
 - **`packaging/`** — the Flatpak manifest, the offline crate list, the tarball, the desktop
   entry, the metainfo and the release notes.

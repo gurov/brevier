@@ -18,7 +18,7 @@ use comrak::nodes::NodeValue;
 use comrak::{Arena, Options};
 use htmd::element_handler::{HandlerResult, Handlers};
 use htmd::options::{
-    BulletListMarker, CodeBlockStyle, HeadingStyle, LinkStyle, Options as HtmdOptions,
+    BrStyle, BulletListMarker, CodeBlockStyle, HeadingStyle, LinkStyle, Options as HtmdOptions,
 };
 use htmd::{Element, HtmlToMarkdown};
 
@@ -329,10 +329,234 @@ pub fn from_html(html: &str) -> Result<String, Error> {
     Ok(tidy(&to_markdown(html)?))
 }
 
+/// Жёсткий перенос (`\` в конце строки — так пишется `<br>`, #21) там,
+/// где переноса нет и быть не может.
+///
+/// `<br>` на краю блока — вёрстка, а не строка: в начале абзаца, в конце
+/// пункта, сразу за открытым `<strong>`. CommonMark переносом такую черту
+/// не считает и рисует буквой, и читателю доставался одинокий `\` (тред
+/// hacker news — десятками), а у waitbutwhy перенос сразу за `**` ломал
+/// выделение. В ячейке таблицы строк нет вовсе — там `<br>` значит пробел.
+/// Внутрь блоков кода не лезем.
+fn fix_breaks(md: &str) -> String {
+    let lines: Vec<&str> = md.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut in_code = false;
+    // Открытое выделение, перенесённое с пустой строки на следующую.
+    let mut carry = String::new();
+
+    for (index, line) in lines.iter().enumerate() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            out.push((*line).to_owned());
+            continue;
+        }
+        if in_code {
+            out.push((*line).to_owned());
+            continue;
+        }
+        let (prefix, body) = split_quote(line);
+        let mut body = format!("{}{body}", std::mem::take(&mut carry));
+        if body.trim_start().starts_with('|') {
+            body = unbreak_cell(&body);
+        }
+        if ends_with_break(&body) {
+            let bare = body[..body.len() - 1].trim_end();
+            let next_blank = lines.get(index + 1).is_none_or(|next| {
+                let (next_prefix, next_body) = split_quote(next);
+                next_body.trim().is_empty()
+                    || next_prefix.trim() != prefix.trim()
+                    || starts_block(next)
+            });
+            if bare.is_empty() {
+                body = String::new();
+            } else if bare.chars().all(|c| matches!(c, '*' | '_')) {
+                carry = bare.to_owned();
+                continue;
+            } else if next_blank {
+                body = bare.to_owned();
+            }
+        }
+        out.push(format!("{prefix}{body}"));
+    }
+    if !carry.is_empty() {
+        out.push(carry);
+    }
+    let mut joined = out.join("\n");
+    if md.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
+}
+
+/// Проза, свёрстанная по строкам печатной страницы, — снова абзацем.
+///
+/// Отсканированную книгу и текстовый файл часто выкладывают как есть:
+/// `<br>` в конце каждой строки страницы, порой с переносом по слогам
+/// («бом-» / «ба»). Это не стих, а чужая ширина колонки: оставь переносы —
+/// и на экране пойдёт полоса строк шириной с книжную страницу, а на
+/// телефоне каждая ещё и переломится надвое. Такой абзац сливаем обратно,
+/// перенос по слогам склеиваем.
+///
+/// Узнаём по форме, без словаря: следующая строка продолжает фразу
+/// (начинается со строчной или за переносом по слогам) — так почти у каждой
+/// строки такой прозы и почти ни у одной строки классического стиха, где
+/// строка начинается с заглавной; и строки длинные и ровные, как у набора
+/// в колонку, — у стиха со строчными началами строки короче и неровнее.
+fn unwrap_prose(md: &str) -> String {
+    let lines: Vec<&str> = md.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut in_code = false;
+    let mut at = 0;
+    while at < lines.len() {
+        let line = lines[at];
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if in_code || !ends_with_break(line) || starts_block(line) {
+            out.push(line.to_owned());
+            at += 1;
+            continue;
+        }
+        // Абзац с жёсткими переносами: строки, кончающиеся `\`, и последняя.
+        let (prefix, _) = split_quote(line);
+        let mut end = at;
+        while end + 1 < lines.len()
+            && ends_with_break(lines[end])
+            && split_quote(lines[end + 1]).0.trim() == prefix.trim()
+            && !split_quote(lines[end + 1]).1.trim().is_empty()
+            && !starts_block(lines[end + 1])
+        {
+            end += 1;
+        }
+        let parts: Vec<&str> = lines[at..=end]
+            .iter()
+            .map(|line| {
+                let body = split_quote(line).1.trim();
+                body.strip_suffix('\\').map_or(body, str::trim_end)
+            })
+            .collect();
+        if wrapped_prose(&parts) {
+            out.push(format!("{prefix}{}", join_wrapped(&parts)));
+        } else {
+            out.extend(lines[at..=end].iter().map(|line| (*line).to_owned()));
+        }
+        at = end + 1;
+    }
+    let mut joined = out.join("\n");
+    if md.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
+}
+
+/// Строка открывает свой блок: заголовок, пункт списка, строка таблицы.
+/// Такие абзацем с соседями не сливаем.
+fn starts_block(line: &str) -> bool {
+    let body = split_quote(line).1.trim_start();
+    let digits = body.chars().take_while(char::is_ascii_digit).count();
+    body.starts_with('#')
+        || body.starts_with('|')
+        || body.starts_with("- ")
+        || body.starts_with("* ")
+        || body.starts_with("+ ")
+        || (digits > 0 && body[digits..].starts_with(". "))
+}
+
+/// Самая короткая строка, которую ещё считаем строкой книжной колонки.
+const WRAPPED_LINE: usize = 45;
+
+/// Строки абзаца — проза, разбитая по ширине колонки (см. [`unwrap_prose`]).
+fn wrapped_prose(parts: &[&str]) -> bool {
+    let Some((_, body)) = parts.split_last() else {
+        return false;
+    };
+    if body.is_empty() {
+        return false;
+    }
+    let chars = |text: &str| text.chars().count();
+    let continued = parts
+        .windows(2)
+        .filter(|pair| hyphenated(pair[0]) || starts_lowercase(pair[1]))
+        .count();
+    let mut lengths: Vec<usize> = body.iter().map(|line| chars(line)).collect();
+    lengths.sort_unstable();
+    let median = lengths[lengths.len() / 2];
+    let widest = *lengths.last().unwrap_or(&0);
+    let even = lengths.iter().filter(|&&len| len * 4 >= widest * 3).count();
+    continued * 2 >= body.len() && median >= WRAPPED_LINE && even * 4 >= body.len() * 3
+}
+
+/// Строка кончается переносом по слогам: буква и дефис (или мягкий перенос).
+fn hyphenated(line: &str) -> bool {
+    let mut tail = line.chars().rev();
+    matches!(tail.next(), Some('-' | '\u{ad}')) && tail.next().is_some_and(char::is_alphabetic)
+}
+
+/// Первая буква строки — строчная: строка продолжает фразу.
+fn starts_lowercase(line: &str) -> bool {
+    line.chars()
+        .find(|c| c.is_alphanumeric())
+        .is_some_and(char::is_lowercase)
+}
+
+/// Слить строки в абзац: перенос по слогам склеивается, остальное — пробелом.
+fn join_wrapped(parts: &[&str]) -> String {
+    let mut out = String::new();
+    for (index, part) in parts.iter().enumerate() {
+        let next = parts.get(index + 1);
+        if hyphenated(part) && next.is_some_and(|next| starts_lowercase(next)) {
+            let mut word = part.to_string();
+            word.pop();
+            out.push_str(&word);
+        } else {
+            out.push_str(part);
+            if next.is_some() {
+                out.push(' ');
+            }
+        }
+    }
+    out
+}
+
+/// Префикс цитаты (`> > `) и остаток строки.
+fn split_quote(line: &str) -> (&str, &str) {
+    let body_at = line
+        .char_indices()
+        .find(|&(_, c)| c != '>' && c != ' ')
+        .map_or(line.len(), |(at, _)| at);
+    // Отступ перед текстом без `>` — не цитата, а продолжение пункта.
+    if !line[..body_at].contains('>') {
+        return ("", line);
+    }
+    line.split_at(body_at)
+}
+
+/// Строка кончается жёстким переносом: нечётное число `\` в конце —
+/// чётное это экранированная черта, текст.
+fn ends_with_break(line: &str) -> bool {
+    line.chars().rev().take_while(|&c| c == '\\').count() % 2 == 1
+}
+
+/// `<br>` в ячейке — пробел: в строке таблицы переносу не бывать.
+fn unbreak_cell(row: &str) -> String {
+    let mut out = String::with_capacity(row.len());
+    let mut slashes = 0;
+    for c in row.chars() {
+        if c == ' ' && slashes % 2 == 1 {
+            out.pop();
+        }
+        slashes = if c == '\\' { slashes + 1 } else { 0 };
+        out.push(c);
+    }
+    out
+}
+
 /// Убрать то, что мешает читать: хвостовые пробелы, дыры в три и больше пустых
 /// строк, выравнивание таблиц пробелами. Внутрь блоков кода не лезем — там
 /// значим каждый символ.
 fn tidy(md: &str) -> String {
+    let md = unwrap_prose(&fix_breaks(md));
     let mut out = String::with_capacity(md.len());
     let mut blanks = 0;
     let mut in_code = false;
@@ -1173,6 +1397,10 @@ fn convert(html: &str, notes: &HashMap<String, usize>) -> Result<String, Error> 
             ol_number_spacing: 1,
             link_style: LinkStyle::Inlined,
             code_block_style: CodeBlockStyle::Fenced,
+            // Жёсткий перенос — обратной чертой, а не двумя пробелами:
+            // хвостовые пробелы срезает `tidy` (и любой редактор), и строки
+            // стиха в окне сливались в одну через пробел (#21).
+            br_style: BrStyle::Backslash,
             ..Default::default()
         })
         .build();
@@ -1463,6 +1691,75 @@ pub fn options() -> Options<'static> {
 
 #[cfg(test)]
 mod tests {
+
+    /// `<br>` на краю блока и в ячейке таблицы — не строка (#21).
+    #[test]
+    fn a_break_where_no_line_can_be_is_dropped() {
+        let md = "\\\n\n\
+                  > \\\n>\n\
+                  However!\\\n\n\
+                  **\\\nWhile they ruin your life:**\n\n\
+                  | a | latency\\ (ms) |\n\n\
+                  **Critical mass**\\\nIt is a guide.\n\n\
+                  - First item.\\\n- Second item.\n\n\
+                  Line one\\\nline two\n";
+        assert_eq!(
+            super::fix_breaks(md),
+            "\n\n\
+             > \n>\n\
+             However!\n\n\
+             **While they ruin your life:**\n\n\
+             | a | latency (ms) |\n\n\
+             **Critical mass**\\\nIt is a guide.\n\n\
+             - First item.\n- Second item.\n\n\
+             Line one\\\nline two\n"
+        );
+        // Экранированная черта — текст, а не перенос.
+        assert_eq!(super::fix_breaks("C:\\\\\n\n"), "C:\\\\\n\n");
+    }
+
+    /// Книга, выложенная по строкам печатной страницы, — проза, а не стих:
+    /// абзац сливается, перенос по слогам склеивается.
+    #[test]
+    fn a_page_wrapped_like_a_printed_book_is_one_paragraph_again() {
+        let md = "Трубопровод пневмопочты тихо выдохнул в приемную чашку патрон\\\n\
+                  размером с карандаш. Сигнальный звонок тренькнул и смолк. Язон\\\n\
+                  динАльт уставился на безобидный патрон так, словно это была бом-\\\n\
+                  ба с часовым механизмом.\n";
+        assert_eq!(
+            super::unwrap_prose(md),
+            "Трубопровод пневмопочты тихо выдохнул в приемную чашку патрон \
+             размером с карандаш. Сигнальный звонок тренькнул и смолк. Язон \
+             динАльт уставился на безобидный патрон так, словно это была \
+             бомба с часовым механизмом.\n"
+        );
+        // В цитате — то же самое, префикс остаётся.
+        let quoted = md
+            .lines()
+            .map(|line| format!("> {line}\n"))
+            .collect::<String>();
+        assert!(super::unwrap_prose(&quoted).starts_with("> Трубопровод"));
+        assert_eq!(super::unwrap_prose(&quoted).lines().count(), 1);
+    }
+
+    /// Стих и переносы по смыслу остаются строками.
+    #[test]
+    fn verse_and_meaningful_breaks_stay_lines() {
+        for md in [
+            // Классический стих: строки с заглавной.
+            "На берегу пустынных волн\\\nСтоял он, дум великих полн,\\\n\
+             И вдаль глядел. Пред ним широко\\\nРека неслася; бедный чёлн\n",
+            // Стих со строчными началами: строки короткие и неровные.
+            "so much depends\\\nupon\\\na red wheel\\\nbarrow\n",
+            // Заголовок пункта и описание под ним.
+            "**Critical mass**\\\nCritical mass isn't just a science term; it's a guide.\n",
+            // Строки прозы, каждая — законченная фраза.
+            "Having no funding was a huge advantage for me, a real one indeed.\\\n\
+             A year after I started CD Baby, the dot-com boom happened there.\n",
+        ] {
+            assert_eq!(super::unwrap_prose(md), md, "{md}");
+        }
+    }
 
     #[test]
     fn front_matter_is_metadata_not_text() {

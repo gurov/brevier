@@ -85,6 +85,20 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     /** Номер показа: ответ картинки для прошлой страницы уже никому не нужен. */
     private var generation = 0
 
+    /**
+     * Куски, которые ещё не в колонке (#22): первый экран показываем сразу,
+     * остальное досыпаем по куску за кадр. Кто прыгает в недосыпанное
+     * (якорь, поиск, место чтения), досыпает до цели сам — см. [ensure].
+     */
+    private val pending = ArrayDeque<Any>()
+    /** Докуда текст страницы уже в колонке — смещение за последним куском. */
+    private var laid = 0
+    private var eager = false
+    private var offer: String? = null
+    /** Подсветка поиска — её получают и куски, досыпанные позже. */
+    private var marks: IntArray? = null
+    private var markHere = -1
+
     init {
         isFillViewport = true
         isVerticalScrollBarEnabled = true
@@ -112,21 +126,64 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         proses.clear()
         images.clear()
         formulas.clear()
+        pending.clear()
+        laid = 0
+        marks = null
+        markHere = -1
+        this.eager = eager
+        this.offer = offer
         fitColumn(width)
 
-        for (item in pieces(page)) {
-            when (item) {
-                is Piece -> addProse(page, item)
-                is Block.Image -> addImage(item)
-                is Block.Table -> addTable(item)
-            }
-        }
-        if (offer != null) addOffer(offer)
-        // Пустое место внизу: последнюю строку можно поднять с края экрана.
-        column.addView(View(context), LinearLayout.LayoutParams(1, (metrics.text * 4).toInt()))
+        // Первый экран — сразу и целиком, остальное — по куску за кадр.
+        pending.addAll(pieces(page))
+        while (pending.isNotEmpty() && laid < FIRST_CHARS) append()
+        if (pending.isEmpty()) finish() else drip(generation)
 
         scrollTo(0, 0)
         if (eager) loadAll()
+    }
+
+    /** Положить в колонку следующий кусок. */
+    private fun append() {
+        val page = page ?: return
+        when (val item = pending.removeFirst()) {
+            is Piece -> {
+                addProse(page, item)
+                marks?.let { hits -> markView(proses.last(), hits, markHere) }
+                laid = item.end
+            }
+            is Block.Image -> {
+                addImage(item)
+                if (eager) images.last().load()
+                laid = item.at + 1
+            }
+            is Block.Table -> {
+                addTable(item)
+                laid = item.at + 1
+            }
+        }
+        if (pending.isEmpty()) finish()
+    }
+
+    /** Все куски на месте: кнопка отказа и поле внизу. */
+    private fun finish() {
+        offer?.let { addOffer(it) }
+        // Пустое место внизу: последнюю строку можно поднять с края экрана.
+        column.addView(View(context), LinearLayout.LayoutParams(1, (metrics.text * 4).toInt()))
+    }
+
+    /** Досыпать кусок на следующем кадре — и так, пока не кончатся. */
+    private fun drip(shown: Int) {
+        postOnAnimation {
+            if (shown != generation || pending.isEmpty()) return@postOnAnimation
+            append()
+            if (pending.isNotEmpty()) drip(shown)
+        }
+    }
+
+    /** Досыпать куски до смещения `offset` сейчас же: к нему прыгают. */
+    private fun ensure(offset: Int) {
+        while (pending.isNotEmpty() && laid <= offset) append()
     }
 
     private fun addProse(page: Page, piece: Piece) {
@@ -205,6 +262,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     /** Загрузить все картинки: переключатель в настройках включён. */
     fun loadAll() {
+        eager = true
         images.forEach { it.load() }
         formulas.forEach { (span, view) -> load(span, view) }
     }
@@ -283,6 +341,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     /** Прокрутить так, чтобы смещение стояло на доле высоты окна. */
     fun scrollToOffset(offset: Int, align: Float) {
+        ensure(offset)
         val y = yOf(offset) ?: return
         scrollTo(0, max(0, y - (height * align).toInt()))
     }
@@ -324,23 +383,26 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     /** Подсветить совпадения; `here` — то, на котором стоим. Смещения — пары подряд. */
     fun highlight(hits: IntArray, here: Int) {
-        for (view in proses) view.clearMarks()
+        marks = hits.takeIf { it.isNotEmpty() }
+        markHere = here
+        for (view in proses) markView(view, hits, here)
+        if (here >= 0 && here * 2 < hits.size) scrollToOffset(hits[here * 2], 0.3f)
+    }
+
+    /** Подсветка совпадений в одном куске. */
+    private fun markView(view: ProseView, hits: IntArray, here: Int) {
+        view.clearMarks()
         val type = metrics.type
+        val start = view.piece.start
+        val end = start + view.text.length
         var index = 0
         while (index + 1 < hits.size) {
-            val from = hits[index]
-            val to = hits[index + 1]
+            val a = max(hits[index], start)
+            val b = min(hits[index + 1], end)
             val current = index / 2 == here
-            for (view in proses) {
-                val start = view.piece.start
-                val end = start + view.text.length
-                val a = max(from, start)
-                val b = min(to, end)
-                if (a < b) view.mark(a - start, b - start, if (current) type.foundHere else type.found, type.foundInk)
-            }
+            if (a < b) view.mark(a - start, b - start, if (current) type.foundHere else type.found, type.foundInk)
             index += 2
         }
-        if (here >= 0 && here * 2 < hits.size) scrollToOffset(hits[here * 2], 0.3f)
     }
 
     // ── щипок ───────────────────────────────────────────────────────────────
@@ -758,6 +820,9 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     companion object {
         /** Сколько кадров ждём, пока картинки и таблицы займут своё место. */
         const val SETTLE_FRAMES = 45
+
+        /** Сколько знаков кладём в колонку сразу: первый экран с запасом. */
+        const val FIRST_CHARS = 2 * CHUNK_CHARS
 
         /** Снять типографские знаки: в буфер обмена идёт чистый текст. */
         fun plain(text: String): String = buildString(text.length) {

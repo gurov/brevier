@@ -204,10 +204,36 @@ pub fn from_feed(xml: &str, url: &str) -> Result<Document, Error> {
     })
 }
 
+/// Выдача поисковика (#25): список ссылок, как у ленты, и так же не идёт
+/// в недельную копию — поиск повторяют ради свежего. Загадка вместо
+/// выдачи — отказ, а не пустой список: читателю надо знать, что искал
+/// не он, а поисковик отказался отвечать.
+pub fn from_search(html: &str, url: &str) -> Result<Document, Error> {
+    let query = hosts::search_query(url).unwrap_or_default();
+    let hits = match hosts::results(html) {
+        hosts::Results::Hits(hits) => hits,
+        hosts::Results::Nothing => Vec::new(),
+        hosts::Results::Challenge => return Err(Error::SearchChallenge),
+    };
+    Ok(Document {
+        address: Address::Web(url.to_owned()),
+        title: query.clone(),
+        markdown: hosts::search_markdown(&query, &hits),
+        kind: Kind::Listing,
+        served: false,
+        site: Vec::new(),
+        feeds: Vec::new(),
+        lang: None,
+    })
+}
+
 /// Страница, которая уже на руках: HTML пришёл не из сети, а из stdin
 /// или из файла. Адрес обязателен и здесь — по нему разворачиваются
 /// относительные ссылки и решается, что это за документ.
 pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
+    if hosts::search_query(url).is_some() {
+        return from_search(html, url);
+    }
     let article = extract::extract(html, url)?;
     let title = article.title.clone();
     let site = article.site.clone();

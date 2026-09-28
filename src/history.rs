@@ -3,6 +3,12 @@
 //! Ровно та же модель, что у браузеров: переход с середины истории обрубает
 //! всё, что было впереди. Иначе «назад, назад, открыть ссылку, вперёд» ведёт
 //! в страницу, которую читатель не выбирал.
+//!
+//! Корень истории любой вкладки — начальная страница. Вкладка, открытая
+//! сразу на странице (ссылкой, из другой программы, набором адреса),
+//! иначе стояла бы с погасшей «назад», и деться с неё было бы некуда,
+//! кроме адресной строки. Кнопка при этом остаётся стрелкой: кнопка,
+//! которая по состоянию делает разное, сбивает руку (#26).
 
 use crate::address::Address;
 
@@ -14,7 +20,9 @@ pub struct History {
     /// стоял, а не в начало страницы. Смещение, а не пиксели: оно не зависит
     /// ни от ширины окна, ни от масштаба.
     places: Vec<i32>,
-    at: usize,
+    /// Где читатель в пути. `None` — на начальной странице, перед первой
+    /// записью: туда ведёт «назад» с первой страницы вкладки.
+    at: Option<usize>,
 }
 
 impl History {
@@ -26,7 +34,7 @@ impl History {
     /// Заведена ради восстановления сессии — вкладка обязана вернуться
     /// не только на свою страницу, но и со своими «назад» и «вперёд».
     pub fn restored(entries: Vec<Address>, at: usize) -> Self {
-        let at = at.min(entries.len().saturating_sub(1));
+        let at = (!entries.is_empty()).then(|| at.min(entries.len() - 1));
         // Мест на диске сессия не хранит (у текущей страницы место едет
         // отдельным полем), поэтому восстановленные записи начинают с нуля.
         let places = vec![0; entries.len()];
@@ -37,17 +45,25 @@ impl History {
         }
     }
 
+    /// Открытая страница; `None` — вкладка на начальной странице.
     pub fn current(&self) -> Option<&Address> {
-        self.entries.get(self.at)
+        self.at.and_then(|at| self.entries.get(at))
     }
 
-    /// Весь путь вкладки и место в нём — то, что кладётся в сессию.
+    /// Весь путь вкладки — то, что кладётся в сессию.
     pub fn entries(&self) -> &[Address] {
         &self.entries
     }
 
-    pub fn at(&self) -> usize {
+    /// Место в пути; `None` — начальная страница.
+    pub fn at(&self) -> Option<usize> {
         self.at
+    }
+
+    /// Стоит ли вкладка на первой странице своего пути — там, откуда
+    /// «назад» ведёт на начальную страницу.
+    pub fn at_first(&self) -> bool {
+        self.at == Some(0)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -55,26 +71,26 @@ impl History {
     }
 
     /// Открыть адрес. Повтор текущего адреса записью не считается — иначе
-    /// перезагрузка страницы забивала бы историю.
+    /// перезагрузка страницы забивала бы историю. С начальной страницы
+    /// впереди весь путь, и обрубается он весь.
     pub fn visit(&mut self, address: Address) {
         if self.current() == Some(&address) {
             return;
         }
-        if !self.entries.is_empty() {
-            self.entries.truncate(self.at + 1);
-            self.places.truncate(self.at + 1);
-            self.at += 1;
-        }
+        let kept = self.at.map_or(0, |at| at + 1);
+        self.entries.truncate(kept);
+        self.places.truncate(kept);
         self.entries.push(address);
         self.places.push(0);
-        self.at = self.entries.len() - 1;
+        self.at = Some(self.entries.len() - 1);
     }
 
     /// Запомнить место чтения на текущей странице — чтобы вернуться сюда,
     /// когда читатель пойдёт «назад» или «вперёд». Зовётся перед самим шагом,
-    /// пока `at` ещё указывает на покидаемую страницу.
+    /// пока `at` ещё указывает на покидаемую страницу. Место начальной
+    /// страницы не помним: она короткая, и её собирают заново.
     pub fn set_place(&mut self, place: i32) {
-        if let Some(slot) = self.places.get_mut(self.at) {
+        if let Some(slot) = self.at.and_then(|at| self.places.get_mut(at)) {
             *slot = place;
         }
     }
@@ -82,31 +98,40 @@ impl History {
     /// Место чтения на текущей странице, если оно было запомнено; иначе ноль
     /// — начало страницы.
     pub fn place(&self) -> i32 {
-        self.places.get(self.at).copied().unwrap_or(0)
+        self.at
+            .and_then(|at| self.places.get(at))
+            .copied()
+            .unwrap_or(0)
     }
 
+    /// Открыта страница — значит, за ней есть куда вернуться: хотя бы
+    /// на начальную.
     pub fn can_go_back(&self) -> bool {
-        self.at > 0
+        self.at.is_some()
     }
 
     pub fn can_go_forward(&self) -> bool {
-        self.at + 1 < self.entries.len()
+        self.at.map_or(0, |at| at + 1) < self.entries.len()
     }
 
-    pub fn back(&mut self) -> Option<&Address> {
-        if !self.can_go_back() {
-            return None;
+    /// Шаг назад. `false` — идти некуда; куда пришли, говорит `current`:
+    /// `None` там — начальная страница.
+    pub fn back(&mut self) -> bool {
+        match self.at {
+            Some(0) => self.at = None,
+            Some(at) => self.at = Some(at - 1),
+            None => return false,
         }
-        self.at -= 1;
-        self.current()
+        true
     }
 
-    pub fn forward(&mut self) -> Option<&Address> {
+    /// Шаг вперёд, с начальной страницы — на первую запись пути.
+    pub fn forward(&mut self) -> bool {
         if !self.can_go_forward() {
-            return None;
+            return false;
         }
-        self.at += 1;
-        self.current()
+        self.at = Some(self.at.map_or(0, |at| at + 1));
+        true
     }
 }
 
@@ -122,8 +147,8 @@ mod tests {
     fn empty_history_goes_nowhere() {
         let mut history = History::new();
         assert!(history.current().is_none());
-        assert!(history.back().is_none());
-        assert!(history.forward().is_none());
+        assert!(!history.back());
+        assert!(!history.forward());
     }
 
     #[test]
@@ -133,10 +158,46 @@ mod tests {
         history.visit(web("https://b.test/"));
         history.visit(web("https://c.test/"));
 
-        assert_eq!(history.back(), Some(&web("https://b.test/")));
-        assert_eq!(history.back(), Some(&web("https://a.test/")));
+        assert!(history.back());
+        assert_eq!(history.current(), Some(&web("https://b.test/")));
+        assert!(history.back());
+        assert_eq!(history.current(), Some(&web("https://a.test/")));
+        assert!(history.forward());
+        assert_eq!(history.current(), Some(&web("https://b.test/")));
+    }
+
+    #[test]
+    fn the_first_page_goes_back_to_the_start_page() {
+        let mut history = History::new();
+        history.visit(web("https://a.test/"));
+        assert!(history.at_first());
+        assert!(history.can_go_back());
+
+        // Назад с первой страницы — на начальную, и оттуда уже некуда.
+        assert!(history.back());
+        assert!(history.current().is_none());
+        assert_eq!(history.at(), None);
         assert!(!history.can_go_back());
-        assert_eq!(history.forward(), Some(&web("https://b.test/")));
+        assert!(!history.back());
+
+        // Путь при этом цел: вперёд — снова на первую страницу.
+        assert!(history.can_go_forward());
+        assert!(history.forward());
+        assert_eq!(history.current(), Some(&web("https://a.test/")));
+    }
+
+    #[test]
+    fn a_page_opened_from_the_start_page_cuts_off_the_whole_path() {
+        let mut history = History::new();
+        history.visit(web("https://a.test/"));
+        history.visit(web("https://b.test/"));
+        history.back();
+        history.back();
+        history.visit(web("https://c.test/"));
+
+        assert_eq!(history.entries(), &[web("https://c.test/")]);
+        assert!(!history.can_go_forward());
+        assert!(history.at_first());
     }
 
     #[test]
@@ -149,7 +210,8 @@ mod tests {
 
         assert!(!history.can_go_forward());
         assert_eq!(history.current(), Some(&web("https://c.test/")));
-        assert_eq!(history.back(), Some(&web("https://a.test/")));
+        history.back();
+        assert_eq!(history.current(), Some(&web("https://a.test/")));
     }
 
     #[test]
@@ -162,13 +224,16 @@ mod tests {
         let mut history = History::restored(entries, 1);
         assert_eq!(history.current(), Some(&web("https://b.test/")));
         assert!(history.can_go_back() && history.can_go_forward());
-        assert_eq!(history.forward(), Some(&web("https://c.test/")));
+        history.forward();
+        assert_eq!(history.current(), Some(&web("https://c.test/")));
 
         // Место вне списка — не повод падать: файл сессии правят руками,
         // и он приезжает каким угодно.
         let short = History::restored(vec![web("https://a.test/")], 9);
         assert_eq!(short.current(), Some(&web("https://a.test/")));
-        assert!(History::restored(Vec::new(), 3).current().is_none());
+        let empty = History::restored(Vec::new(), 3);
+        assert!(empty.current().is_none());
+        assert!(!empty.can_go_back());
     }
 
     #[test]
@@ -178,7 +243,7 @@ mod tests {
         history.visit(web("https://b.test/"));
         history.back();
         assert_eq!(history.entries().len(), 2);
-        assert_eq!(history.at(), 0);
+        assert_eq!(history.at(), Some(0));
     }
 
     #[test]
@@ -195,6 +260,14 @@ mod tests {
         // Вперёд — место страницы b на месте.
         history.forward();
         assert_eq!(history.place(), 340);
+
+        // Начальная страница своего места не держит и чужого не затирает.
+        history.back();
+        history.back();
+        history.set_place(999);
+        assert_eq!(history.place(), 0);
+        history.forward();
+        assert_eq!(history.place(), 120);
     }
 
     #[test]
@@ -218,6 +291,7 @@ mod tests {
         let mut history = History::new();
         history.visit(web("https://a.test/"));
         history.visit(web("https://a.test/"));
-        assert!(!history.can_go_back());
+        assert_eq!(history.entries().len(), 1);
+        assert!(history.at_first());
     }
 }

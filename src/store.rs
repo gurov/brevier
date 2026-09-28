@@ -51,6 +51,15 @@ const KEEP: usize = 5000;
 /// а список, который надо читать.
 pub const HINTS: usize = 8;
 
+/// Сколько недавних страниц на начальной странице. Пять — это «где я был»,
+/// узнаваемое с одного взгляда; длиннее список уже читают, и для этого
+/// есть страница истории.
+pub const RECENT: usize = 5;
+
+/// Сколько знаков заголовка в строке недавнего. Блок обязан быть
+/// компактным: строка на страницу, а не абзац.
+const RECENT_TITLE: usize = 56;
+
 /// Один визит: когда, куда, что там было.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Visit {
@@ -305,6 +314,42 @@ impl Store {
                 where_it_is(path),
             ));
         }
+        out
+    }
+
+    /// Последние прочитанные страницы, свежие сверху, каждая по разу:
+    /// страница, открытая за вечер дважды, — одна строка, а не две.
+    pub fn recent(&self, count: usize) -> Vec<&Visit> {
+        let mut seen = HashSet::new();
+        self.visits
+            .iter()
+            .rev()
+            .filter(|visit| seen.insert(visit.address.as_str()))
+            .take(count)
+            .collect()
+    }
+
+    /// Недавнее для начальной страницы — markdown: пять страниц строкой
+    /// каждая и ссылка на всю историю последним пунктом того же списка.
+    /// Отдельным абзацем она отбивалась бы от списка пустой строкой, а блок
+    /// обязан быть компактным. Пусто, пока читать было нечего: на первом
+    /// запуске про историю говорить незачем, и пустого заголовка не будет.
+    pub fn recent_page(&self) -> String {
+        let recent = self.recent(RECENT);
+        if recent.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from("### Recently read\n\n");
+        for visit in recent {
+            let title = if visit.title.is_empty() {
+                &visit.address
+            } else {
+                &visit.title
+            };
+            let title = crate::outline::clip(title, RECENT_TITLE);
+            out.push_str(&format!("- {}\n", link(&title, &visit.address)));
+        }
+        out.push_str("- [All history…](brevier:history)\n");
         out
     }
 
@@ -1295,6 +1340,63 @@ mod tests {
                 .page()
                 .contains(r"[Rust 1.90 \[stable\]](https://example.test/)")
         );
+    }
+
+    #[test]
+    fn recent_pages_are_the_freshest_each_once() {
+        let path = temporary("recent");
+        let mut store = Store::at(&path);
+        for (url, title) in [
+            ("https://a.test/", "A"),
+            ("https://b.test/", "B"),
+            ("https://a.test/", "A again"),
+            ("https://c.test/", ""),
+            ("https://d.test/", "D"),
+            ("https://e.test/", "E"),
+            ("https://f.test/", "F"),
+        ] {
+            store.record(&web(url), title, 0);
+        }
+        let recent: Vec<&str> = store
+            .recent(RECENT)
+            .iter()
+            .map(|visit| visit.address.as_str())
+            .collect();
+        // Пять, свежие сверху, и `a` один раз — там, где его читали последним.
+        assert_eq!(
+            recent,
+            [
+                "https://f.test/",
+                "https://e.test/",
+                "https://d.test/",
+                "https://c.test/",
+                "https://a.test/"
+            ]
+        );
+
+        let page = store.recent_page();
+        assert!(page.starts_with("### Recently read\n\n- [F](https://f.test/)\n"));
+        // Без заголовка страница называется адресом.
+        assert!(page.contains("- [https://c.test/](https://c.test/)\n"));
+        assert!(page.contains("- [A again](https://a.test/)\n"));
+        assert!(!page.contains("https://b.test/"));
+        assert!(
+            page.ends_with("- [A again](https://a.test/)\n- [All history…](brevier:history)\n")
+        );
+    }
+
+    #[test]
+    fn recent_pages_are_one_line_each_and_absent_on_a_first_run() {
+        assert_eq!(Store::at(temporary("recent-none")).recent_page(), "");
+
+        let path = temporary("recent-long");
+        let mut store = Store::at(&path);
+        let long = "A title that goes on and on, far longer than one line of the list";
+        store.record(&web("https://long.test/"), long, 0);
+        let page = store.recent_page();
+        let line = page.lines().find(|line| line.starts_with("- ")).unwrap();
+        assert!(line.contains("…](https://long.test/)"), "{line}");
+        assert!(!line.contains(long));
     }
 
     #[test]

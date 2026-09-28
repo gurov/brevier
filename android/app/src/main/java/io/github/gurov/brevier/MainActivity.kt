@@ -579,9 +579,6 @@ class MainActivity : Activity(), ArticleHost {
     /** Страница-сообщение, собранная здесь: для загрузки ядро не нужно. */
     private fun message(text: String) = Page(text, listOf(Run(0, text.length, listOf("h2"))), emptyList(), emptyList(), emptyList(), emptyList())
 
-    /** Начальная страница: у ядра, один раз на запуск. */
-    private val intro by lazy { Core.intro() }
-
     /**
      * Нарисовать вкладку тем, что у неё есть: документом, загрузкой или
      * начальной страницей. Место — отложенное (`resume`), иначе решётка
@@ -604,6 +601,8 @@ class MainActivity : Activity(), ArticleHost {
             }
             tab.loading || tab.pending -> view.show(message("Loading" + ".".repeat(tab.dots)), metrics(), dark, eager = false)
             tab.current() == null -> {
+                // У ядра, на каждый показ: наверху недавнее из журнала, а он растёт.
+                val intro = Core.intro()
                 tab.title = intro.optString("title", "Brevier")
                 view.show(Page.of(intro.getJSONObject("page")), metrics(), dark, eager = false)
             }
@@ -655,10 +654,27 @@ class MainActivity : Activity(), ArticleHost {
         val tab = currentTab() ?: return
         val view = tab.view ?: return
         if (tab.shown != null) tab.setPlace(view.place())
-        val address = (if (backwards) tab.back() else tab.forward()) ?: return
+        val moved = if (backwards) tab.back() else tab.forward()
+        if (!moved) return
+        // Назад с первой страницы — на начальную: она корень истории вкладки.
+        val address = tab.current() ?: return showStart(tab)
         val place = tab.place()
         tab.resume = if (place > 0) place else null
         open(tab, address, remember = false)
+    }
+
+    /**
+     * Вернуть вкладку на начальную страницу (#26). Загрузку, если она шла,
+     * бросаем: её ответ показывать уже некуда.
+     */
+    private fun showStart(tab: Tab) {
+        tab.generation++
+        tab.loading = false
+        tab.resume = null
+        tab.shown = null
+        render(tab)
+        sync()
+        rememberSession()
     }
 
     /**
@@ -699,6 +715,12 @@ class MainActivity : Activity(), ArticleHost {
         val shown = tab.shown
         back.isEnabled = tab.canGoBack()
         back.alpha = if (tab.canGoBack()) 1f else 0.35f
+        // Стрелка остаётся стрелкой и на первой странице; куда она ведёт — в подписи.
+        val backSays = if (tab.atFirst()) "Back to the start page" else "Back"
+        if (back.contentDescription != backSays) {
+            back.contentDescription = backSays
+            back.tooltip(backSays)
+        }
         setAddress(tab.current() ?: "")
         val insecureNow = (tab.current() ?: "").startsWith("http://")
         insecure.visibility = if (insecureNow) View.VISIBLE else View.GONE
@@ -1022,6 +1044,8 @@ class MainActivity : Activity(), ArticleHost {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Forget") { _, _ ->
                 Core.forget()
+                // Недавнее на начальной странице — тот же журнал: забытое не должно остаться на экране.
+                currentTab()?.takeIf { it.current() == null && !it.loading && !it.pending }?.let { render(it) }
                 notice("The list of pages you have read is empty now")
             }
             .show()

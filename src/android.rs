@@ -338,12 +338,14 @@ fn typography() -> String {
     )
 }
 
-/// Начальная страница: тот же тракт, что у статьи.
+/// Начальная страница: тот же тракт, что у статьи. Недавнее в ней — из
+/// журнала на момент вызова, поэтому Kotlin спрашивает её на каждый показ.
 fn intro() -> String {
+    let markdown = crate::intro::page(&core().store, true);
     let document = Document {
         address: Address::Web(String::new()),
         title: crate::intro::TITLE.to_owned(),
-        markdown: crate::intro::TOUCH.to_owned(),
+        markdown,
         kind: Kind::Article,
         served: false,
         site: Vec::new(),

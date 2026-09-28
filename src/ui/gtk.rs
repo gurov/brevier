@@ -1965,6 +1965,18 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         // Копии страниц — такой же след прочитанного, как журнал. Память
         // вкладок не трогаем: открытые вкладки остаются, как и обещано.
         brevier::cache::Cache::open().forget();
+        // А вот недавнее на начальных страницах — тот же журнал, и оставить
+        // его на экране значило бы не забыть.
+        let starts: Vec<(u64, gtk::TextView)> = state
+            .borrow()
+            .tabs
+            .iter()
+            .filter(|tab| !tab.settings && !tab.pending && tab.history.current().is_none())
+            .map(|tab| (tab.id, tab.view.clone()))
+            .collect();
+        for (id, view) in starts {
+            show_intro(&ui, &state, id, &view);
+        }
         notice(&ui, "The list of pages you have read is empty now");
     });
 }
@@ -2009,7 +2021,10 @@ fn remember_session(ui: &Ui, state: &Rc<RefCell<State>>) {
         .filter(|tab| !tab.settings)
         .map(|tab| store::Opened {
             addresses: tab.history.entries().iter().map(Address::display).collect(),
-            at: tab.history.at(),
+            // Вкладка, оставленная на начальной странице, возвращается
+            // на первую страницу своего пути: пустых вкладок сессия
+            // не поднимает, и путь пропал бы вместе с ней.
+            at: tab.history.at().unwrap_or(0),
             // Место, которое ещё не применили, старше того, что показывает
             // виджет: у вкладки, которая пока не грузилась или не была
             // на экране, он честно отвечает «ноль», и этим нулём мы бы
@@ -2311,21 +2326,50 @@ fn step(ui: &Ui, state: &Rc<RefCell<State>>, backwards: bool) {
         // указывает на неё, чтобы вернуть его сюда шагом обратно.
         let here = top_of(&tab.view);
         tab.history.set_place(here);
-        let address = if backwards {
-            tab.history.back().cloned()
+        let moved = if backwards {
+            tab.history.back()
         } else {
-            tab.history.forward().cloned()
+            tab.history.forward()
         };
         // Куда прокрутить страницу назначения, когда она приедет.
         let place = tab.history.place();
-        address.map(|address| (tab.id, address, place))
+        moved.then(|| (tab.id, tab.history.current().cloned(), place))
     };
-    if let Some((id, address, place)) = step {
-        if let Some(tab) = state.borrow_mut().find(id) {
-            tab.resume = (place > 0).then_some(place);
-        }
-        open(ui, state, id, address, false);
+    let Some((id, address, place)) = step else {
+        return;
+    };
+    // Назад с первой страницы — на начальную: она корень истории вкладки.
+    let Some(address) = address else {
+        show_start(ui, state, id);
+        return;
+    };
+    if let Some(tab) = state.borrow_mut().find(id) {
+        tab.resume = (place > 0).then_some(place);
     }
+    open(ui, state, id, address, false);
+}
+
+/// Вернуть вкладку на начальную страницу (#26). Загрузку, если она шла,
+/// бросаем — показывать её ответ уже некуда; полку очищаем от навигации
+/// и лент прежней страницы. Точки входа проекта не трогаем: они вкладки,
+/// а не страницы, и шаг «вперёд» в тот же репозиторий их не повторит.
+fn show_start(ui: &Ui, state: &Rc<RefCell<State>>, id: u64) {
+    let view = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else { return };
+        tab.generation += 1;
+        tab.loading = false;
+        tab.resume = None;
+        tab.document = None;
+        tab.shots.clear();
+        tab.site.clear();
+        tab.feeds.clear();
+        tab.label.set_text("New tab");
+        tab.label.set_tooltip_text(None);
+        tab.view.clone()
+    };
+    show_intro(ui, state, id, &view);
+    remember_session(ui, state);
 }
 
 /// Открыть адрес в названной вкладке.
@@ -2578,7 +2622,18 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     let index = index.or_else(|| ui.notebook.current_page().map(|page| page as usize));
     let Some(index) = index else { return };
 
-    let (address, here, can_back, can_forward, marks, entries, site, feeds, title, kept) = {
+    let (
+        address,
+        here,
+        (can_back, back_home),
+        can_forward,
+        marks,
+        entries,
+        site,
+        feeds,
+        title,
+        kept,
+    ) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.get(index) else {
             return;
@@ -2595,10 +2650,16 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
                 .map(Address::display)
                 .unwrap_or_default(),
             tab.history.current().and_then(directory_row),
-            tab.history.can_go_back(),
+            (tab.history.can_go_back(), tab.history.at_first()),
             tab.history.can_go_forward(),
             tab.marks.clone(),
-            tab.entries.clone(),
+            // Точки входа — свойство вкладки, но уводят они с открытой
+            // страницы проекта; на начальной их показывать не к чему.
+            if open_now.is_some() {
+                tab.entries.clone()
+            } else {
+                Vec::new()
+            },
             tab.site.clone(),
             tab.feeds.clone(),
             tab.label.text().to_string(),
@@ -2610,6 +2671,13 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
 
     set_address(ui, &address);
     ui.back.set_sensitive(can_back);
+    // Стрелка остаётся стрелкой и на первой странице вкладки; куда она
+    // теперь ведёт, говорит подсказка.
+    ui.back.set_tooltip_text(Some(if back_home {
+        "Back to the start page"
+    } else {
+        "Back"
+    }));
     ui.forward.set_sensitive(can_forward);
 
     // Ступень видна, только когда она не «как задумано»: кнопка, всегда
@@ -3285,11 +3353,13 @@ fn show_message(view: &gtk::TextView, headline: &str, detail: &str, offer: Optio
 /// Начальная страница. Рисуется тем же трактом, что и статья: текст в ядре,
 /// разметка markdown, рендерер общий. Историю и адресную строку не трогает —
 /// это не открытая страница, а пустая вкладка, которой есть что сказать.
+/// Недавнее в ней берётся из журнала на каждый показ.
 fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView) {
+    let markdown = brevier::intro::page(&state.borrow().store, false);
     let document = Document {
         address: Address::Web(String::new()),
         title: brevier::intro::TITLE.to_owned(),
-        markdown: brevier::intro::MARKDOWN.to_owned(),
+        markdown,
         kind: brevier::Kind::Article,
         served: false,
         site: Vec::new(),
@@ -3347,6 +3417,22 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             ("size-points", &body),
             ("pixels-inside-wrap", &extra),
             ("pixels-below-lines", &(extra * 2)),
+        ],
+    );
+    // Строфа (#21): каждая строка стиха — свой абзац буфера, и воздух между
+    // ними тот же, что между строками прозы внутри абзаца. Длинная строка,
+    // не влезшая в меру, переносится с висячим отступом — так перенос
+    // не спутать с новой строкой стиха. Строфы разводит пустая строка,
+    // её ставит модель страницы.
+    style(
+        buffer,
+        "verse",
+        &[
+            ("family", &BODY_FAMILY),
+            ("size-points", &body),
+            ("pixels-inside-wrap", &extra),
+            ("pixels-below-lines", &extra),
+            ("indent", &px(-f64::from(HANG))),
         ],
     );
 

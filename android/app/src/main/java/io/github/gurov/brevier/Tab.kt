@@ -6,10 +6,13 @@ package io.github.gurov.brevier
  * История — та же модель, что `history.rs` в ядре: переход с середины
  * обрубает всё, что было впереди, повтор текущего адреса записью не считается,
  * и у каждой записи своё место чтения — смещение в тексте, а не пиксели.
+ * Корень истории — начальная страница: «назад» с первой страницы ведёт на неё.
  */
 class Tab(val id: Long) {
     val addresses = mutableListOf<String>()
     private val places = mutableListOf<Int>()
+
+    /** Место в пути; `-1` — начальная страница, перед первой записью. */
     var at = -1
         private set
 
@@ -55,12 +58,11 @@ class Tab(val id: Long) {
 
     fun current(): String? = addresses.getOrNull(at)
 
+    /** Переход обрубает всё впереди; с начальной страницы впереди весь путь. */
     fun visit(address: String) {
         if (current() == address) return
-        if (addresses.isNotEmpty()) {
-            while (addresses.size > at + 1) addresses.removeAt(addresses.size - 1)
-            while (places.size > at + 1) places.removeAt(places.size - 1)
-        }
+        while (addresses.size > at + 1) addresses.removeAt(addresses.size - 1)
+        while (places.size > at + 1) places.removeAt(places.size - 1)
         addresses += address
         places += 0
         at = addresses.size - 1
@@ -72,7 +74,7 @@ class Tab(val id: Long) {
         places.clear()
         addresses += path
         repeat(path.size) { places += 0 }
-        this.at = at.coerceIn(0, maxOf(0, path.size - 1))
+        this.at = if (path.isEmpty()) -1 else at.coerceIn(0, path.size - 1)
     }
 
     fun setPlace(place: Int) {
@@ -81,19 +83,24 @@ class Tab(val id: Long) {
 
     fun place(): Int = places.getOrNull(at) ?: 0
 
-    fun canGoBack() = at > 0
+    /** Открыта страница — значит, за ней есть куда вернуться: хотя бы на начальную. */
+    fun canGoBack() = current() != null
     fun canGoForward() = at + 1 < addresses.size
 
-    fun back(): String? {
-        if (!canGoBack()) return null
+    /** На первой странице пути: «назад» отсюда — на начальную. */
+    fun atFirst() = at == 0 && addresses.isNotEmpty()
+
+    /** Шаг назад; куда пришли, говорит `current()`: `null` — начальная страница. */
+    fun back(): Boolean {
+        if (!canGoBack()) return false
         at -= 1
-        return current()
+        return true
     }
 
-    fun forward(): String? {
-        if (!canGoForward()) return null
+    fun forward(): Boolean {
+        if (!canGoForward()) return false
         at += 1
-        return current()
+        return true
     }
 
     /** Выбросить из кэша страницы, до которых по истории больше не дойти. */

@@ -119,6 +119,12 @@ pub fn describe(error: &Error) -> Failure {
             format!("It is a feed, but broken beyond what Brevier repairs: {e}."),
             true,
         ),
+        Error::SearchChallenge => failure(
+            "The search engine wants proof you are human",
+            "DuckDuckGo shows a puzzle instead of results to searches it takes for a bot — usually after several in a row. Brevier does not solve puzzles: open the search in your browser, or try again in a few minutes."
+                .to_owned(),
+            true,
+        ),
         Error::Media(what) => failure(
             "The image cannot be shown",
             format!("{what}. The text of the article is not affected."),

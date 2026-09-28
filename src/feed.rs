@@ -937,7 +937,7 @@ fn body_markdown(entry: &Entry, page: &str) -> Option<String> {
 
 /// Экранировать то, что markdown принял бы за разметку внутри строки.
 /// Текст ленты пишет не наш код: звёздочка в заголовке — звёздочка.
-fn inline(text: &str) -> String {
+pub(crate) fn inline(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 8);
     for ch in text.chars() {
         if matches!(
@@ -953,7 +953,7 @@ fn inline(text: &str) -> String {
 
 /// То же для абзаца: вдобавок начало строки не должно стать списком,
 /// цитатой или заголовком.
-fn block(text: &str) -> String {
+pub(crate) fn block(text: &str) -> String {
     let text = inline(text);
     let digits = text.chars().take_while(char::is_ascii_digit).count();
     if digits > 0 && matches!(text[digits..].chars().next(), Some('.' | ')')) {
@@ -966,7 +966,7 @@ fn block(text: &str) -> String {
 }
 
 /// Текст заголовка: `#` в конце ATX-заголовок съел бы как закрывающий.
-fn heading(text: &str) -> String {
+pub(crate) fn heading(text: &str) -> String {
     let text = block(text);
     match text.strip_suffix('#') {
         Some(rest) => format!("{rest}\\#"),
@@ -975,7 +975,7 @@ fn heading(text: &str) -> String {
 }
 
 /// Адрес ссылки: в угловых скобках, если в нём то, что оборвало бы ссылку.
-fn destination(url: &str) -> String {
+pub(crate) fn destination(url: &str) -> String {
     if url.contains(['(', ')', ' ', '<', '>']) {
         format!("<{}>", url.replace('<', "%3C").replace('>', "%3E"))
     } else {

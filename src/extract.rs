@@ -144,6 +144,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     unlazy(&doc);
     deicon(&doc);
     keep_lang(&doc);
+    keep_verse_class(&doc);
     unglue(&doc);
     unprint(&doc);
     unbutton(&doc);
@@ -184,6 +185,15 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     } else {
         content_html
     };
+
+    // Стих — после того, как Readability выбрала область статьи, не до
+    // него (#21). Отдать ей готовые `<p>` заранее значит подсунуть чужой
+    // счёт: рядом со случайными тегами `<v>`/`<z>`, которые сами по себе
+    // почти не весят, свежие абзацы перетягивают кандидата на себя —
+    // ровно так на ilibrary.ru пропадало целиком «Предисловие» перед
+    // стихом, лежащее в соседнем узле дерева. Стих поэтому собирается
+    // здесь, уже в границах, которые определила сама Readability.
+    let content_html = verse_html(&content_html);
 
     // Заглавная картинка — последней добавкой и только в статью без единой
     // своей: в ленте карточки несут миниатюры сами.
@@ -1134,6 +1144,30 @@ fn keep_lang(doc: &Document) {
     }
 }
 
+/// Стих, размеченный классом, — в атрибут, который переживёт извлечение
+/// (#21).
+///
+/// Повод тот же, что у [`keep_lang`]: Readability снимает `class` с итоговой
+/// статьи, и после неё признак `verse`/`stanza`/`poem` уже не прочесть.
+/// Атрибуты она не трогает — кладём признак в `data-verse`, а собирает
+/// строки [`verse`] уже после извлечения. Тег не меняем: у `div` и `p`
+/// в счёте Readability свои правила, и переименование сдвинуло бы выбор.
+fn keep_verse_class(doc: &Document) {
+    for class in VERSE_CLASSES {
+        for node in doc.select(&format!(".{class}")).nodes() {
+            if has_word_class(node, class) {
+                node.set_attr(VERSE_ATTR, class);
+            }
+        }
+    }
+}
+
+/// Классы стиха: строка, строфа, стихотворение.
+const VERSE_CLASSES: [&str; 3] = ["verse", "stanza", "poem"];
+
+/// Куда [`keep_verse_class`] кладёт класс стиха.
+const VERSE_ATTR: &str = "data-verse";
+
 /// Язык у самого блока или у ближайшей обёртки.
 fn nearest_language(code: &NodeRef) -> Option<String> {
     std::iter::successors(Some(*code), NodeRef::parent)
@@ -1544,6 +1578,231 @@ fn absolute(base: Option<&Url>, link: &str) -> Option<String> {
     }
 }
 
+/// Стих: строки, размеченные отдельным элементом каждая, — тегом или классом,
+/// не структурой абзацев (#21).
+///
+/// Многие русские электронные библиотеки сводят книгу из FictionBook (FB2)
+/// в HTML и оставляют имена FB2 как есть: `<v>` — строка, `<stanza>`/`<poem>`
+/// — строфа и стихотворение. Это не HTML-теги: парсер держит их как
+/// неизвестные элементы, и без разбора строки слипаются в одну — перевод
+/// строки между элементами для конвертера ничего не значит. Тот же смысл
+/// несут классы `verse`/`stanza`/`poem`; их до извлечения переносит
+/// в `data-verse` [`keep_verse_class`], потому что `class` Readability снимает.
+///
+/// Правило по форме, а не по хосту. Строфа становится абзацем с жёсткими
+/// переносами внутри — `page.rs` узнаёт в нём стих уже по этому знаку,
+/// тегов к тому времени нет. Строки без явной обёртки (ilibrary.ru: `<v>`
+/// подряд под `<z>`, вперемешку с пустыми `<o>`/`<c>`) собираются по
+/// соседству: подряд идущие строки — один абзац.
+///
+/// Работает над уже извлечённой статьёй, см. [`verse_html`].
+fn verse(doc: &Document) {
+    // Стихотворение — обёртка без своего смысла: развернуть на месте, чтобы
+    // строфы и голые строки внутри достались следующим шагам соседями.
+    for group in doc.select(&verse_selector("poem", "poem")).nodes() {
+        if !is_verse_kind(group, "poem", "poem") {
+            continue;
+        }
+        match group.first_child() {
+            Some(first) => first.unwrap_node(),
+            None => group.remove_from_parent(),
+        }
+    }
+
+    // Явная строфа: её строки идут в абзац с жёсткими переносами, и сам
+    // узел становится этим абзацем.
+    for stanza in doc.select(&verse_selector("stanza", "stanza")).nodes() {
+        if !is_verse_kind(stanza, "stanza", "stanza") {
+            continue;
+        }
+        join_verse(stanza);
+        stanza.remove_attr(VERSE_ATTR);
+        stanza.rename("p");
+    }
+
+    // Строки без обёртки: подряд идущие — один абзац. Строфы выше свои
+    // строки уже забрали, здесь остаются ничем не сгруппированные.
+    for run in verse_runs(doc) {
+        join_run(&run);
+    }
+}
+
+/// [`verse`] над уже извлечённым HTML статьи.
+///
+/// Именно после Readability, а не до: готовые `<p>` до извлечения —
+/// чужой счёт. Рядом с неизвестными `<v>`/`<z>`, которые почти ничего
+/// не весят, свежие абзацы перетягивали кандидата на себя, и на
+/// ilibrary.ru целиком пропадало «Предисловие» перед стихом, лежащее
+/// в соседнем узле дерева.
+fn verse_html(content: &str) -> String {
+    let article = Document::from(content.to_owned());
+    if article.select(&verse_selector("v", "verse")).is_empty()
+        && article
+            .select(&verse_selector("stanza", "stanza"))
+            .is_empty()
+        && article.select(&verse_selector("poem", "poem")).is_empty()
+    {
+        return content.to_owned();
+    }
+    verse(&article);
+    match article.select("#readability-page-1").nodes().first() {
+        Some(node) => node.html().to_string(),
+        None => article.select("body").inner_html().to_string(),
+    }
+}
+
+/// Селектор стиха одного рода: имя FictionBook либо метка [`keep_verse_class`].
+fn verse_selector(name: &str, class: &str) -> String {
+    format!("{name}, [{VERSE_ATTR}=\"{class}\"]")
+}
+
+/// Узел — стих этого рода: по имени FictionBook (html5ever приводит имена
+/// к нижнему регистру) либо по метке класса.
+fn is_verse_kind(node: &NodeRef, name: &str, class: &str) -> bool {
+    node.node_name().is_some_and(|tag| tag.as_ref() == name)
+        || node
+            .attr(VERSE_ATTR)
+            .is_some_and(|value| value.as_ref() == class)
+}
+
+/// Строка стиха: `<v>` либо класс `verse`.
+fn is_verse_line(node: &NodeRef) -> bool {
+    is_verse_kind(node, "v", "verse")
+}
+
+/// Класс несёт слово `word` целиком, а не как часть другого имени:
+/// `class="poem intro"` подходит под `poem`, `class="poem-outer"` — нет.
+fn has_word_class(node: &NodeRef, word: &str) -> bool {
+    node.class().is_some_and(|class| {
+        class
+            .split_whitespace()
+            .any(|c| c.eq_ignore_ascii_case(word))
+    })
+}
+
+/// Узел ничего не несёт сам по себе: пустой текст, комментарий или
+/// элемент без текста (`<o>`/`<c>` у ilibrary.ru). Между строками стиха
+/// такие узлы выбрасываются вместе со строками. Картинка текста не несёт,
+/// но значима — её не трогаем.
+fn is_insignificant(node: &NodeRef) -> bool {
+    if node.is_comment() {
+        return true;
+    }
+    if node.is_text() {
+        return node.text().trim().is_empty();
+    }
+    node.is_element()
+        && !is_verse_line(node)
+        && squeeze(&node.text()).is_empty()
+        && !node.is("img, picture, svg, video, iframe, object")
+        && !node
+            .descendants()
+            .iter()
+            .any(|inner| inner.is("img, picture, svg"))
+}
+
+/// Склеить прямых детей строфы в её собственный HTML: строки — их
+/// содержимым (с вложенной разметкой вроде `<i>он</i>`), жёстким переносом
+/// между ними; незначимое выбрасывается; что-то третье (проза внутри
+/// строфы) остаётся как есть, своей строкой.
+fn join_verse(container: &NodeRef) {
+    let mut lines: Vec<String> = Vec::new();
+    for child in container.children() {
+        if is_verse_line(&child) {
+            lines.push(child.inner_html().to_string());
+        } else if !is_insignificant(&child) {
+            lines.push(child.html().to_string());
+        }
+    }
+    container.set_html(lines.join("<br>"));
+}
+
+/// Ряды подряд идущих строк без обёртки строфы: между строками ряда лежат
+/// только незначимые узлы. Что-то весомое между ними — проза, картинка —
+/// разводит ряды.
+fn verse_runs(doc: &Document) -> Vec<Vec<NodeRef<'_>>> {
+    let mut runs: Vec<Vec<NodeRef>> = Vec::new();
+    for line in doc
+        .select(&verse_selector("v", "verse"))
+        .nodes()
+        .iter()
+        .copied()
+    {
+        match runs.last_mut() {
+            Some(run)
+                if run
+                    .last()
+                    .is_some_and(|previous| directly_follows(previous, &line)) =>
+            {
+                run.push(line)
+            }
+            _ => runs.push(vec![line]),
+        }
+    }
+    runs
+}
+
+/// `next` идёт сразу за `prev` у того же родителя, и между ними только
+/// незначимые узлы.
+fn directly_follows(prev: &NodeRef, next: &NodeRef) -> bool {
+    let mut cursor = prev.next_sibling();
+    while let Some(node) = cursor {
+        if node.id == next.id {
+            return true;
+        }
+        if !is_insignificant(&node) {
+            return false;
+        }
+        cursor = node.next_sibling();
+    }
+    false
+}
+
+/// Собрать ряд строк в один абзац на месте первой строки: содержимое —
+/// строки через жёсткий перенос. Остальные строки ряда и всё незначимое
+/// между ними и по краям ряда (`<o>`, `<c>`) уходят из дерева. Если ряд
+/// уже стоит внутри абзаца (Readability превращает `<div>` из одних
+/// строк в `<p>`), вложенного абзаца не заводим — строка становится `<span>`.
+fn join_run(run: &[NodeRef]) {
+    let Some((first, rest)) = run.split_first() else {
+        return;
+    };
+    let last = rest.last().copied().unwrap_or(*first);
+    let lines: Vec<String> = run
+        .iter()
+        .map(|line| line.inner_html().to_string())
+        .collect();
+
+    let mut after = first.next_sibling();
+    if first.id != last.id {
+        while let Some(current) = after {
+            after = current.next_sibling();
+            let reached_last = current.id == last.id;
+            current.remove_from_parent();
+            if reached_last {
+                break;
+            }
+        }
+    }
+    while let Some(current) = after.filter(is_insignificant) {
+        after = current.next_sibling();
+        current.remove_from_parent();
+    }
+    let mut before = first.prev_sibling();
+    while let Some(current) = before.filter(is_insignificant) {
+        before = current.prev_sibling();
+        current.remove_from_parent();
+    }
+
+    let inside_p = first
+        .parent()
+        .and_then(|parent| parent.node_name())
+        .is_some_and(|name| name.as_ref() == "p");
+    first.set_html(lines.join("<br>"));
+    first.remove_attr(VERSE_ATTR);
+    first.rename(if inside_p { "span" } else { "p" });
+}
+
 /// Снять подсказку `loading="lazy"` с картинок, у которых адрес и так на месте.
 ///
 /// `loading` — подсказка браузеру, когда качать, а не признак подменённого
@@ -1640,6 +1899,122 @@ mod tests {
             !article
                 .content_html
                 .contains(r#"src="https://example.org/wiki/File:Portrait.jpg""#)
+        );
+    }
+
+    /// Строки FB2 без обёртки строфы (ilibrary.ru): `<v>` подряд под `<z>`,
+    /// вперемешку с пустыми `<o>`/`<c>` — те сайт ставит сам, и в тексте
+    /// от них ничего не остаётся.
+    #[test]
+    fn bare_verse_lines_break_without_a_stanza_wrapper() {
+        let page = format!(
+            "<html><body><article><h1>Медный всадник</h1>\
+             <p>{TEXT}</p>\
+             <z><o></o><v>На берегу пустынных волн</v><c></c>\n\
+             <v>Стоял <i>он</i>, дум великих полн,</v><c></c>\n\
+             <v>И вдаль глядел. Пред ним широко</v><c></c></z>\
+             </article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/a").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("На берегу пустынных волн<br>Стоял <i>он</i>, дум великих полн,<br>И вдаль глядел. Пред ним широко"),
+            "{}",
+            article.content_html
+        );
+        // Ни `<v>`, ни его обвязка (`<z>`, `<o>`, `<c>`) наружу не идут.
+        assert!(!article.content_html.contains("<v>"));
+        assert!(!article.content_html.contains("<o>"));
+        assert!(!article.content_html.contains("<c>"));
+    }
+
+    /// `<stanza>`/`<poem>` — явная разметка FictionBook: строфы становятся
+    /// разными абзацами, чтобы между ними в markdown вышла пустая строка.
+    #[test]
+    fn explicit_stanzas_become_separate_paragraphs() {
+        let page = format!(
+            "<html><body><article><h1>Стихи</h1>\
+             <p>{TEXT}</p>\
+             <poem>\
+             <stanza><v>Первая строка первой строфы</v><v>Вторая строка первой строфы</v></stanza>\
+             <stanza><v>Первая строка второй строфы</v><v>Вторая строка второй строфы</v></stanza>\
+             </poem>\
+             </article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/a").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("<p>Первая строка первой строфы<br>Вторая строка первой строфы</p>"),
+            "{}",
+            article.content_html
+        );
+        assert!(
+            article
+                .content_html
+                .contains("<p>Первая строка второй строфы<br>Вторая строка второй строфы</p>"),
+            "{}",
+            article.content_html
+        );
+        assert!(!article.content_html.contains("<poem"));
+        assert!(!article.content_html.contains("<stanza"));
+    }
+
+    /// Признак по форме годится и на классы, не только на имена тегов
+    /// FictionBook — так верстает Wikisource (`<div class="poem">`
+    /// с построчной разметкой `class="verse"`).
+    #[test]
+    fn verse_by_class_name_works_the_same_way() {
+        let page = format!(
+            "<html><body><article><h1>Стихи</h1>\
+             <p>{TEXT}</p>\
+             <div class=\"poem\">\
+             <div class=\"stanza\">\
+             <span class=\"verse\">Первая строка</span>\
+             <span class=\"verse\">Вторая строка</span>\
+             </div>\
+             </div>\
+             </article></body></html>"
+        );
+        let article = extract(&page, "https://example.org/a").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("Первая строка<br>Вторая строка"),
+            "{}",
+            article.content_html
+        );
+    }
+
+    /// Регрессия: строфа, ставшая полноценным абзацем, не должна перетягивать
+    /// на себя выбор Readability и ронять соседнюю прозу — эпиграф перед
+    /// стихотворением остаётся на месте (ilibrary.ru, «Предисловие» перед
+    /// «Медным всадником», см. #21).
+    #[test]
+    fn verse_does_not_starve_a_sibling_paragraph_of_the_readability_pick() {
+        let long_poem: String = (0..40)
+            .map(|n| format!("<v>Строка стихотворения номер {n} среди прочих</v>"))
+            .collect();
+        let page = format!(
+            "<html><body>\
+             <article>\
+             <h2>Предисловие</h2>\
+             <p>{TEXT}</p>\
+             <div id=\"pmt1\"><h2>Вступление</h2><z>{long_poem}</z></div>\
+             </article>\
+             </body></html>"
+        );
+        let article = extract(&page, "https://example.org/a").unwrap();
+        assert!(
+            article.content_html.contains("Кеннет Эрроу"),
+            "эпиграф выпал: {}",
+            article.content_html
+        );
+        assert!(
+            article
+                .content_html
+                .contains("Строка стихотворения номер 0")
         );
     }
 

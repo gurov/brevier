@@ -90,6 +90,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.0" date="2026-09-28" type="development">
+      <description>
+        <p>Text typed in the address bar that is not an address is a search:
+          the results come back as a list of links. A poem marked line by line
+          keeps its lines and stanzas, and a book scanned line by line reads as
+          paragraphs. A new tab shows the pages read last, and Back on a tab's
+          first page leads there. A very long page opens at once on the
+          phone.</p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-09-26" type="development">
       <description>
         <p>The text keeps to its measure: a long image description or a word

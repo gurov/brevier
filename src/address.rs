@@ -306,14 +306,35 @@ pub fn parse(input: &str) -> Result<Address, Error> {
         return Err(Error::BadUrl(String::new()));
     }
 
-    if let Some(rest) = text.strip_prefix("gh:") {
-        return shorthand(RepoHost::GitHub, rest);
-    }
-    if let Some(rest) = text.strip_prefix("gl:") {
-        return shorthand(RepoHost::GitLab, rest);
+    // `?` впереди — поиск, что бы ни шло дальше: так ищут и то, что само
+    // похоже на адрес («?danluu.com»).
+    if let Some(query) = text.strip_prefix('?') {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(Error::BadUrl(text.to_owned()));
+        }
+        return Ok(search(query));
     }
 
-    if let Some((scheme, rest)) = split_scheme(text) {
+    let spaced = text.contains(char::is_whitespace);
+    if !spaced {
+        if let Some(rest) = text.strip_prefix("gh:") {
+            return shorthand(RepoHost::GitHub, rest);
+        }
+        if let Some(rest) = text.strip_prefix("gl:") {
+            return shorthand(RepoHost::GitLab, rest);
+        }
+    }
+
+    if let Some((scheme, rest)) = split_scheme(text)
+        && (!spaced || KNOWN_SCHEMES.contains(&scheme))
+    {
+        // `имя:порт` — не схема, а хост в локальной сети или у себя
+        // на машине: dev-сервер, NAS. Туда ходят по http.
+        if is_port(rest) {
+            let url = format!("http://{text}");
+            return Ok(from_url(&url, text));
+        }
         return match scheme {
             "http" | "https" => Ok(from_url(text, rest)),
             // `feed:` — старая схема ссылок «подписаться»: `feed://host/path`
@@ -348,13 +369,65 @@ pub fn parse(input: &str) -> Result<Address, Error> {
         return Ok(Address::File(PathBuf::from(text)));
     }
 
-    // Голый домен: человек печатает «danluu.com», а не «https://danluu.com».
-    if text.contains('.') && !text.contains(char::is_whitespace) {
-        let url = format!("https://{text}");
-        return Ok(from_url(&url, text));
+    if !spaced {
+        // Своя машина — по http: у dev-сервера сертификата нет.
+        let host = text.split(['/', '?', '#']).next().unwrap_or(text);
+        if host.eq_ignore_ascii_case("localhost") {
+            let url = format!("http://{text}");
+            return Ok(from_url(&url, text));
+        }
+        // Голый домен: человек печатает «danluu.com», а не «https://danluu.com».
+        if is_domain(host) {
+            let url = format!("https://{text}");
+            return Ok(from_url(&url, text));
+        }
     }
 
-    Err(Error::BadUrl(text.to_owned()))
+    // Не адрес — значит, запрос (#25): так ведёт себя любой браузер,
+    // и отвечать на слова «это не адрес» значило бы бросить читателя.
+    Ok(search(text))
+}
+
+/// Схемы, которые мы открываем. Незнакомая схема с пробелами после неё —
+/// это текст («rust: borrow checker»), а не адрес.
+const KNOWN_SCHEMES: [&str; 5] = ["http", "https", "feed", "file", "brevier"];
+
+/// Адрес выдачи поисковика по запросу.
+fn search(query: &str) -> Address {
+    Address::Web(crate::hosts::search_url(query))
+}
+
+/// После двоеточия — порт: цифры, а за ними конец или путь.
+fn is_port(rest: &str) -> bool {
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    digits > 0
+        && digits <= 5
+        && matches!(rest[digits..].chars().next(), None | Some('/' | '?' | '#'))
+}
+
+/// Похоже на имя хоста в вебе: через точку, и последнее звено — буквенный
+/// домен верхнего уровня, либо это IPv4. «3.14» и «e.g.» доменами не считаем:
+/// лучше найти их поиском, чем стучаться в несуществующий хост.
+fn is_domain(host: &str) -> bool {
+    let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+    let host = host.split(':').next().unwrap_or(host).trim_end_matches('.');
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|label| label.is_empty()) {
+        return false;
+    }
+    let ipv4 = labels.len() == 4
+        && labels
+            .iter()
+            .all(|label| label.len() <= 3 && label.chars().all(|c| c.is_ascii_digit()));
+    let tld = labels.last().copied().unwrap_or_default();
+    let named =
+        tld.chars().count() >= 2 && tld.chars().all(char::is_alphabetic) || tld.starts_with("xn--");
+    let clean = labels.iter().all(|label| {
+        label
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    });
+    ipv4 || (named && clean)
 }
 
 fn shorthand(host: RepoHost, rest: &str) -> Result<Address, Error> {
@@ -716,8 +789,56 @@ mod tests {
     }
 
     #[test]
-    fn nonsense_is_not_an_address() {
+    fn nothing_is_not_an_address() {
         assert!(parse("").is_err());
-        assert!(parse("что почитать").is_err());
+        assert!(parse("   ").is_err());
+        assert!(parse("?").is_err());
+    }
+
+    /// Не адрес — запрос (#25).
+    #[test]
+    fn words_are_a_search() {
+        let searched = |text: &str| match parse(text) {
+            Ok(Address::Web(url)) => crate::hosts::search_query(&url),
+            _ => None,
+        };
+        assert_eq!(searched("что почитать").as_deref(), Some("что почитать"));
+        assert_eq!(searched("rust").as_deref(), Some("rust"));
+        assert_eq!(
+            searched("rust: borrow checker").as_deref(),
+            Some("rust: borrow checker")
+        );
+        assert_eq!(searched("3.14").as_deref(), Some("3.14"));
+        assert_eq!(searched("e.g.").as_deref(), Some("e.g."));
+        assert_eq!(searched("what is rust?").as_deref(), Some("what is rust?"));
+        // `?` впереди ищет и то, что само похоже на адрес.
+        assert_eq!(searched("?danluu.com").as_deref(), Some("danluu.com"));
+        assert_eq!(searched(" ? gh:o/n ").as_deref(), Some("gh:o/n"));
+    }
+
+    #[test]
+    fn addresses_are_still_addresses() {
+        let web = |text: &str| match parse(text) {
+            Ok(Address::Web(url)) => url,
+            other => panic!("{text}: {other:?}"),
+        };
+        assert_eq!(web("danluu.com"), "https://danluu.com");
+        assert_eq!(
+            web("ru.wikipedia.org/wiki/Rust"),
+            "https://ru.wikipedia.org/wiki/Rust"
+        );
+        assert_eq!(web("1.1.1.1"), "https://1.1.1.1");
+        assert_eq!(web("localhost"), "http://localhost");
+        assert_eq!(web("localhost:8080/notes"), "http://localhost:8080/notes");
+        assert_eq!(web("nas:5000"), "http://nas:5000");
+        assert_eq!(web("пример.рф"), "https://пример.рф");
+        assert!(matches!(
+            parse("mailto:reader@example.org"),
+            Err(Error::UnsupportedScheme(s)) if s == "mailto"
+        ));
+        assert_eq!(
+            parse("~/My Notes.md").unwrap(),
+            Address::File(PathBuf::from("~/My Notes.md"))
+        );
     }
 }

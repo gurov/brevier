@@ -23,7 +23,7 @@ import android.text.style.UnderlineSpan
  * цвет подсветки кода, ровно как на десктопе.
  */
 private val PRIORITY = listOf(
-    "body", "h1", "h2", "h3", "h4", "h5", "h6", "em", "strong", "code", "codeblock", "pad",
+    "body", "verse", "h1", "h2", "h3", "h4", "h5", "h6", "em", "strong", "code", "codeblock", "pad",
     "kw", "lit", "num", "com", "quote1", "quote2", "quote3", "list1", "list2", "list3",
     "link", "dim", "alert", "noteref", "note",
 )
@@ -128,6 +128,13 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
             "body" -> {
                 inside = m.extra
                 below = m.extra * 2
+            }
+            // Строфа: каждая строка — свой абзац, воздух между ними как между
+            // строками прозы, перенос длинной строки — с висячим отступом (#21).
+            "verse" -> {
+                inside = m.extra
+                below = m.extra
+                hang = m.px(type.hang)
             }
             "h1", "h2", "h3", "h4", "h5", "h6" -> {
                 // Воздух сверху, а не снизу: заголовок принадлежит тому, что под ним.
@@ -347,12 +354,39 @@ fun pieces(page: Page): List<Any> {
     for (block in blocks) {
         var end = block.at
         if (end > cursor && text[end - 1] == '\n') end -= 1
-        if (end > cursor) out += Piece(cursor, end)
+        if (end > cursor) out.addAll(prose(text, cursor, end))
         out += block
         cursor = block.at + 1
         if (cursor < text.length && text[cursor] == '\n') cursor += 1
     }
-    if (cursor < text.length) out += Piece(cursor, text.length)
+    if (cursor < text.length) out.addAll(prose(text, cursor, text.length))
+    return out
+}
+
+/**
+ * Сколько знаков в куске текста, прежде чем резать его по концу абзаца (#22).
+ * Роман одной страницей — это 300 тысяч знаков в одном `TextView`, и Android
+ * раскладывает их целиком до первого кадра: секунды на телефоне, десятки
+ * секунд на эмуляторе. Кусками он раскладывает по одному за кадр.
+ */
+const val CHUNK_CHARS = 6000
+
+/**
+ * Текст между объектами — кусками по концам абзацев. Воздух на границе
+ * куска тот же, что внутри: у последнего абзаца куска остаётся его `below`,
+ * у первого абзаца следующего — его `above`. Абзац длиннее куска не режем:
+ * разрыв посреди абзаца был бы виден.
+ */
+private fun prose(text: String, start: Int, end: Int): List<Piece> {
+    val out = mutableListOf<Piece>()
+    var from = start
+    while (end - from > CHUNK_CHARS) {
+        val cut = text.indexOf('\n', from + CHUNK_CHARS)
+        if (cut < 0 || cut + 1 >= end) break
+        out += Piece(from, cut + 1)
+        from = cut + 1
+    }
+    out += Piece(from, end)
     return out
 }
 
