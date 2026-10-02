@@ -5,7 +5,7 @@
 //! получают именованные правила, у каждого — страницы в проверке. Системы
 //! плагинов вокруг нет и не будет: строка таблицы — функция здесь.
 //!
-//! Сейчас в таблице reddit и поисковик. Страницы reddit без JavaScript пусты
+//! Сейчас в таблице reddit, поисковик и читалка книг royallib. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
 //! и полным текстом каждой реплики. Цена — вложенности ответов в ленте нет,
@@ -18,6 +18,15 @@
 //! а у JSON-поисковиков либо ключ с картой, либо маленький индекс.
 //! Выдача — таблица, и обычным трактом десять результатов слипаются в одну
 //! строку, поэтому её разбирает правило ниже.
+//!
+//! Читалка royallib (#20): в страницу сервер кладёт только первую порцию
+//! книги, остальные листает скрипт, забирая `/br.php?i=<книга>&pg=<n>`
+//! простым GET, без кук. Порции те же, что у сайта, и каждая — своя
+//! страница Brevier: `…/книга.html?part=3`. Сервер параметра не замечает
+//! и отдаёт читалку как есть, а правило кладёт в неё третью порцию и строку
+//! «Part 3 of 5» со ссылками на соседние. Книгу целиком не тянем: у романа
+//! это сотни запросов, а прочтут, может быть, одну главу. Зато у каждой
+//! порции своё место в истории, своё место чтения и своя недельная копия.
 
 use dom_query::Document;
 use url::Url;
@@ -68,6 +77,151 @@ pub fn reply_html(html: &str) -> String {
         }
     }
     html.to_owned()
+}
+
+/// Хост читалки книг, чьи порции правило собирает само.
+const ROYALLIB: &str = "royallib.com";
+
+/// Номер порции книги (с нуля), если адрес — читалка royallib. В адресе
+/// номер с единицы, как его видит читатель: `?part=2` — вторая порция,
+/// без параметра — первая.
+pub fn book_part(url: &str) -> Option<usize> {
+    let parsed = Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if host.trim_start_matches("www.") != ROYALLIB || !parsed.path().starts_with("/read/") {
+        return None;
+    }
+    let part = parsed
+        .query_pairs()
+        .find(|(key, _)| key == "part")
+        .and_then(|(_, value)| value.parse::<usize>().ok())
+        .unwrap_or(1);
+    Some(part.saturating_sub(1))
+}
+
+/// Книга в читалке: её номер у сайта и границы порций.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Book {
+    id: String,
+    /// Границы порций, как их считает сайт: порция `n` — от `bounds[n]`
+    /// до `bounds[n + 1]`. Пусто — карты в странице не было.
+    bounds: Vec<u64>,
+    /// Текст первой порции сервер положил в страницу сам (абзацы
+    /// в `#contentDiv`); до конца сентября 2026 не клал.
+    pub served: bool,
+}
+
+impl Book {
+    /// Номер книги (`#bid`) и карта порций (`rlServerMap`) из страницы
+    /// читалки. Без номера это не читалка, и правило не нужно.
+    pub fn of(html: &str) -> Option<Book> {
+        let doc = Document::from(html);
+        let id = squeeze(&doc.select("#bid").text());
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let bounds = html
+            .find("rlServerMap")
+            .map(|at| bounds_of(&html[at..]))
+            .unwrap_or_default();
+        Some(Book {
+            id,
+            bounds,
+            served: doc.select("#contentDiv p").exists(),
+        })
+    }
+
+    /// Сколько порций; без карты — ноль.
+    pub fn parts(&self) -> usize {
+        self.bounds.len().saturating_sub(1)
+    }
+
+    /// Карта порций, если её не было в странице: так её спрашивает и скрипт сайта.
+    pub fn map_url(&self, url: &str) -> Option<String> {
+        let mut map = Url::parse(url).ok()?.join("/br.php").ok()?;
+        map.query_pairs_mut()
+            .append_pair("i", &self.id)
+            .append_pair("map", "1");
+        Some(map.into())
+    }
+
+    /// Принять карту из ответа `map_url` — JSON-массив чисел.
+    pub fn set_map(&mut self, json: &str) {
+        self.bounds = bounds_of(json);
+    }
+
+    /// Адрес порции `part` (с нуля) у сайта.
+    pub fn part_url(&self, url: &str, part: usize) -> Option<String> {
+        let mut text = Url::parse(url).ok()?.join("/br.php").ok()?;
+        text.query_pairs_mut()
+            .append_pair("i", &self.id)
+            .append_pair("pg", &part.to_string());
+        Some(text.into())
+    }
+}
+
+/// Числа первого `[…]` в тексте: `rlServerMap = [0,20277,40749];`.
+fn bounds_of(text: &str) -> Vec<u64> {
+    let Some(open) = text.find('[') else {
+        return Vec::new();
+    };
+    let Some(close) = text[open..].find(']') else {
+        return Vec::new();
+    };
+    let numbers: Option<Vec<u64>> = text[open + 1..open + close]
+        .split(',')
+        .map(|number| number.trim().parse().ok())
+        .collect();
+    numbers.unwrap_or_default()
+}
+
+/// Страница читалки с порцией `part` (с нуля): текст порции — внутрь
+/// `#contentDiv`, на место того, что положил туда сервер, а под ним строка
+/// «Part 2 of 5» со ссылками на соседние порции. `text` — `None`, когда
+/// порция в странице уже есть (первая, сервер кладёт её сам).
+pub fn book_page(html: &str, url: &str, book: &Book, part: usize, text: Option<&str>) -> String {
+    let doc = Document::from(html);
+    let content = doc.select("#contentDiv");
+    if !content.exists() {
+        return html.to_owned();
+    }
+    if let Some(text) = text {
+        content.set_html(text);
+    }
+    let parts = book.parts();
+    if parts > 1 {
+        let mut line = format!("Part {} of {parts}", part + 1);
+        if part > 0 {
+            line += &format!(
+                " · <a href=\"{}\">Previous part</a>",
+                part_address(url, part - 1)
+            );
+        }
+        if part + 1 < parts {
+            line += &format!(
+                " · <a href=\"{}\">Next part</a>",
+                part_address(url, part + 1)
+            );
+        }
+        content.append_html(format!("<p>{line}</p>"));
+    }
+    doc.html().to_string()
+}
+
+/// Адрес порции у Brevier: первая — сама страница читалки, остальные —
+/// с `?part=`, номер с единицы.
+fn part_address(url: &str, part: usize) -> String {
+    let Ok(mut address) = Url::parse(url) else {
+        return url.to_owned();
+    };
+    address.set_fragment(None);
+    address.set_query(None);
+    if part > 0 {
+        address
+            .query_pairs_mut()
+            .append_pair("part", &(part + 1).to_string());
+    }
+    address.into()
 }
 
 /// Где искать: DuckDuckGo Lite. Страница выдачи — по GET, запрос в `q`.
@@ -260,6 +414,71 @@ pub fn search_markdown(query: &str, hits: &[Hit]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Читалка royallib, сжатая до того, на что смотрит правило.
+    const READER: &str = "<html><head><title>Гаррисон Гарри :: Режим чтения</title>\
+        <script>var rlServerMap = [0,20277,40749,60937];</script></head><body>\
+        <div id=\"bid\" style=\"display:none\">28323</div>\
+        <div id=\"contentDiv\"><p>Глава 1. Начало.</p></div></body></html>";
+    const BOOK: &str = "https://royallib.com/read/garrison_garri/neukrotimaya_planeta.html";
+
+    #[test]
+    fn a_royallib_reader_page_is_a_part_of_a_book() {
+        assert_eq!(book_part(BOOK), Some(0));
+        assert_eq!(book_part(&format!("{BOOK}?part=3")), Some(2));
+        assert_eq!(book_part(&format!("{BOOK}?part=0")), Some(0));
+        assert_eq!(book_part("https://www.royallib.com/read/a/b.html"), Some(0));
+        // Карточка книги и чужой хост — не читалка.
+        assert_eq!(
+            book_part("https://royallib.com/book/garrison_garri/neukrotimaya_planeta.html"),
+            None
+        );
+        assert_eq!(book_part("https://example.com/read/a/b.html"), None);
+    }
+
+    #[test]
+    fn a_reader_page_knows_its_book_and_parts() {
+        let book = Book::of(READER).unwrap();
+        assert_eq!(book.parts(), 3);
+        assert!(book.served);
+        assert_eq!(
+            book.part_url(BOOK, 2).as_deref(),
+            Some("https://royallib.com/br.php?i=28323&pg=2")
+        );
+        assert_eq!(
+            book.map_url(BOOK).as_deref(),
+            Some("https://royallib.com/br.php?i=28323&map=1")
+        );
+        // Без карты в странице её дают отдельным ответом.
+        let mut bare = Book::of(&READER.replace("rlServerMap", "other")).unwrap();
+        assert_eq!(bare.parts(), 0);
+        bare.set_map("[0,20277,40749,60937,81104,83848]");
+        assert_eq!(bare.parts(), 5);
+        // Без номера книги это не читалка.
+        assert_eq!(Book::of("<html><body><p>Текст</p></body></html>"), None);
+    }
+
+    #[test]
+    fn a_part_goes_into_the_reader_with_a_way_on() {
+        let book = Book::of(READER).unwrap();
+        let second = book_page(
+            READER,
+            &format!("{BOOK}?part=2#top"),
+            &book,
+            1,
+            Some("<p>Глава 2. Дальше.</p>"),
+        );
+        assert!(second.contains("Глава 2. Дальше."));
+        assert!(!second.contains("Глава 1. Начало."));
+        assert!(second.contains("Part 2 of 3"));
+        assert!(second.contains(&format!("href=\"{BOOK}\">Previous part")));
+        assert!(second.contains(&format!("href=\"{BOOK}?part=3\">Next part")));
+        // Первая порция уже в странице: только строка, и назад из неё некуда.
+        let first = book_page(READER, BOOK, &book, 0, None);
+        assert!(first.contains("Глава 1. Начало."));
+        assert!(first.contains("Part 1 of 3"));
+        assert!(!first.contains("Previous part"));
+    }
 
     #[test]
     fn reddit_pages_are_read_through_their_feeds() {

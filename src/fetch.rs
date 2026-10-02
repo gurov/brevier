@@ -160,6 +160,11 @@ pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
 /// с ней. `--check`, `--raw`, `--html`, `--links` и `--nav` сюда не ходят —
 /// им нужен сам HTML, а не его замена.
 pub fn readable(url: &str, ua: UserAgent) -> Result<Page, Error> {
+    // Читалка книги (#20): порцию текста берём отдельным запросом, как её
+    // берёт скрипт сайта.
+    if let Some(part) = crate::hosts::book_part(url) {
+        return book(url, part, ua);
+    }
     // Хост из таблицы (`hosts`): страницу читаем её лентой. Адрес остаётся
     // тем, что открывали, — как и у markdown-двойника.
     if let Some(feed) = crate::hosts::feed_for(url) {
@@ -194,6 +199,33 @@ pub fn readable(url: &str, ua: UserAgent) -> Result<Page, Error> {
         }),
         _ => Ok(page),
     }
+}
+
+/// Порция книги из читалки (`hosts::Book`): страница читалки, а в ней
+/// вместо первой порции — нужная. Первую сервер кладёт в страницу сам;
+/// не положил (так было до конца сентября 2026) — берём и её. Номер за
+/// последней порцией — последняя, как листает и сайт. Не читалка
+/// (`#bid` нет) — страница идёт как есть, обычным трактом.
+fn book(url: &str, part: usize, ua: UserAgent) -> Result<Page, Error> {
+    let mut page = fetch(url, ua)?;
+    if page.kind != ContentKind::Html {
+        return Ok(page);
+    }
+    let Some(mut book) = crate::hosts::Book::of(&page.body) else {
+        return Ok(page);
+    };
+    if book.parts() == 0
+        && let Some(map) = book.map_url(&page.url)
+    {
+        book.set_map(&fetch(&map, ua)?.body);
+    }
+    let part = part.min(book.parts().saturating_sub(1));
+    let text = match book.part_url(&page.url, part) {
+        Some(text) if part > 0 || !book.served => Some(fetch(&text, ua)?.body),
+        _ => None,
+    };
+    page.body = crate::hosts::book_page(&page.body, url, &book, part, text.as_deref());
+    Ok(page)
 }
 
 /// Скачать что-то нетекстовое: картинку. Content-type не проверяем здесь —

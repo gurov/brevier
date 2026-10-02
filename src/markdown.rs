@@ -579,7 +579,15 @@ fn tidy(md: &str) -> String {
             continue;
         }
 
-        let line = line.trim_end();
+        let mut line = line.trim_end();
+        // Красная строка, набранная неразрывными пробелами (`&nbsp;` ×4
+        // в начале абзаца у книжных сайтов), — вёрстка сайта: отступ абзаца
+        // задаёт наша типографика. Только в начале абзаца и только пробелы
+        // не из ASCII: обычные значимы для markdown, а строка после жёсткого
+        // переноса — лесенка стиха.
+        if out.is_empty() || out.ends_with("\n\n") {
+            line = line.trim_start_matches(|c: char| c.is_whitespace() && !c.is_ascii());
+        }
         if line.is_empty() {
             blanks += 1;
             if blanks > 1 {
@@ -2199,6 +2207,19 @@ mod tests {
     fn an_empty_list_item_is_dropped() {
         let md = "# Статья\n\n## Новости\n\n-\n-\n-\n\nТекст.\n";
         assert_eq!(tidy(md), "# Статья\n\n## Новости\n\nТекст.\n");
+    }
+
+    #[test]
+    fn an_indent_typed_with_spaces_is_the_site_s_not_ours() {
+        let nbsp = "\u{a0}".repeat(4);
+        let md = format!("{nbsp}Первый абзац.\n\n{nbsp}Второй абзац.\n");
+        assert_eq!(tidy(&md), "Первый абзац.\n\nВторой абзац.\n");
+        // После жёсткого переноса — строка стиха, её отступ — лесенка.
+        let verse = format!("Строка\\\n{nbsp}лесенкой\n");
+        assert_eq!(tidy(&verse), verse);
+        // Обычные пробелы значимы для markdown — их не трогаем.
+        let code = "    код отступом\n";
+        assert_eq!(tidy(code), code);
     }
 
     #[test]
