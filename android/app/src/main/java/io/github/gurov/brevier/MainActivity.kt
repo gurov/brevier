@@ -146,9 +146,15 @@ class MainActivity : Activity(), ArticleHost {
         if (!parsed.optBoolean("ok")) return
         val address = parsed.getString("address")
         // Пустая начальная вкладка — не чья-то страница: адрес занимает её,
-        // а не заводит рядом вторую.
+        // а не заводит рядом вторую. Так или иначе вкладка — «снаружи»:
+        // по Brevier читатель не ходил, и «назад» на начальную ему не нужен.
         val blank = currentTab()?.takeIf { it.current() == null && !it.loading }
-        if (blank != null) open(blank, address, remember = true) else newTab(address)
+        if (blank != null) {
+            blank.outside = true
+            open(blank, address, remember = true)
+        } else {
+            newTab(address, outside = true)
+        }
     }
 
     /**
@@ -416,9 +422,13 @@ class MainActivity : Activity(), ArticleHost {
 
     // ── вкладки ─────────────────────────────────────────────────────────────
 
-    /** `ask` — поднять клавиатуру к адресу: читатель сам попросил пустую вкладку. */
-    private fun newTab(address: String?, switch: Boolean = true, ask: Boolean = true) {
+    /**
+     * `ask` — поднять клавиатуру к адресу: читатель сам попросил пустую вкладку.
+     * `outside` — адрес пришёл из другой программы (`Tab.outside`).
+     */
+    private fun newTab(address: String?, switch: Boolean = true, ask: Boolean = true, outside: Boolean = false) {
         val tab = Tab(nextId++)
+        tab.outside = outside
         tabs += tab
         // Пустая вкладка — не пустой экран: `render` покажет начальную страницу,
         // тем же трактом, что и статью.
@@ -721,7 +731,7 @@ class MainActivity : Activity(), ArticleHost {
         back.isEnabled = tab.canGoBack()
         back.alpha = if (tab.canGoBack()) 1f else 0.35f
         // Стрелка остаётся стрелкой и на первой странице; куда она ведёт — в подписи.
-        val backSays = if (tab.atFirst()) "Back to the start page" else "Back"
+        val backSays = if (tab.atFirst() && tab.canGoBack()) "Back to the start page" else "Back"
         if (back.contentDescription != backSays) {
             back.contentDescription = backSays
             back.tooltip(backSays)
@@ -1295,6 +1305,8 @@ class MainActivity : Activity(), ArticleHost {
             }
             currentTab()?.canGoBack() == true -> step(backwards = true)
             // Вкладки и место в них уже в сессии: уходим, не закрываясь.
+            // С вкладки, открытой снаружи, это и есть возврат туда, откуда
+            // пришла ссылка.
             else -> moveTaskToBack(true)
         }
     }

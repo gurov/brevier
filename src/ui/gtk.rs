@@ -713,7 +713,7 @@ fn build(app: &Application, start: Vec<String>) {
             else {
                 return;
             };
-            new_tab(&ui, &state, Some(address));
+            outside_tab(&ui, &state, address);
         });
         window.add_action(&open);
     }
@@ -1007,7 +1007,7 @@ fn build(app: &Application, start: Vec<String>) {
         }
     } else {
         for address in addresses {
-            new_tab(&ui, &state, Some(address));
+            outside_tab(&ui, &state, address);
         }
         // Открываем первую: читатель просил их в этом порядке, а не наоборот.
         ui.notebook.set_current_page(Some(0));
@@ -1486,6 +1486,16 @@ fn reload_current(ui: &Ui, state: &Rc<RefCell<State>>) {
 
 /// Открыть новую вкладку и, если дали адрес, сразу читать.
 fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
+    add_tab(ui, state, address, History::new());
+}
+
+/// Вкладка под адрес из другой программы — из чата, почты, второго
+/// запуска: «назад» с этой страницы гаснет, начальной за ней нет.
+fn outside_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Address) {
+    add_tab(ui, state, Some(address), History::from_outside());
+}
+
+fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, history: History) {
     // Виджет статьи — свой: `GtkTextView`, который дорисовывает линейку
     // слева от цитаты. Настраиваем его уже как `TextView`, чтобы не спорить
     // с одноимёнными методами других интерфейсов GTK.
@@ -1540,7 +1550,7 @@ fn new_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>) {
             id,
             view: view.clone(),
             label: label.clone(),
-            history: History::new(),
+            history,
             links: Vec::new(),
             marks: Vec::new(),
             anchors: Vec::new(),
@@ -2672,8 +2682,9 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     set_address(ui, &address);
     ui.back.set_sensitive(can_back);
     // Стрелка остаётся стрелкой и на первой странице вкладки; куда она
-    // теперь ведёт, говорит подсказка.
-    ui.back.set_tooltip_text(Some(if back_home {
+    // теперь ведёт, говорит подсказка. Погасшая (вкладка открыта снаружи)
+    // на начальную не ведёт и так не подписывается.
+    ui.back.set_tooltip_text(Some(if can_back && back_home {
         "Back to the start page"
     } else {
         "Back"
