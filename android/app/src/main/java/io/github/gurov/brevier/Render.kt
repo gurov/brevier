@@ -25,6 +25,7 @@ import android.text.style.UnderlineSpan
 private val PRIORITY = listOf(
     "body", "verse", "h1", "h2", "h3", "h4", "h5", "h6", "em", "strong", "code", "codeblock", "pad",
     "kw", "lit", "num", "com", "quote1", "quote2", "quote3", "list1", "list2", "list3",
+    "inset1", "inset2", "inset3", "rule1", "rule2", "rule3", "iteminset1", "iteminset2", "iteminset3",
     "link", "dim", "alert", "noteref", "note",
 )
 
@@ -164,6 +165,12 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
                 // Пункты стоят плотнее абзацев: список — одна мысль, разбитая на части.
                 below = m.extra / 2
             }
+            // Блок кода внутри цитаты или пункта (#13): только поле — под их
+            // текстом (у пункта — правее маркера) — и линейки цитат вокруг.
+            "inset1", "inset2", "inset3" -> margin = m.px(type.indent) * (style.last() - '0')
+            "iteminset1", "iteminset2", "iteminset3" ->
+                margin = m.px(type.indent) * (style.last() - '0') + m.px(type.hang)
+            "rule1", "rule2", "rule3" -> quotes = maxOf(quotes, style.last() - '0')
             "note" -> {
                 margin = m.px(type.noteIndent)
                 hang = m.px(type.noteHang)
@@ -330,7 +337,9 @@ class ShapeSpan(
         val color = panel ?: return
         val was = paint.color
         paint.color = color
-        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        // От поля, как `paragraph-background` у GTK: код внутри пункта
+        // или цитаты (#13) — панель под их текстом, а не во всю колонку.
+        canvas.drawRect((left + margin).toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
         paint.color = was
     }
 }

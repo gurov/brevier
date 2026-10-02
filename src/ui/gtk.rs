@@ -3554,6 +3554,29 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             ],
         );
     }
+    // Блок кода внутри цитаты или пункта (#13): только поле — то, под которым
+    // стоит их текст (у пункта — правее маркера). Теги самих цитаты и пункта
+    // принесли бы курсив и воздух. Заводятся после `codeblock`, чтобы их
+    // поле перебило его нулевое; линейку цитаты на этих строках рисует виджет
+    // статьи по тегу `rule`, у которого свойств нет вовсе.
+    for level in 1..=page::QUOTE_LEVELS {
+        style(
+            buffer,
+            &format!("inset{level}"),
+            &[("left-margin", &px(f64::from(INDENT) * f64::from(level)))],
+        );
+        style(buffer, &format!("rule{level}"), &[]);
+    }
+    for level in 1..=page::LIST_LEVELS {
+        style(
+            buffer,
+            &format!("iteminset{level}"),
+            &[(
+                "left-margin",
+                &px(f64::from(INDENT) * f64::from(level) + f64::from(HANG)),
+            )],
+        );
+    }
     let (link, dim) = (colors.link, colors.dim);
     style(
         buffer,

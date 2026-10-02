@@ -19,6 +19,8 @@ use gtk::subclass::prelude::*;
 /// Вложенная цитата получает свою, правее, — иначе ответ на ответ в треде
 /// обсуждения не отличить от новой реплики.
 const QUOTES: [&str; 3] = ["quote1", "quote2", "quote3"];
+/// Линейка без цитаты: строки блока кода внутри неё (#13).
+const RULES: [&str; 3] = ["rule1", "rule2", "rule3"];
 // Толщина линейки, её место в левом поле цитаты и шаг уровня — в ядре,
 // вместе с остальной типографской моделью: телефон рисует ту же линейку.
 use brevier::outline::{INDENT as RULE_STEP, RULE_INSET, RULE_WIDTH, RULE_X};
@@ -95,7 +97,8 @@ fn draw_quote_rules(view: &gtk::TextView, snapshot: &gtk::Snapshot, color: gtk::
     let buffer = view.buffer();
     let table = buffer.tag_table();
     let quotes: Vec<Option<gtk::TextTag>> = QUOTES.iter().map(|name| table.lookup(name)).collect();
-    if quotes.iter().all(Option::is_none) {
+    let rules: Vec<Option<gtk::TextTag>> = RULES.iter().map(|name| table.lookup(name)).collect();
+    if quotes.iter().chain(&rules).all(Option::is_none) {
         return;
     }
 
@@ -108,9 +111,10 @@ fn draw_quote_rules(view: &gtk::TextView, snapshot: &gtk::Snapshot, color: gtk::
         if top > bottom {
             break;
         }
-        for (level, quote) in quotes.iter().enumerate() {
-            let Some(quote) = quote else { continue };
-            if !line.has_tag(quote) {
+        for (level, (quote, rule)) in quotes.iter().zip(&rules).enumerate() {
+            let tagged =
+                |tag: &Option<gtk::TextTag>| tag.as_ref().is_some_and(|tag| line.has_tag(tag));
+            if !tagged(quote) && !tagged(rule) {
                 continue;
             }
             // Слой рисуется в координатах буфера: GTK сдвигает снимок

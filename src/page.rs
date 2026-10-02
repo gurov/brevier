@@ -75,6 +75,16 @@ pub enum Style {
     Quote(u8),
     /// Пункт списка, уровень 1..=[`LIST_LEVELS`].
     List(u8),
+    /// Блок кода внутри цитаты уровня 1..=[`QUOTE_LEVELS`] (#13): только
+    /// поле — под текстом цитаты. Сам тег цитаты принёс бы коду курсив.
+    Inset(u8),
+    /// Блок кода внутри пункта списка уровня 1..=[`LIST_LEVELS`]: только
+    /// поле — под текстом пункта, правее маркера. Сам тег пункта принёс бы
+    /// воздух между строками.
+    ItemInset(u8),
+    /// Линейка цитаты уровня 1..=[`QUOTE_LEVELS`] — и больше ничего:
+    /// на строках кода внутри цитаты она не должна обрываться.
+    Rule(u8),
     Link,
     /// Приглушённое: маркер сноски, черта, подпись к картинке.
     Dim,
@@ -104,6 +114,9 @@ impl Style {
             Style::Comment => "com".to_owned(),
             Style::Quote(level) => format!("quote{level}"),
             Style::List(level) => format!("list{level}"),
+            Style::Inset(level) => format!("inset{level}"),
+            Style::ItemInset(level) => format!("iteminset{level}"),
+            Style::Rule(level) => format!("rule{level}"),
             Style::Link => "link".to_owned(),
             Style::Dim => "dim".to_owned(),
             Style::Alert => "alert".to_owned(),
@@ -227,6 +240,7 @@ impl Page {
             base: &document.address,
             depth: 0,
             quotes: 0,
+            inset: None,
             typeset: typesetter.as_ref(),
         };
         for node in root.children() {
@@ -526,6 +540,9 @@ struct Writer<'a> {
     depth: u8,
     /// Глубина вложенности цитаты: от неё отступ и место линейки.
     quotes: u8,
+    /// Поле, под которым стоит текст ближайшей цитаты или пункта, —
+    /// его берёт блок кода внутри них (#13). `None` — у края колонки.
+    inset: Option<Style>,
     /// Типографика по языку страницы, если он известен. Расставляет мягкие
     /// переносы и клеит однобуквенные предлоги — только в прозе, не в коде
     /// и не в заголовках (иначе поехали бы якоря, что считаются по тексту).
@@ -680,12 +697,20 @@ impl Writer<'_> {
             }
             NodeValue::CodeBlock(code) => {
                 let text = code.literal.trim_end_matches('\n');
-                self.put("\n", &[Style::Pad]);
+                // Внутри цитаты или пункта панель встаёт под их текст,
+                // а линейки цитат идут мимо неё не обрываясь (#13).
+                let frame: Vec<Style> = self
+                    .inset
+                    .into_iter()
+                    .chain((1..=self.quotes.min(QUOTE_LEVELS)).map(Style::Rule))
+                    .collect();
+                let with = |first: &[Style]| [first, &frame].concat();
+                self.put("\n", &with(&[Style::Pad]));
 
                 let mut at = 0;
                 for span in code::spans(text, &code.info) {
                     if span.start > at {
-                        self.put(&text[at..span.start], &[Style::CodeBlock]);
+                        self.put(&text[at..span.start], &with(&[Style::CodeBlock]));
                     }
                     let paint = match span.kind {
                         code::Kind::Comment => Style::Comment,
@@ -693,23 +718,29 @@ impl Writer<'_> {
                         code::Kind::Number => Style::Number,
                         code::Kind::Keyword => Style::Keyword,
                     };
-                    self.put(&text[span.start..span.end], &[Style::CodeBlock, paint]);
+                    self.put(
+                        &text[span.start..span.end],
+                        &with(&[Style::CodeBlock, paint]),
+                    );
                     at = span.end;
                 }
                 if at < text.len() {
-                    self.put(&text[at..], &[Style::CodeBlock]);
+                    self.put(&text[at..], &with(&[Style::CodeBlock]));
                 }
 
-                self.put("\n", &[Style::CodeBlock]);
-                self.put("\n", &[Style::Pad]);
+                self.put("\n", &with(&[Style::CodeBlock]));
+                self.put("\n", &with(&[Style::Pad]));
             }
             NodeValue::BlockQuote => {
                 self.quotes += 1;
+                let level = self.quotes.min(QUOTE_LEVELS);
                 let mut styles = outer.to_vec();
-                styles.push(Style::Quote(self.quotes.min(QUOTE_LEVELS)));
+                styles.push(Style::Quote(level));
+                let was = self.inset.replace(Style::Inset(level));
                 for child in node.children() {
                     self.block(child, &styles);
                 }
+                self.inset = was;
                 self.quotes -= 1;
             }
             // Оповещение (`> [!NOTE]`) — та же цитата, но с подписью, чем
@@ -729,9 +760,13 @@ impl Writer<'_> {
                 self.put(&title, &titled);
                 self.put("\n", &titled);
 
+                let was = self
+                    .inset
+                    .replace(Style::Inset(self.quotes.min(QUOTE_LEVELS)));
                 for child in node.children() {
                     self.block(child, &styles);
                 }
+                self.inset = was;
                 self.quotes -= 1;
             }
             NodeValue::List(list) => {
@@ -740,6 +775,9 @@ impl Writer<'_> {
 
                 self.depth += 1;
                 let level = Style::List(self.depth.min(LIST_LEVELS));
+                let was = self
+                    .inset
+                    .replace(Style::ItemInset(self.depth.min(LIST_LEVELS)));
                 for item in node.children() {
                     let mut styles = outer.to_vec();
                     styles.push(Style::Body);
@@ -780,6 +818,7 @@ impl Writer<'_> {
                         self.put("\n", &styles);
                     }
                 }
+                self.inset = was;
                 self.depth -= 1;
 
                 if self.depth == 0 {
@@ -1235,6 +1274,46 @@ mod tests {
             vec!["codeblock", "kw"]
         );
         assert!(page.text.contains("•  один"));
+    }
+
+    #[test]
+    fn code_inside_an_item_or_a_quote_stands_under_its_text() {
+        let page = Page::of(&doc(
+            "1. Пункт:\n\n   ```\n   первый\n   ```\n\n   - глубже:\n\n     ```\n     второй\n     ```\n\n\
+             > Цитата:\n>\n> ```\n> третий\n> ```\n\n\
+             > [!NOTE]\n> ```\n> четвёртый\n> ```\n\n\
+             - Пункт в цитате? Нет, в списке:\n\n  > ```\n  > пятый\n  > ```\n\n\
+             ```\nшестой\n```\n",
+        ));
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "первый")),
+            vec!["codeblock", "iteminset1"]
+        );
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "второй")),
+            vec!["codeblock", "iteminset2"]
+        );
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "третий")),
+            vec!["codeblock", "inset1", "rule1"]
+        );
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "четвёртый")),
+            vec!["codeblock", "inset1", "rule1"]
+        );
+        // Ближайший контейнер решает поле, линейка — от всех цитат вокруг.
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "пятый")),
+            vec!["codeblock", "inset1", "rule1"]
+        );
+        // Поля панели идут вместе с кодом.
+        let pad = offset_of(&page, "первый") - 1;
+        assert_eq!(styles_at(&page, pad), vec!["pad", "iteminset1"]);
+        // Вне контейнеров — у края, как и было.
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "шестой")),
+            vec!["codeblock"]
+        );
     }
 
     #[test]
