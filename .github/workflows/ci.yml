@@ -58,6 +58,30 @@ jobs:
             { echo "run packaging/cargo-sources.py > packaging/cargo-sources.json" >&2; exit 1; }
       - run: sh -n packaging/install.sh && sh -n packaging/tarball.sh
 
+  # Подпись по DCO у каждого коммита чужого PR: откуда пришёл вклад — запись
+  # в истории, а не в памяти. Подпись должна быть автора коммита, а не любая.
+  dco:
+    name: every commit of a pull request is signed off
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Signed-off-by from the author on every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=$(git log --no-merges --format='%H%x09%ae%x09%(trailers:key=Signed-off-by,valueonly,separator=%x20)%x09%s' "$BASE..$HEAD" |
+            awk -F'\t' 'index($3, "<" $2 ">") == 0 { print substr($1, 1, 12) "  " $4 }')
+          if [ -n "$missing" ]; then
+            echo "These commits are not signed off by their author (see DCO and CONTRIBUTING.md):" >&2
+            echo "$missing" >&2
+            echo "To sign them off: git rebase --signoff $BASE && git push --force-with-lease" >&2
+            exit 1
+          fi
+
   action:
     name: the check as a GitHub Action
     runs-on: ubuntu-latest

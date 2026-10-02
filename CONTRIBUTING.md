@@ -91,6 +91,11 @@ Release builds are signed by CI.
 
 ## Before a pull request
 
+- **Every commit is signed off.** `git commit -s` adds a line `Signed-off-by: Your Name
+  <you@example.com>` with the name and address the commit is made under. By it you state,
+  under the [Developer Certificate of Origin](DCO), that you wrote the change or otherwise
+  have the right to submit it under the project's license. CI checks every commit of a pull
+  request; a forgotten sign-off is added with `git rebase --signoff main` and a force-push.
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, the same with
   `--features ui`, and `cargo test`. CI runs all of them, and builds the core and the app
   for Android on every push.
@@ -147,5 +152,6 @@ version.
 ## License
 
 Contributions are licensed as the project is: MIT OR Apache-2.0, at the user's option. The
-bundled fonts are under the SIL Open Font License, and `assets/fonts/OFL-NotoSans.txt` must
+sign-off on each commit (see above) records where the contribution came from; no separate
+agreement is asked for. The bundled fonts are under the SIL Open Font License, and `assets/fonts/OFL-NotoSans.txt` must
 travel with any distribution.
