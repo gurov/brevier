@@ -135,9 +135,12 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         fitColumn(width)
 
         // Первый экран — сразу и целиком, остальное — по куску за кадр.
+        // Последний кусок `append` закрывает сам (`finish`); здесь — только
+        // страница без кусков вовсе, иначе кнопка отказа вставала дважды.
         pending.addAll(pieces(page))
+        if (pending.isEmpty()) finish()
         while (pending.isNotEmpty() && laid < FIRST_CHARS) append()
-        if (pending.isEmpty()) finish() else drip(generation)
+        if (pending.isNotEmpty()) drip(generation)
 
         scrollTo(0, 0)
         if (eager) loadAll()

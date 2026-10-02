@@ -9,6 +9,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -24,6 +25,7 @@ import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -78,6 +80,9 @@ class MainActivity : Activity(), ArticleHost {
     private lateinit var tabList: TabList
     private lateinit var settings: SettingsPage
     private lateinit var hints: ListPopupWindow
+
+    /** Последнее касание экрана, в его координатах (`dispatchTouchEvent`). */
+    private var touched = 0 to 0
 
     /** Строку адреса окно правит и само — пока правит, подсказки молчат. */
     private var quiet = false
@@ -840,36 +845,58 @@ class MainActivity : Activity(), ArticleHost {
     /**
      * Отдать адрес браузеру системы — но не нам самим: если Brevier выбран
      * браузером по умолчанию, простой `VIEW` вернулся бы сюда же.
+     *
+     * Браузер выбирается нашим меню, а не системным окном выбора: когда
+     * браузер по умолчанию — Brevier, система на веб-ссылку отвечает только
+     * им, и её окно выбора, из которого мы себя вычли, выходило пустым —
+     * «No apps can perform this action» (на Xiaomi — строкой внизу экрана).
+     * Проверено на эмуляторе 2 октября 2026.
      */
     override fun openOutside(target: String) {
-        val uri = Uri.parse(target)
-        val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target)).addCategory(Intent.CATEGORY_BROWSABLE)
         // `MATCH_ALL`, а не умолчание: когда браузер по умолчанию выбран,
         // Android на веб-ссылку отвечает только им — то есть нами же,
         // и остальных браузеров без этого флага не видно вовсе.
         val handlers = packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
             .filter { it.activityInfo.packageName != packageName }
-        val chosen = when (handlers.size) {
-            0 -> {
-                notice("No other browser is registered for links")
-                return
-            }
+            .distinctBy { it.activityInfo.packageName }
+        when (handlers.size) {
+            0 -> notice("No other browser is registered for links")
             // Другой браузер один — им и открываем, без лишнего вопроса.
-            1 -> Intent(intent)
-                .setComponent(ComponentName(handlers[0].activityInfo.packageName, handlers[0].activityInfo.name))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            // Несколько — «твой браузер» уже не один: спрашиваем систему,
-            // убрав из списка самих себя.
-            else -> Intent.createChooser(intent, "Open in your browser").putExtra(
-                Intent.EXTRA_EXCLUDE_COMPONENTS,
-                arrayOf(ComponentName(this, MainActivity::class.java)),
-            )
+            1 -> launch(intent, handlers[0])
+            // Несколько — «твой браузер» уже не один: спрашиваем там, где палец.
+            else -> {
+                val menu = Menu(this, fonts, palette)
+                menu.caption("Open with")
+                for (handler in handlers.sortedBy { it.loadLabel(packageManager).toString().lowercase() }) {
+                    menu.item(handler.loadLabel(packageManager).toString()) { launch(intent, handler) }
+                }
+                menu.showAt(root, touched.first, touched.second)
+            }
         }
+    }
+
+    /** Открыть адрес названным приложением — явным компонентом, мимо выбора системы. */
+    private fun launch(intent: Intent, handler: ResolveInfo) {
+        val explicit = Intent(intent)
+            .setComponent(ComponentName(handler.activityInfo.packageName, handler.activityInfo.name))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
-            startActivity(chosen)
+            startActivity(explicit)
         } catch (failure: ActivityNotFoundException) {
             notice("No other browser is registered for links")
+        } catch (failure: SecurityException) {
+            notice("No other browser is registered for links")
         }
+    }
+
+    /**
+     * Где палец коснулся экрана в последний раз: там выбор браузера и встанет —
+     * у кнопки под отказом, у ссылки, у меню.
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) touched = event.rawX.toInt() to event.rawY.toInt()
+        return super.dispatchTouchEvent(event)
     }
 
     override fun scrolled() {
@@ -1062,6 +1089,10 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun closeFind() {
         if (!::needle.isInitialized || findBar.visibility != View.VISIBLE) return
+        // Фокус — статье, до того как поле поиска спрячется: иначе Android
+        // отдаёт его адресной строке, и та, занятая, перестаёт показывать
+        // адрес — после смены вкладки в ней оставался прежний.
+        currentTab()?.view?.requestFocus()
         findBar.visibility = View.GONE
         hits = IntArray(0)
         currentTab()?.view?.highlight(hits, -1)
