@@ -90,6 +90,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.1" date="2026-10-02" type="development">
+      <description>
+        <p>On the phone, Open in your browser works when Brevier is the default
+          browser. A tab opened by a link from another app starts at that page,
+          with nothing behind it to go back to. Books on royallib open part by
+          part, and a site that lets in only browsers running JavaScript is
+          named as such. A code block inside a list item or a quote stands
+          under its text.</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-09-28" type="development">
       <description>
         <p>Text typed in the address bar that is not an address is a search:
