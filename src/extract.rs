@@ -137,6 +137,40 @@ struct Listing {
     cards: usize,
 }
 
+/// Чем скрипт отправляет браузер дальше: перезагрузка, переход, замена адреса.
+const GATE_MOVES: [&str; 5] = [
+    "location.replace(",
+    "location.reload(",
+    "location.assign(",
+    "location.href",
+    "location =",
+];
+
+/// Видимого текста у заслона нет или почти нет: «проверяем браузер…».
+const GATE_TEXT: usize = 200;
+
+/// Статьи не нашлось — но, может быть, и страницы не было: вместо неё
+/// заслон (#23). Признак по форме, а не по сайту: видимого текста нет,
+/// а скрипт перезагружает страницу или уводит дальше — обычно поставив
+/// куку, чтобы проверить, что клиент исполняет скрипты. Такой ответ
+/// не винит страницу в пустоте, а называет причину.
+fn empty(html: &str) -> Error {
+    let doc = Document::from(html);
+    let moves = doc.select("script").iter().any(|script| {
+        let code = script.text();
+        GATE_MOVES.iter().any(|call| code.contains(call))
+    });
+    if !moves {
+        return Error::EmptyExtraction;
+    }
+    doc.select("script, style, noscript, template").remove();
+    if doc.select("body").text().trim().chars().count() < GATE_TEXT {
+        Error::ScriptGate
+    } else {
+        Error::EmptyExtraction
+    }
+}
+
 pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let cfg = Config::default();
 
@@ -167,10 +201,10 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
             _ => Error::EmptyExtraction,
         })?;
 
-    let article = readability.parse().map_err(|_| Error::EmptyExtraction)?;
+    let article = readability.parse().map_err(|_| empty(html))?;
 
     if article.content.trim().is_empty() {
-        return Err(Error::EmptyExtraction);
+        return Err(empty(html));
     }
 
     let content_html = article.content.to_string();
@@ -1851,6 +1885,29 @@ mod tests {
         format!(
             "<html><body><article><h1>Эрроу</h1><p>{img}</p><p>{text}</p><p>{text}</p><p>{text}</p></article></body></html>"
         )
+    }
+
+    /// Заглушка yapishu.net (#23) байт в байт: кука и перезагрузка.
+    const GATE: &str = "<!doctype html>\n<html>\n<head>\n\
+        <meta name=\"robots\" content=\"noindex,nofollow\">\n</head>\n<body>\n<script>\n\
+        document.cookie = \"hc=1; path=/; max-age=3600\";\nlocation.replace(location.href);\n\
+        </script>\n<noscript>\n<meta http-equiv=\"refresh\" content=\"2\">\n</noscript>\n</body>\n</html>\n";
+
+    #[test]
+    fn a_script_that_reloads_the_page_is_a_gate_not_an_empty_page() {
+        let url = "https://yapishu.net/book/274446";
+        assert!(matches!(extract(GATE, url), Err(Error::ScriptGate)));
+        // Пустая страница без такого скрипта — по-прежнему пустая.
+        let blank =
+            "<html><body><div id=\"root\"></div><script src=\"/app.js\"></script></body></html>";
+        assert!(matches!(extract(blank, url), Err(Error::EmptyExtraction)));
+        // Страница с текстом, у которой скрипт только поминает адрес, — тоже
+        // не заслон: виноват не он.
+        let words = "<p>Здесь много слов, но ни одной статьи. </p>".repeat(12);
+        let busy = format!(
+            "<html><body><nav>{words}</nav><script>var here = location.href;</script></body></html>"
+        );
+        assert!(!matches!(empty(&busy), Error::ScriptGate));
     }
 
     #[test]

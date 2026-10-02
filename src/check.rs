@@ -376,7 +376,8 @@ fn access_finding(error: &Error) -> Option<Finding> {
         | Error::Convert(_)
         | Error::Feed(_)
         | Error::Media(_)
-        | Error::SearchChallenge => return None,
+        | Error::SearchChallenge
+        | Error::ScriptGate => return None,
     };
     Some(note(id, seen))
 }

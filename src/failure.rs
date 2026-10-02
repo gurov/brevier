@@ -125,6 +125,15 @@ pub fn describe(error: &Error) -> Failure {
                 .to_owned(),
             true,
         ),
+        // Заслон, а не пустая страница (#23): скрипт ставит куку и грузит
+        // страницу заново. Обходить его, исполняя или читая скрипт, не станем —
+        // браузер читателя проходит его сам.
+        Error::ScriptGate => failure(
+            "The site lets in only browsers that run JavaScript",
+            "Instead of the page it sent a script that sets a cookie and loads the page again — a check that the client runs scripts, with nothing to read behind it yet. Brevier runs no JavaScript; your browser passes the check."
+                .to_owned(),
+            true,
+        ),
         Error::Media(what) => failure(
             "The image cannot be shown",
             format!("{what}. The text of the article is not affected."),
