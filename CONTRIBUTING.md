@@ -3,6 +3,8 @@
 Patches and bug reports are welcome. This file is for working on the code; for using
 Brevier, see the [README](README.md).
 
+Working with a coding agent? Give it [AGENTS.md](AGENTS.md) as well.
+
 What is planned is in the [roadmap](ROADMAP.md) and the issues labelled `roadmap`; smaller
 items carry `bug` or `enhancement`. What the program promises is in the
 [manifesto](MANIFESTO.md), and those promises decide more than code quality does: a patch
@@ -30,10 +32,10 @@ mostly in Russian; write yours in whatever language you are most exact in.
 - **`android/`** — the Android app: Kotlin over the core, through one JNI entry point
   (`src/android.rs`) that answers in JSON. No androidx.
 - **`src/hosts.rs`** — the per-host rules, in one small table: reddit read through its
-  feed, and the search engine's results page. Everything else is ruled by the shape of a
-  page, never by its site. The results page is tested against a saved copy in
-  `tests/fixtures/`; when DuckDuckGo changes its markup, that test fails instead of the
-  reader.
+  feed, the search engine's results page, and royallib's reader, whose book comes part by
+  part. Everything else is ruled by the shape of a page, never by its site. The results
+  page is tested against a saved copy in `tests/fixtures/`; when DuckDuckGo changes its
+  markup, that test fails instead of the reader.
 - **`corpus/`** — the regression corpus, its expected outputs and the scripts that measure.
 - **`packaging/`** — the Flatpak manifest, the offline crate list, the tarball, the desktop
   entry, the metainfo and the release notes.
