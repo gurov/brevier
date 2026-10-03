@@ -57,6 +57,9 @@ jobs:
           diff -u packaging/cargo-sources.json /tmp/cargo-sources.json ||
             { echo "run packaging/cargo-sources.py > packaging/cargo-sources.json" >&2; exit 1; }
       - run: sh -n packaging/install.sh && sh -n packaging/tarball.sh
+      # Знак — контур с плоским градиентом; сохранение из Inkscape это ломает.
+      - name: The mark is an outline with a flat gradient
+        run: python3 packaging/icons.py --check
 
   # Подпись по DCO у каждого коммита чужого PR: откуда пришёл вклад — запись
   # в истории, а не в памяти. Подпись должна быть автора коммита, а не любая.

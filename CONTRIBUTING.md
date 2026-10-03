@@ -144,6 +144,12 @@ packaging/tarball.sh              # the tarball and its install.sh
 The Flatpak builds offline, the way Flathub builds: every crate is declared with its
 checksum in `packaging/cargo-sources.json`.
 
+The mark is `assets/brevier.svg`, and every raster icon is drawn from it: after changing
+the mark, run `packaging/icons.py` (Inkscape and Pillow), which redraws the Android
+launcher icons at every density and the store icon in `fastlane/`. It also refuses a mark
+that is not an outline, not square, or whose gradient is not flat — what saving from
+Inkscape tends to bring back; CI runs the same check with `--check`.
+
 Releases are built by CI from a tag (`.github/workflows/release.yml`), not on a laptop. A
 release `vX.Y.Z` needs the version in `Cargo.toml`, a `<release>` entry in the metainfo,
 notes in `packaging/notes/vX.Y.Z.md` and the version in the README's download links; CI
