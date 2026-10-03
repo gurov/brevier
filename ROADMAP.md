@@ -223,6 +223,21 @@ fingerprint differs, what was read is carried over by heading anchors, or droppe
 The archive (#8) removes the problem for the pages it keeps: a stored copy does not
 change.
 
+### 13. F-Droid and IzzyOnDroid (#31)
+
+The Android app is a signed APK in Releases, found only by those who already know where
+to look. The readers most likely to want it — no JavaScript, no trackers, no account —
+look in F-Droid first. Two doors, the cheap one first:
+
+- **IzzyOnDroid**, a repository F-Droid's client reads, takes the APK straight from
+  Releases, with our signature. Days rather than weeks, and nothing new to build.
+- **F-Droid itself** builds from source: a recipe in `fdroiddata` (Gradle in `android/`,
+  the Rust core through the NDK), the store text and screenshots in `fastlane/` in this
+  repository, and a reproducible build, so that F-Droid publishes the APK with our
+  signature rather than its own. One key across Releases, IzzyOnDroid and F-Droid means
+  an install from one updates from any other; with three keys, switching means losing
+  the reader's history.
+
 ## Far — after that
 
 ### Send to
