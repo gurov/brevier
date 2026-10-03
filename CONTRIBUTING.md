@@ -152,7 +152,9 @@ Inkscape tends to bring back; CI runs the same check with `--check`.
 
 Releases are built by CI from a tag (`.github/workflows/release.yml`), not on a laptop. A
 release `vX.Y.Z` needs the version in `Cargo.toml`, a `<release>` entry in the metainfo,
-notes in `packaging/notes/vX.Y.Z.md` and the version in the README's download links; CI
+notes in `packaging/notes/vX.Y.Z.md`, a store changelog in
+`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` (`X·10000 + Y·100 + Z`) and
+the version in the README's download links; CI
 checks the tag against `Cargo.toml`, builds the tarball, the Flatpak and the signed APK, and
 publishes them with `SHA256SUMS`. A published tag is never moved: something newer is a new
 version.

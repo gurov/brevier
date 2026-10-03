@@ -90,6 +90,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.2" date="2026-10-03" type="development">
+      <description>
+        <p>A bolder mark: the icon no longer thins to a hairline at launcher
+          size, in lists or in monochrome themed icons.</p>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-10-02" type="development">
       <description>
         <p>On the phone, Open in your browser works when Brevier is the default
