@@ -1,0 +1,5 @@
+• Open in your browser works when Brevier is the default browser: with several other browsers, Brevier asks which one.
+• A link from another app opens with nothing behind it: Back takes you back to that app.
+• Books on royallib open part by part, without the site's paragraph indents.
+• A site that admits only browsers running JavaScript is named as such.
+• Code inside a list or a quote stands under its text.

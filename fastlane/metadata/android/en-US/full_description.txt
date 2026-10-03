@@ -1,0 +1,24 @@
+Brevier opens a web page, reduces it to its text and structure — headings, paragraphs, lists, quotes, code, tables, images — and sets it in its own typography: one typeface, a comfortable line length and leading, warm paper in light or dark. No JavaScript runs and no site styles apply. The type is the reader's, not the site's.
+
+What it does
+
+• Articles, blogs, documentation and long reads come out as clean text. The page's own contents, the feeds it offers and its navigation sit on a shelf at the side.
+• Search from the address bar: words that are not an address go to DuckDuckGo Lite, and the results come back as a list of links.
+• RSS, Atom and JSON feeds, including feed files and feed:// links. A feed of comments on one page reads as a thread.
+• Documentation straight from GitHub and GitLab repositories: type gh:owner/repo.
+• Tabs, history, bookmarks, find on page, zoom, saving an article as Markdown (with its images, as a zip).
+• Pages read in the last week open from a copy on the phone, with no download.
+• Back and forward return to the place you were reading.
+• It can be your default browser: links from other apps open in new tabs, and what needs JavaScript or a login goes on to your other browser in one tap.
+• Check this page: a score from 0 to 100 for how well a page reads without JavaScript, with the reasons.
+
+What it does not do
+
+• Run JavaScript, apply site styles, keep cookies or log in.
+• Show ads, count its users or ask for an account. Brevier reports nothing to anyone: it fetches the pages you open and what it takes to read them, and your searches go to DuckDuckGo.
+
+Sites assembled entirely by JavaScript do not open. Brevier says so plainly and offers your other browser.
+
+Images are decoded by Brevier's own memory-safe decoders, not the system's. Certificates are checked by Android, and a site Android does not trust does not open.
+
+Brevier is free software, under MIT or Apache-2.0. The same core runs a GTK window on Linux.
