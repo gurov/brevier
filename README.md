@@ -395,9 +395,11 @@ it through a different window size, zoom or font.
 - **Not a crawler.** Brevier fetches the page you opened and what it takes to read it — its
   images, an alternate Markdown copy when offered, a dozen probes on a repository's CDN for
   where its documentation starts. It does not walk a site or fetch pages nobody asked for.
-- **Two per-site rules, and no more so far.** reddit's pages are empty without JavaScript,
-  so a reddit thread or subreddit is fetched as its `.rss` instead; reddit allows few
-  requests in a row without an account, and when it asks to slow down, Brevier says so.
+- **Three per-site rules, and no more so far.** reddit's pages are empty without
+  JavaScript, so a reddit thread or subreddit is fetched as its `.rss` instead; reddit
+  allows few requests in a row without an account, and when it asks to slow down, Brevier
+  says so. royallib's reader loads a book by script, part by part; each part opens as a
+  page of its own, its text fetched the way the site's script fetches it.
   A search goes to DuckDuckGo Lite — the one engine that answers a plain GET with plain
   HTML, without a key — and its results page is read by its own rule, links unwrapped from
   DuckDuckGo's click counter so they lead straight to the sites. The query leaves your
