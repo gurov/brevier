@@ -86,11 +86,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install the toolchain
+      # Rust и NDK — закреплённые (android/rust-toolchain.toml и `ndkVersion`
+      # в Gradle): F-Droid собирает тем же и сверяет APK побайтно.
+      - name: Install the pinned Rust and NDK
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add aarch64-linux-android
+          (cd android && rustup toolchain install)
+          ndk=$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' android/app/build.gradle.kts)
+          test -n "$ndk" || { echo "::error::no ndkVersion in android/app/build.gradle.kts"; exit 1; }
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -121,6 +124,52 @@ jobs:
           name: apk
           path: android/app/build/outputs/apk/release/brevier-*.apk
           if-no-files-found: error
+
+  # F-Droid собирает APK сам и публикует наш, подписанный, только если его
+  # сборка совпала с нашей побайтно; не совпала — версия в F-Droid не выйдет.
+  # Здесь та же проверка: другой каталог, другой дом cargo, сборка без подписи
+  # и `apksigcopier compare`, как у F-Droid. Выкладку на GitHub она не держит:
+  # тем, кто ставит из Releases, расхождение не мешает, а красная задача видна.
+  reproducible:
+    name: Android — the APK builds the same elsewhere
+    needs: android
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elsewhere/brevier
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: elsewhere/brevier
+      # Rust и NDK — закреплённые (android/rust-toolchain.toml и `ndkVersion`
+      # в Gradle): F-Droid собирает тем же и сверяет APK побайтно.
+      - name: Install the pinned Rust and NDK
+        run: |
+          (cd android && rustup toolchain install)
+          ndk=$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' android/app/build.gradle.kts)
+          test -n "$ndk" || { echo "::error::no ndkVersion in android/app/build.gradle.kts"; exit 1; }
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
+      - name: Another home for cargo
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build the APK unsigned
+        working-directory: elsewhere/brevier/android
+        run: ./gradlew --no-daemon assembleRelease -Pabis=arm64-v8a -Punsigned
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: ${{ runner.temp }}/signed
+      - name: Our signature fits the unsigned build
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet apksigcopier
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          PATH="$tools:$PATH" "$RUNNER_TEMP/venv/bin/apksigcopier" compare \
+            "$RUNNER_TEMP"/signed/brevier-*.apk \
+            --unsigned android/app/build/outputs/apk/release/brevier-*-unsigned.apk
 
   publish:
     name: publish the release

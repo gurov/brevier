@@ -127,37 +127,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install the toolchain
+      # Rust и NDK — закреплённые, те же, что у выпуска и у F-Droid: Rust
+      # называет android/rust-toolchain.toml, NDK — `ndkVersion` в Gradle.
+      - name: Install the pinned Rust and NDK
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add aarch64-linux-android
+          (cd android && rustup toolchain install)
+          ndk=$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' android/app/build.gradle.kts)
+          test -n "$ndk" || { echo "no ndkVersion in android/app/build.gradle.kts" >&2; exit 1; }
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
       # Сначала канарейка: ядро — то, что едет на телефон как есть. День,
       # когда в тракт чтения заедет зависимость с X11, fontconfig или
       # библиотекой хоста, должен быть виден здесь отдельной строкой, а не
-      # потеряться в выводе Gradle.
-      - name: Point the C compiler and the linker at the NDK
-        run: |
-          ndk="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
-          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          # `ring` собран из C и ассемблера, и цели нужен компилятор из NDK,
-          # а не хостовый cc. API 24 — ниже него системный проверяющий
-          # сертификаты не знает отзыва.
-          clang="$bin/aarch64-linux-android24-clang"
-          test -x "$clang" || { echo "no NDK toolchain under $bin" >&2; exit 1; }
-          {
-            echo "CC_aarch64_linux_android=$clang"
-            echo "AR_aarch64_linux_android=$bin/llvm-ar"
-            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$clang"
-          } >> "$GITHUB_ENV"
-      # Форма та самая, в которой ядро возьмёт приложение: общая библиотека
-      # под arm64, собранная с фичами читалки (`save` тянет `images`).
+      # потеряться в выводе Gradle. Команда та же, что зовёт Gradle: общая
+      # библиотека под arm64 с фичами читалки (`save` тянет `images`).
       # Линковка тут не лишняя: она и доказывает, что ядро собирается
       # в одно целое под чужую платформу.
       - name: The core links into a shared library for arm64
-        run: >
-          cargo rustc --lib --crate-type cdylib
-          --target aarch64-linux-android --features typeset,save
+        run: sh android/core.sh "$RUNNER_TEMP/core" arm64-v8a
       # Потом само приложение (`android/`): Kotlin поверх того же ядра.
       # Одна ABI — телефонная; эмуляторную x86_64 CI не гоняет.
       - uses: actions/setup-java@v4

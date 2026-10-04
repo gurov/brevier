@@ -77,11 +77,12 @@ instead.
 
 ### The Android app
 
-JDK 21, the Android SDK (platform 35) and the NDK, plus two Rust targets:
+JDK 17, the Android SDK (platform 35) and the NDK named by `ndkVersion` in
+`android/app/build.gradle.kts`. Rust for the core is pinned in `android/rust-toolchain.toml`,
+and rustup installs that toolchain with both Android targets on the first build.
 
 ```sh
-rustup target add aarch64-linux-android x86_64-linux-android
-export JAVA_HOME=… ANDROID_HOME=…          # ANDROID_NDK_HOME if the NDK is elsewhere
+export JAVA_HOME=… ANDROID_HOME=…
 cd android && ./gradlew assembleDebug                # arm64 and x86_64
 cd android && ./gradlew assembleDebug -Pabis=x86_64  # the emulator only, faster
 ```
@@ -90,6 +91,18 @@ Gradle builds the core for each ABI itself, through `android/core.sh`, and the A
 `android/app/build/outputs/apk/debug/` as `brevier-<version>[-<abi>]-debug.apk`. A debug
 build is signed with the debug key and does not install over a release: uninstall first.
 Release builds are signed by CI.
+
+The release build is reproducible: from the same commit, with the pinned Rust, NDK and JDK,
+the APK comes out the same byte for byte wherever it is built. That is what lets F-Droid
+publish our signed APK instead of signing its own. `./gradlew assembleRelease
+-Pabis=arm64-v8a -Punsigned` builds it without a key, and the release workflow checks it
+that way in a second directory (`apksigcopier compare`). So the pins move only on purpose,
+and the F-Droid recipe moves with them.
+
+The Kotlin component of `rustls-platform-verifier` is kept as source in
+`android/rustls-platform-verifier/`, copied verbatim from upstream, because F-Droid builds
+from source only. Its `VERSION` must match `rustls-platform-verifier-android` in
+`Cargo.lock`, and the build stops when it does not.
 
 ## Before a pull request
 
@@ -153,8 +166,9 @@ Inkscape tends to bring back; CI runs the same check with `--check`.
 Releases are built by CI from a tag (`.github/workflows/release.yml`), not on a laptop. A
 release `vX.Y.Z` needs the version in `Cargo.toml`, a `<release>` entry in the metainfo,
 notes in `packaging/notes/vX.Y.Z.md`, a store changelog in
-`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` (`X·10000 + Y·100 + Z`) and
-the version in the README's download links; CI
+`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` (`X·10000 + Y·100 + Z`), the
+same number as `versionCode` in `android/app/build.gradle.kts` (F-Droid reads it there; the
+build checks it against the version), and the version in the README's download links; CI
 checks the tag against `Cargo.toml`, builds the tarball, the Flatpak and the signed APK, and
 publishes them with `SHA256SUMS`. A published tag is never moved: something newer is a new
 version.

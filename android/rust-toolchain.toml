@@ -1,0 +1,8 @@
+# Rust для ядра под Android — закреплённый, а не `stable`: F-Droid собирает
+# APK заново из исходников и сверяет побайтно с нашим из Releases, а другой
+# rustc — другая библиотека. Файл читает rustup: `core.sh` зовёт cargo
+# из этого каталога. Десктоп и CI-проверки ядра идут на `stable`, как и шли.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+targets = ["aarch64-linux-android", "x86_64-linux-android"]

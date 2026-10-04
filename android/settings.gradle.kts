@@ -13,15 +13,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Kotlin-компонент платформенного проверяющего сертификаты: апстрим
-        // раздаёт его maven-репозиторием из ветки на GitHub. Только эта группа —
-        // остальное из этого репозитория брать незачем.
-        maven {
-            url = uri("https://github.com/rustls/rustls-platform-verifier/raw/maven-archive/android-release-support/maven/")
-            content { includeGroup("org.rustls") }
-        }
     }
 }
 
 rootProject.name = "brevier"
 include(":app")
+// Kotlin-компонент проверяющего сертификаты — исходником, а не AAR.
+include(":rustls-platform-verifier")
