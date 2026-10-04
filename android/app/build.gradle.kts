@@ -129,9 +129,11 @@ android {
 
     buildTypes {
         release {
-            // Без ProGuard: Kotlin-компонент проверяющего зовут по JNI,
-            // и минификатор счёл бы его мёртвым кодом.
-            isMinifyEnabled = false
+            // R8 выбрасывает неиспользуемый код (просьба ревьюера F-Droid).
+            // Всё, что зовут по JNI, он не видит, — правила в proguard-rules.pro
+            // и у модуля rustls-platform-verifier.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (unsigned) null else signingConfigs.findByName("release")
             // Корень Gradle — `android/`, а git — уровнем выше: AGP писал
             // в APK «NO_SUPPORTED_VCS_FOUND», то есть ничего полезного.

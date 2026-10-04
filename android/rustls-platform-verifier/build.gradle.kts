@@ -35,6 +35,7 @@ android {
         minSdk = 24
         // Исходник спрашивает `BuildConfig.TEST`: правда только в тестах апстрима.
         buildConfigField("boolean", "TEST", "false")
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     buildFeatures { buildConfig = true }
