@@ -90,6 +90,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.4" date="2026-10-04" type="development">
+      <description>
+        <p>No changes on Linux: the Android APK is smaller.</p>
+      </description>
+    </release>
     <release version="0.5.3" date="2026-10-04" type="development">
       <description>
         <p>No changes on Linux: this release makes the Android build
