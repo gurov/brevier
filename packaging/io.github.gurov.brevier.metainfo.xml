@@ -90,6 +90,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.3" date="2026-10-04" type="development">
+      <description>
+        <p>No changes on Linux: this release makes the Android build
+          reproducible.</p>
+      </description>
+    </release>
     <release version="0.5.2" date="2026-10-03" type="development">
       <description>
         <p>A bolder mark: the icon no longer thins to a hairline at launcher

@@ -1,0 +1,1 @@
+• First release on F-Droid. The APK is built reproducibly: the same file, with the same signature, as in the GitHub releases.
