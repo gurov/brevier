@@ -37,7 +37,7 @@ save = ["dep:zip", "images"]
 [dependencies]
 comrak = { version = "0.55", default-features = false }
 dom_query = "0.28"
-dom_smoothie = "0.18.1"
+dom_smoothie = "0.18.2"
 # Лента в чужой кодировке (koi8-r, cp1251 в объявлении XML): тот же крейт,
 # которым `ureq` перекодирует страницы, — в сборке он и так есть.
 encoding_rs = "0.8"

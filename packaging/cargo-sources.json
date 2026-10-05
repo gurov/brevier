@@ -470,14 +470,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/dom_smoothie/dom_smoothie-0.18.1.crate",
-        "sha256": "90cea52c49b95c4d1011fa998aa1b558f5ade4fabc051827b3c00df0f6112486",
-        "dest": "cargo/vendor/dom_smoothie-0.18.1"
+        "url": "https://static.crates.io/crates/dom_smoothie/dom_smoothie-0.18.2.crate",
+        "sha256": "1afbed996f0bcb119c068504c7c504d625700d58c8bd862d6f66abd7ae7d3859",
+        "dest": "cargo/vendor/dom_smoothie-0.18.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"90cea52c49b95c4d1011fa998aa1b558f5ade4fabc051827b3c00df0f6112486\", \"files\": {}}",
-        "dest": "cargo/vendor/dom_smoothie-0.18.1",
+        "contents": "{\"package\": \"1afbed996f0bcb119c068504c7c504d625700d58c8bd862d6f66abd7ae7d3859\", \"files\": {}}",
+        "dest": "cargo/vendor/dom_smoothie-0.18.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {

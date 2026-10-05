@@ -175,7 +175,6 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let cfg = Config::default();
 
     let doc = Document::from(html);
-    unlazy(&doc);
     deicon(&doc);
     keep_lang(&doc);
     keep_verse_class(&doc);
@@ -883,9 +882,9 @@ fn piece_of(node: &NodeRef, base: Option<&Url>) -> Option<Piece> {
     head_key(node).map(Piece::Head)
 }
 
-/// Чем узнаётся картинка — своим адресом. К этому времени ложную
-/// ленивость уже снял `unlazy`, поэтому в `src` стоит то же, что увидит
-/// читатель.
+/// Чем узнаётся картинка — своим адресом. Рабочий `src` извлечение
+/// не подменяет (с dom_smoothie 0.18.2 подсказка `loading="lazy"` для него
+/// не признак ленивой картинки, #17), поэтому в нём то же, что увидит читатель.
 ///
 /// Адрес приводим к абсолютному: в извлечённом его уже развернул
 /// `Readability`, а на странице он лежит как написан. Сверяя как есть,
@@ -1835,36 +1834,6 @@ fn join_run(run: &[NodeRef]) {
     first.set_html(lines.join("<br>"));
     first.remove_attr(VERSE_ATTR);
     first.rename(if inside_p { "span" } else { "p" });
-}
-
-/// Снять подсказку `loading="lazy"` с картинок, у которых адрес и так на месте.
-///
-/// `loading` — подсказка браузеру, когда качать, а не признак подменённого
-/// адреса. dom_smoothie считает иначе: у него в «ленивые» попадает любая
-/// `<img loading="lazy">`, и тогда он ищет настоящий адрес по остальным
-/// атрибутам — берёт первый, в значении которого мерещится имя файла
-/// картинки. У википедии рядом со `src` стоит `resource` с адресом
-/// *страницы описания* файла (`…/wiki/Файл:Портрет.jpg`), и он затирает
-/// настоящий адрес на upload.wikimedia.org — вместо фотографии читателю
-/// приезжает html. Иконки на той же странице уцелели случайно: их `resource`
-/// оканчивается на `.svg`, а этого расширения в списке у dom_smoothie нет.
-///
-/// В самом readability.js ленивой считается картинка без `src` либо
-/// с классом `lazy`; возвращаем это правило, снимая подсказку с тех,
-/// у кого адрес уже есть. Заглушку в `src` (`data:`-пиксель) не трогаем:
-/// вот там подстановка по атрибутам и есть единственный способ найти
-/// картинку.
-fn unlazy(doc: &Document) {
-    for node in doc.select("img[loading]").nodes() {
-        let Some(src) = node.attr("src") else {
-            continue;
-        };
-        let src = src.trim();
-        if src.is_empty() || src.starts_with("data:") {
-            continue;
-        }
-        node.remove_attr("loading");
-    }
 }
 
 #[cfg(test)]
