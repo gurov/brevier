@@ -1,0 +1,1 @@
+• Nothing changes on the phone: a fix from Brevier now lives in its extraction library, and pages read as before.

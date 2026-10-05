@@ -90,6 +90,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.5" date="2026-10-05" type="development">
+      <description>
+        <p>A code block is drawn as one panel: the margins above and below the
+          code and the empty lines inside it no longer show the colour of the
+          page.</p>
+      </description>
+    </release>
     <release version="0.5.4" date="2026-10-04" type="development">
       <description>
         <p>No changes on Linux: the Android APK is smaller.</p>
