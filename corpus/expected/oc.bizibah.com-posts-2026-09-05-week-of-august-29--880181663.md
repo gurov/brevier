@@ -6,17 +6,6 @@ September 5, 2026
 
 On this page
 
-- [Volume](#volume)
-- [What the week was about](#what-the-week-was-about)
-- [The same day in four markets](#the-same-day-in-four-markets)
-- [How far stories travel](#how-far-stories-travel)
-- [How long a story lasts](#how-long-a-story-lasts)
-- [Who moves together](#who-moves-together)
-- [How stories move between newsrooms](#how-stories-move-between-newsrooms)
-- [What the headline said first](#what-the-headline-said-first)
-- [Words that have to be quoted](#words-that-have-to-be-quoted)
-- [Method](#method)
-
 Between 29 August and 4 September 2026 this project collected **30,467 articles** and grouped them into **1,364 stories** across four markets. A story is a cluster of articles close enough in meaning to be the same event[3](https://oc.bizibah.com/method/#n3 "What a story is"); independence is counted in owners, not outlets[4](https://oc.bizibah.com/method/#n4 "Owners, not outlets"). Superscripts link into the [method page](https://oc.bizibah.com/method/), where each measurement is defined once.
 
 ## Volume

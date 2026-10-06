@@ -254,14 +254,6 @@ Lecture 5 of 8
 
 Russian Art in the 20th Century
 
-- [Предыдущий материал](https://arzamas.academy/materials/1235)
-
-  Conceptualism and Sots Art
-
-- [Следующий материал](https://arzamas.academy/materials/1233)
-
-  Socialist Realism
-
 Хотите быть в курсе всего?
 
 Подпишитесь на нашу рассылку, вам понравится. Мы обещаем писать редко и по делу

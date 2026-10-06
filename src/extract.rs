@@ -191,6 +191,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let feeds = crate::feed::advertised(&doc, url);
     let next = next_page(&doc, url);
     let listing = listing(&doc, url);
+    let chrome = chrome(&doc, url);
     // Язык страницы — до того, как `Readability` заберёт документ себе.
     let lang = html_lang(&doc);
     // Копия — под сверку с извлечённым: `Readability` документ забирает себе
@@ -221,6 +222,11 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     } else {
         content_html
     };
+
+    // Навигация — из готового текста, а не из страницы до извлечения:
+    // Readability должна видеть страницу как есть, иначе у неё меняется
+    // выбор заголовка (sive.rs держит имя сайта в `<h1>` внутри `<nav>`).
+    let content_html = unnav(&content_html, &chrome);
 
     // Стих — после того, как Readability выбрала область статьи, не до
     // него (#21). Отдать ей готовые `<p>` заранее значит подсунуть чужой
@@ -481,6 +487,104 @@ const PRINT_HIDDEN: &str = ".noprint,.no-print,.hidden-print,.d-print-none";
 fn unprint(doc: &Document) {
     for node in doc.select(PRINT_HIDDEN).nodes() {
         node.remove_from_parent();
+    }
+}
+
+/// Что страница сама объявила интерфейсом сайта — для [`unnav`]. Снимается
+/// с исходного дерева: Readability меняет имена (`<h1>` статьи у неё
+/// становится `<h2>`) и выбрасывает флажки.
+struct Chrome {
+    /// `id` флажков и переключателей: подпись к такому — кнопка на CSS.
+    toggles: HashSet<String>,
+    /// Текст `<h1>`, целиком ссылки на корень сайта, когда на странице есть
+    /// и другой `<h1>`: это шапка сайта, а не заголовок статьи.
+    mastheads: HashSet<String>,
+}
+
+fn chrome(doc: &Document, url: &str) -> Chrome {
+    let toggles = doc
+        .select("input[type=\"checkbox\" i][id], input[type=\"radio\" i][id]")
+        .nodes()
+        .iter()
+        .filter_map(|input| input.attr("id").map(|id| id.to_string()))
+        .collect();
+
+    let base = Url::parse(url).ok();
+    let root = |href: &str| {
+        absolute(base.as_ref(), href)
+            .and_then(|address| Url::parse(&address).ok())
+            .is_some_and(|address| {
+                address.path() == "/"
+                    && address.query().is_none()
+                    && address.host_str() == base.as_ref().and_then(Url::host_str)
+            })
+    };
+    let headings = doc.select("h1").nodes().to_vec();
+    let mastheads = if headings.len() < 2 {
+        HashSet::new()
+    } else {
+        headings
+            .iter()
+            .filter(|heading| {
+                let links = heading.find(&["a"]);
+                matches!(links.as_slice(), [link]
+                    if squeeze(&link.text()) == squeeze(&heading.text())
+                        && link.attr("href").is_some_and(|href| root(&href)))
+            })
+            .map(|heading| squeeze(&heading.text()))
+            .collect()
+    };
+    Chrome { toggles, mastheads }
+}
+
+/// Навигация сайта уходит из текста статьи (#33): полка её уже собрала
+/// (`site`), следующую страницу — `next_page`.
+///
+/// Readability выбирает контейнер, и если статья не завёрнута в `<article>`
+/// (тема Jekyll для GitHub Pages кладёт всё в один `div.markdown-body`),
+/// меню едет в текст вместе с ним. Признаки по разметке, а не по сайту:
+///
+/// - `<nav>` и `role="navigation"` — навигация по определению; оглавление
+///   в `<nav>` уходит тоже — на полке оно есть;
+/// - подпись к флажку (`<label for>`) из одного значка — кнопка меню на CSS
+///   («☰»). Подпись со словами остаётся: тем же приёмом делают сноски
+///   на полях (without.boats), и там подпись — текст автора;
+/// - шапка сайта — см. [`Chrome::mastheads`].
+fn unnav(content: &str, chrome: &Chrome) -> String {
+    let article = Document::from(content.to_owned());
+    let mut changed = false;
+
+    let navigation = article.select("nav, [role=\"navigation\" i]");
+    if !navigation.is_empty() {
+        navigation.remove();
+        changed = true;
+    }
+    for label in article.select("label[for]").nodes() {
+        let toggle = label
+            .attr("for")
+            .is_some_and(|id| chrome.toggles.contains(id.as_ref()));
+        let glyph = !label.text().chars().any(char::is_alphanumeric);
+        if toggle && glyph && !label.ancestors_it(None).any(|up| up.is("form")) {
+            label.remove_from_parent();
+            changed = true;
+        }
+    }
+    if !chrome.mastheads.is_empty() {
+        for heading in article.select("h1, h2").nodes() {
+            let links = heading.find(&["a"]);
+            if links.len() == 1 && chrome.mastheads.contains(&squeeze(&heading.text())) {
+                heading.remove_from_parent();
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return content.to_owned();
+    }
+    match article.select("#readability-page-1").nodes().first() {
+        Some(node) => node.html().to_string(),
+        None => article.select("body").inner_html().to_string(),
     }
 }
 
@@ -1948,6 +2052,89 @@ mod tests {
         let page = series(r#"<link rel="next" href="https://e.com/series/2/">"#, "");
         let next = extract(&page, url).unwrap().next.unwrap();
         assert_eq!(next.title, "https://e.com/series/2/");
+    }
+
+    #[test]
+    fn site_navigation_inside_the_container_leaves_the_text() {
+        // Как у темы GitHub Pages: ни `<article>`, ни `<main>` — один
+        // контейнер, и меню сайта лежит в нём рядом со статьёй (#33).
+        let text = TEXT;
+        let page = format!(
+            r##"<html><body><div class="container markdown-body">
+            <h1><a href="https://e.com/">The Site Title</a></h1>
+            <input type="checkbox" id="series-nav" class="toggle">
+            <label for="series-nav" class="button">☰</label>
+            <nav class="panel"><h2>Серия</h2><ul>
+              <li><a href="/ru/"><span>I</span><span>Первая часть</span></a></li>
+              <li><a href="/ru/2/"><span>II</span><span>Вторая часть</span></a></li>
+            </ul><label for="series-nav">✕ Закрыть</label></nav>
+            <nav id="top"><span>НЕДЕЛЯ: <strong>I</strong>—<a href="/ru/2/">II</a></span></nav>
+            <h1 id="first">Первая часть</h1>
+            <p>{text}</p><p>{text}</p><p>{text}</p>
+            <nav><a href="#top">↑ Наверх</a> · <a href="/ru/2/" rel="next">Дальше: вторая часть</a></nav>
+            </div></body></html>"##
+        );
+        let article = extract(&page, "https://e.com/ru/").unwrap();
+        let html = &article.content_html;
+        for gone in [
+            "☰",
+            "Закрыть",
+            "НЕДЕЛЯ",
+            "Наверх",
+            "The Site Title",
+            "IПервая",
+        ] {
+            assert!(!html.contains(gone), "{gone} в тексте:\n{html}");
+        }
+        assert!(html.contains("Кеннет Эрроу"));
+        // Полка и «дальше» своё уже взяли.
+        assert!(
+            article
+                .site
+                .iter()
+                .any(|link| link.address == "https://e.com/ru/2/")
+        );
+        assert_eq!(article.next.unwrap().address, "https://e.com/ru/2/");
+    }
+
+    #[test]
+    fn a_heading_that_links_home_stays_when_it_is_the_only_one() {
+        let text = TEXT;
+        let page = format!(
+            r#"<html><body><article><h1><a href="/">Единственный заголовок</a></h1><p>{text}</p><p>{text}</p></article></body></html>"#
+        );
+        let article = extract(&page, "https://e.com/post").unwrap();
+        assert!(
+            article.content_html.contains("Единственный заголовок"),
+            "{}",
+            article.content_html
+        );
+    }
+
+    #[test]
+    fn a_sidenote_label_with_words_is_the_author_s_text() {
+        // Сноска на полях на CSS (without.boats): подпись к флажку — слова
+        // автора, а не кнопка.
+        let text = TEXT;
+        let page = format!(
+            r#"<html><body><article><h1>Заметка</h1><p>{text} <span class="sidenote"><label class="sidenote-label" for="1">Подпись к сноске на полях</label><input class="sidenote-checkbox" type="checkbox" id="1"><span class="sidenote-content">Сама сноска.</span></span></p><p>{text}</p></article></body></html>"#
+        );
+        let html = extract(&page, "https://e.com/note").unwrap().content_html;
+        assert!(html.contains("Подпись к сноске на полях"), "{html}");
+    }
+
+    #[test]
+    fn a_label_inside_a_form_is_not_a_menu_toggle() {
+        let text = TEXT;
+        let page = format!(
+            r#"<html><body><article><h1>Опрос</h1><p>{text}</p><form><input type="checkbox" id="agree"><label for="agree">Согласен с условиями опроса</label></form><p>{text}</p></article></body></html>"#
+        );
+        assert!(
+            extract(&page, "https://e.com/poll")
+                .unwrap()
+                .content_html
+                .contains("Согласен")
+        );
     }
 
     #[test]
