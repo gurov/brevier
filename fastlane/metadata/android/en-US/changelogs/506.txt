@@ -1,0 +1,1 @@
+• Nothing changes on the phone: this release fixes formulas, images and the icon in the desktop window.
