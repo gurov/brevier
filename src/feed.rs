@@ -144,7 +144,7 @@ pub fn decode(bytes: &[u8], charset: Option<&str>) -> String {
 }
 
 /// Кодировка из объявления XML — оно всегда в начале и всегда ASCII.
-fn declared(bytes: &[u8]) -> Option<String> {
+pub(crate) fn declared(bytes: &[u8]) -> Option<String> {
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(256)]);
     let declaration = head.split_once("<?xml")?.1.split_once("?>")?.0;
     let value = declaration.split_once("encoding")?.1.trim_start();

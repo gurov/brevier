@@ -52,7 +52,7 @@ resvg = { version = "0.48.1", optional = true }
 # Ленты RSS и Atom: разбор XML без зависимостей. Та же версия, что тянет `resvg`.
 roxmltree = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli", "charset"] }
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli"] }
 url = "2.5.8"
 zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }
 

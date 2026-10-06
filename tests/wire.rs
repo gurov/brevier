@@ -227,6 +227,93 @@ fn windows_1251_is_decoded() {
     );
 }
 
+/// Страница старого русского сайта: сервер о кодировке молчит, сама страница
+/// называет её в `<meta>` (#32).
+fn old_page(declaration: &str, text: &[u8]) -> Vec<u8> {
+    let mut body =
+        format!("<html><head>{declaration}<title>T</title></head><body><article><h1>T</h1><p>")
+            .into_bytes();
+    for _ in 0..6 {
+        body.extend_from_slice(text);
+        body.extend_from_slice(b" ");
+    }
+    body.extend_from_slice(b"</p></article></body></html>");
+    body
+}
+
+#[test]
+fn a_page_that_names_its_encoding_only_in_meta_opens() {
+    // «Съешь же ещё этих мягких французских булок» — в cp1251 и в koi8-r.
+    let phrase = "Съешь же ещё этих мягких французских булок, да выпей чаю.";
+    let cp1251: Vec<u8> = phrase.chars().map(cp1251_byte).collect();
+    let koi8: Vec<u8> = phrase.chars().map(koi8_byte).collect();
+    let base = serve(vec![
+        Route {
+            path: "/cp",
+            content_type: "text/html",
+            body: old_page(r#"<meta charset="windows-1251">"#, &cp1251),
+        },
+        Route {
+            path: "/koi",
+            content_type: "text/html",
+            body: old_page(
+                r#"<meta http-equiv="Content-Type" content="text/html; charset=koi8-r">"#,
+                &koi8,
+            ),
+        },
+    ]);
+    for path in ["/cp", "/koi"] {
+        let out = brevier(&[&format!("{base}{path}")]);
+        assert!(
+            out.status.success(),
+            "{path}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(stdout(&out).contains(phrase), "{path}: {}", stdout(&out));
+    }
+
+    // И та же страница, принесённая в stdin.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_brevier"))
+        .args(["--stdin", "https://old.example/page"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&old_page(r#"<meta charset="windows-1251">"#, &cp1251))
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(stdout(&out).contains(phrase), "{}", stdout(&out));
+}
+
+/// Буква кириллицы в cp1251; ASCII как есть.
+fn cp1251_byte(ch: char) -> u8 {
+    match ch {
+        'А'..='я' => (ch as u32 - 'А' as u32 + 0xc0) as u8,
+        'ё' => 0xb8,
+        'Ё' => 0xa8,
+        _ => ch as u8,
+    }
+}
+
+/// Буква кириллицы в koi8-r; ASCII как есть.
+fn koi8_byte(ch: char) -> u8 {
+    const LOWER: &str = "юабцдефгхийклмнопярстужвьызшэщчъ";
+    match ch {
+        'ё' => 0xa3,
+        'Ё' => 0xb3,
+        'а'..='я' => 0xc0 + LOWER.chars().position(|c| c == ch).unwrap() as u8,
+        'А'..='Я' => {
+            let lower = ch.to_lowercase().next().unwrap();
+            0xe0 + LOWER.chars().position(|c| c == lower).unwrap() as u8
+        }
+        _ => ch as u8,
+    }
+}
+
 #[test]
 fn links_are_absolute() {
     let base = serve(vec![route("/a", "text/html", ARTICLE)]);
@@ -332,6 +419,22 @@ fn a_feed_names_its_encoding_in_the_declaration() {
     let base = serve(vec![Route {
         path: "/koi",
         content_type: "application/rss+xml",
+        body,
+    }]);
+    let out = stdout(&brevier(&[&format!("{base}/koi")]));
+    assert!(out.starts_with("# Привет\n"), "{out}");
+}
+
+#[test]
+fn a_feed_with_its_encoding_in_the_header_is_decoded_once() {
+    // Раньше ureq сам перекодировал тело `text/*` по заголовку, а лента
+    // декодировала его второй раз — выходила «п÷я─п╦п╡п╣я┌» (#32).
+    let mut body = b"<rss><channel><title>".to_vec();
+    body.extend_from_slice(&[0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4]);
+    body.extend_from_slice(b"</title></channel></rss>");
+    let base = serve(vec![Route {
+        path: "/koi",
+        content_type: "text/xml; charset=koi8-r",
         body,
     }]);
     let out = stdout(&brevier(&[&format!("{base}/koi")]));

@@ -270,12 +270,11 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         .to_ascii_lowercase();
     let kind = ContentKind::from_mime(&mime).ok_or(Error::UnsupportedContentType(mime.clone()))?;
 
+    // Тело читаем байтами: кодировку страница часто называет сама, а не
+    // заголовок ответа (#32), — и лента тоже, в объявлении XML.
+    let charset = res.body().charset().map(str::to_owned);
+    let bytes = res.body_mut().with_config().limit(MAX_BODY).read_to_vec()?;
     let (kind, body) = if kind == ContentKind::Feed {
-        // XML читаем байтами: кодировку ленты чаще называет её собственное
-        // объявление, чем заголовок ответа, а `read_to_string` знает только
-        // заголовок.
-        let charset = res.body().charset().map(str::to_owned);
-        let bytes = res.body_mut().with_config().limit(MAX_BODY).read_to_vec()?;
         let body = feed::decode(&bytes, charset.as_deref());
         // `application/xml` оказался не лентой — это не текст для чтения.
         if !feed::is_feed(&body) {
@@ -283,13 +282,7 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         }
         (kind, body)
     } else {
-        // read_to_string перекодирует из charset заголовка (фича `charset`):
-        // cp1251 и прочий доюникодный веб никуда не делся.
-        let body = res
-            .body_mut()
-            .with_config()
-            .limit(MAX_BODY)
-            .read_to_string()?;
+        let body = decode(&bytes, charset.as_deref(), kind);
         // Ленту отдают и `text/html`, и `text/plain` (сырые файлы хостингов):
         // по телу видно, что это она.
         let kind = if feed::is_feed(&body) {
@@ -306,6 +299,141 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         body,
         redirects,
     })
+}
+
+/// Текст страницы из её байтов (#32).
+///
+/// Порядок — браузерный (HTML Standard, «encoding sniffing») без того, что
+/// требует браузера: метка порядка байтов; `charset` заголовка; объявление
+/// в самой странице — `<meta charset>` или `http-equiv` в первых 1024 байтах,
+/// а у XHTML и ленты на руках — объявление XML; UTF-8, если байты им
+/// и являются; иначе windows-1252 — умолчание стандарта для страницы, которая
+/// не сказала ничего. Старый веб чаще всего именно такой: сервер молчит,
+/// а страница называет cp1251 или koi8-r в `<meta>`. Угадывать молчащую
+/// по статистике (chardetng, как Firefox) не берёмся.
+///
+/// Битый байт — не ошибка, а U+FFFD, как у браузера: страница в кодировке,
+/// которую она назвала неверно, всё равно читается почти целиком.
+pub fn decode(bytes: &[u8], charset: Option<&str>, kind: ContentKind) -> String {
+    let named = |label: &str| encoding_rs::Encoding::for_label(label.trim().as_bytes());
+    let header = charset.and_then(named);
+    let inside = || {
+        if kind != ContentKind::Html {
+            return None;
+        }
+        let encoding = prescan(bytes)
+            .or_else(|| feed::declared(bytes))
+            .and_then(|label| named(&label))?;
+        // Так велит стандарт: объявление, сделанное ASCII-байтами, не может
+        // говорить правду о UTF-16, а `x-user-defined` — это windows-1252.
+        Some(
+            if encoding == encoding_rs::UTF_16LE || encoding == encoding_rs::UTF_16BE {
+                encoding_rs::UTF_8
+            } else if encoding == encoding_rs::X_USER_DEFINED {
+                encoding_rs::WINDOWS_1252
+            } else {
+                encoding
+            },
+        )
+    };
+    let encoding = header.or_else(inside).unwrap_or_else(|| {
+        // Недописанный последний знак — обрыв тела, а не другая кодировка.
+        match std::str::from_utf8(bytes) {
+            Err(error) if error.error_len().is_some() => encoding_rs::WINDOWS_1252,
+            _ => encoding_rs::UTF_8,
+        }
+    });
+    // `decode` сам смотрит на метку порядка байтов, и она старше всего.
+    encoding.decode(bytes).0.into_owned()
+}
+
+/// Кодировка из `<meta>` в первых 1024 байтах страницы: `charset="…"` или
+/// `http-equiv="Content-Type" content="text/html; charset=…"`. Разбор
+/// грубее стандартного, но тех же правил: теги ищутся вне комментариев,
+/// регистр не важен, кавычки любые или никаких.
+fn prescan(bytes: &[u8]) -> Option<String> {
+    // Байты как Latin-1: позиции совпадают с байтовыми, а всё, что нужно
+    // найти, — ASCII.
+    let head: String = bytes[..bytes.len().min(1024)]
+        .iter()
+        .map(|&byte| char::from(byte).to_ascii_lowercase())
+        .collect();
+    let mut at = 0;
+    while let Some(found) = head[at..].find('<') {
+        let rest = &head[at + found..];
+        if let Some(comment) = rest.strip_prefix("<!--") {
+            let end = comment.find("-->")?;
+            at += found + 4 + end + 3;
+            continue;
+        }
+        at += found + 1;
+        let Some(tag) = rest.strip_prefix("<meta") else {
+            continue;
+        };
+        if !tag.starts_with(|ch: char| ch.is_ascii_whitespace() || ch == '/') {
+            continue;
+        }
+        let tag = &tag[..tag.find('>').unwrap_or(tag.len())];
+        let attributes = attributes(tag);
+        let value = |name: &str| {
+            attributes
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.as_str())
+        };
+        if let Some(charset) = value("charset") {
+            return Some(charset.to_owned());
+        }
+        if value("http-equiv") == Some("content-type")
+            && let Some(content) = value("content")
+            && let Some((_, charset)) = content.split_once("charset")
+            && let Some(charset) = charset.trim_start().strip_prefix('=')
+        {
+            let charset = charset.trim_start().trim_matches(['"', '\'']);
+            let end = charset
+                .find(|ch: char| ch == ';' || ch == '"' || ch == '\'' || ch.is_ascii_whitespace())
+                .unwrap_or(charset.len());
+            return Some(charset[..end].to_owned());
+        }
+    }
+    None
+}
+
+/// Атрибуты тега парами «имя — значение»: значение в любых кавычках или без.
+fn attributes(tag: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let mut rest = tag;
+    loop {
+        rest = rest.trim_start_matches(|ch: char| ch.is_ascii_whitespace() || ch == '/');
+        let end = rest
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '=' || ch == '/')
+            .unwrap_or(rest.len());
+        if end == 0 {
+            return found;
+        }
+        let name = rest[..end].to_owned();
+        rest = rest[end..].trim_start();
+        let Some(after) = rest.strip_prefix('=') else {
+            found.push((name, String::new()));
+            continue;
+        };
+        let after = after.trim_start();
+        let (value, tail) = match after.chars().next() {
+            Some(quote @ ('"' | '\'')) => {
+                let inner = &after[1..];
+                let close = inner.find(quote).unwrap_or(inner.len());
+                (&inner[..close], inner.get(close + 1..).unwrap_or(""))
+            }
+            _ => {
+                let close = after
+                    .find(|ch: char| ch.is_ascii_whitespace())
+                    .unwrap_or(after.len());
+                (&after[..close], &after[close..])
+            }
+        };
+        found.push((name, value.to_owned()));
+        rest = tail;
+    }
 }
 
 /// Что отправляем серверу. Схема проверяется здесь, и здесь же отрезается
@@ -439,6 +567,76 @@ mod tests {
         // ureq отдаёт mime_type() уже без `; charset=...`, но регистр бывает любой.
         assert_eq!(ContentKind::from_mime("text/html"), Some(ContentKind::Html));
         assert_eq!(ContentKind::from_mime("application/pdf"), None);
+    }
+
+    /// «Привет» в cp1251 и в koi8-r.
+    const CP1251: &[u8] = &[0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2];
+    const KOI8: &[u8] = &[0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4];
+
+    fn page(head: &str, text: &[u8]) -> Vec<u8> {
+        let mut bytes = format!("<html><head>{head}</head><body><p>").into_bytes();
+        bytes.extend_from_slice(text);
+        bytes.extend_from_slice(b"</p></body></html>");
+        bytes
+    }
+
+    fn read(bytes: &[u8], charset: Option<&str>) -> String {
+        decode(bytes, charset, ContentKind::Html)
+    }
+
+    #[test]
+    fn a_page_names_its_encoding_in_meta() {
+        let html = read(&page(r#"<meta charset="windows-1251">"#, CP1251), None);
+        assert!(html.contains("<p>Привет</p>"), "{html}");
+        let html = read(&page("<META CHARSET=koi8-r>", KOI8), None);
+        assert!(html.contains("<p>Привет</p>"), "{html}");
+    }
+
+    #[test]
+    fn the_older_http_equiv_form_counts_too() {
+        let head = r#"<meta http-equiv="Content-Type" content="text/html; charset=koi8-r">"#;
+        assert!(read(&page(head, KOI8), None).contains("Привет"));
+        let head = "<meta content='text/html;charset=windows-1251' http-equiv='content-type'>";
+        assert!(read(&page(head, CP1251), None).contains("Привет"));
+    }
+
+    #[test]
+    fn the_header_outranks_the_page_and_a_byte_order_mark_outranks_both() {
+        // Сервер прав, страница ошиблась: верим серверу, как браузер.
+        let bytes = page(r#"<meta charset="koi8-r">"#, CP1251);
+        assert!(read(&bytes, Some("windows-1251")).contains("Привет"));
+        // Метка UTF-8 — старше заголовка.
+        let mut bytes = b"\xef\xbb\xbf".to_vec();
+        bytes.extend_from_slice(&page("", "Привет".as_bytes()));
+        assert!(read(&bytes, Some("windows-1251")).contains("Привет"));
+    }
+
+    #[test]
+    fn a_meta_in_a_comment_or_past_1024_bytes_is_not_read() {
+        let head = r#"<!-- <meta charset="koi8-r"> -->"#;
+        assert!(!read(&page(head, CP1251), None).contains("Привет"));
+        let head = format!(
+            "<title>{}</title><meta charset=windows-1251>",
+            "x".repeat(1100)
+        );
+        assert!(!read(&page(&head, CP1251), None).contains("Привет"));
+    }
+
+    #[test]
+    fn a_page_that_says_nothing_is_utf8_if_it_can_be_and_never_an_error() {
+        assert!(read(&page("", "Привет".as_bytes()), None).contains("Привет"));
+        // Обрыв посреди знака — всё ещё UTF-8.
+        let cut = &"Привет".as_bytes()[..5];
+        assert!(read(cut, None).starts_with("Пр"));
+        // Не UTF-8 и не названа — windows-1252, а не отказ.
+        assert_eq!(read(b"caf\xe9 au lait", None), "café au lait");
+    }
+
+    #[test]
+    fn markdown_is_not_searched_for_meta() {
+        // Метатег в markdown — пример в тексте, а не объявление.
+        let text = b"Example: <meta charset=\"koi8-r\">\n\n\xd0\x9f\xd1\x80\xd0\xb8";
+        assert!(decode(text, None, ContentKind::Markdown).ends_with("При"));
     }
 
     fn html_page(body: &str) -> Page {

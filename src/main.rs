@@ -128,11 +128,13 @@ fn check_page(args: &Args) -> ExitCode {
     // первой такой ошибки: она важнее порога.
     let mut failed: Option<u8> = None;
     if args.stdin {
-        let mut html = String::new();
-        if let Err(e) = io::stdin().read_to_string(&mut html) {
-            eprintln!("brevier: {}", Error::Convert(e));
-            return ExitCode::from(6);
-        }
+        let html = match stdin_page() {
+            Ok(html) => html,
+            Err(e) => {
+                eprintln!("brevier: {e}");
+                return ExitCode::from(6);
+            }
+        };
         reports.push(check::check_html(&html, &args.url));
     } else {
         for url in std::iter::once(&args.url).chain(&args.more) {
@@ -243,13 +245,24 @@ fn save_page(_args: &Args) -> ExitCode {
 #[cfg(feature = "save")]
 fn document(args: &Args) -> Result<brevier::Document, Error> {
     if args.stdin {
-        let mut html = String::new();
-        io::stdin()
-            .read_to_string(&mut html)
-            .map_err(Error::Convert)?;
-        return brevier::from_html(&html, &args.url);
+        return brevier::from_html(&stdin_page()?, &args.url);
     }
     brevier::open(&address::parse(&args.url)?, args.ua)
+}
+
+/// Страница из stdin. Байтами, а не строкой: старый веб бывает в cp1251
+/// и koi8-r, и сказано это в самой странице (#32), — разбирает кодировку
+/// тот же `fetch::decode`, что и у страницы из сети, только без заголовка.
+fn stdin_page() -> Result<String, Error> {
+    let mut bytes = Vec::new();
+    io::stdin()
+        .read_to_end(&mut bytes)
+        .map_err(Error::Convert)?;
+    Ok(brevier::fetch::decode(
+        &bytes,
+        None,
+        brevier::fetch::ContentKind::Html,
+    ))
 }
 
 fn run(args: &Args) -> Result<String, Error> {
@@ -267,10 +280,7 @@ fn run(args: &Args) -> Result<String, Error> {
     }
 
     let text = if args.stdin {
-        let mut html = String::new();
-        io::stdin()
-            .read_to_string(&mut html)
-            .map_err(Error::Convert)?;
+        let html = stdin_page()?;
         // Лента на руках идёт тем же трактом, что из сети.
         if brevier::feed::is_feed(&html) {
             feed_text(&html, &args.url)?
