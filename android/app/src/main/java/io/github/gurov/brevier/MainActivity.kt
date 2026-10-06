@@ -475,9 +475,15 @@ class MainActivity : Activity(), ArticleHost {
         val fresh = tab.view == null
         val view = tab.view ?: ArticleView(this, this).also { tab.view = it }
         if (view.parent !== stage) {
+            // Фокус был у прежней статьи — переходит к новой. Иначе Android
+            // отдаёт его первому, кто может взять, — полю адреса, и `setAddress`
+            // оставлял в нём адрес прежней вкладки, будто читатель печатает:
+            // так открывалась ссылка из другого приложения после нажатия в статье.
+            val reading = stage.hasFocus()
             stage.removeAllViews()
             (view.parent as? ViewGroup)?.removeView(view)
             stage.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            if (reading) view.requestFocus()
         }
         if (tab.pending) wakeTab(tab) else if (fresh) render(tab)
         closeFind()
