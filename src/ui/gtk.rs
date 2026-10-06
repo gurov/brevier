@@ -2889,7 +2889,14 @@ fn page_css(dark: bool) -> String {
         // Шапка и окно — в тот же тёплый ряд, что и бумага. Иначе слоновая
         // кость соседствует с холодно-белой панелью GTK, и окно выглядит
         // склеенным из двух разных.
+        //
+        // Значок окна в шапке (его просит раскладка кнопок `icon:…`, так
+        // у flatpak под GNOME) тема ставила вплотную к краю окна: кнопки
+        // окна она сдвигает к краю на −6 px, а отступ возвращает только
+        // первой кнопке — значок же не кнопка. Возвращаем и ему.
         "window, headerbar {{ background-color: {shelf}; }}\n\
+         headerbar windowcontrols.start > image.icon:first-child {{ margin-left: 6px; }}\n\
+         headerbar windowcontrols.end > image.icon:last-child {{ margin-right: 6px; }}\n\
          .page, .page text {{ background-color: {paper}; color: {ink}; }}\n\
          .shelf, .shelf > viewport, .shelf list, .shelf row {{ background-color: {shelf}; }}\n\
          .shelf separator {{ background-color: {rule}; }}\n\
