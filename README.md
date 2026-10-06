@@ -44,7 +44,7 @@ Nothing is in a store yet — builds for Linux and Android in the
 which distribution is underneath:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.5.6/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.6.0/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -66,8 +66,8 @@ also in the [release](https://github.com/gurov/brevier/releases/latest), or buil
 `packaging/tarball.sh`:
 
 ```sh
-tar xf brevier-0.5.6-x86_64-linux.tar.gz
-cd brevier-0.5.6-x86_64-linux && ./install.sh
+tar xf brevier-0.6.0-x86_64-linux.tar.gz
+cd brevier-0.6.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` puts the binaries, the desktop entry, the icon and the licenses under
@@ -75,7 +75,7 @@ cd brevier-0.5.6-x86_64-linux && ./install.sh
 (`libgtk-4-1` on Debian and Ubuntu) and a glibc no older than the build machine's.
 
 **Android** (7.0 and later, 64-bit ARM — any phone from the last several years): download
-[`brevier-0.5.6-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.5.6/brevier-0.5.6-arm64.apk)
+[`brevier-0.6.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.6.0/brevier-0.6.0-arm64.apk)
 on the phone and open it; Android asks once to allow installing apps from the browser or
 file manager you opened it with. Updates install over it as long as they carry the same
 signature — the release key, whose SHA-256 fingerprint is
@@ -163,7 +163,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action, built from this repository at the ref you name:
 
 ```yaml
-- uses: gurov/brevier@v0.5.6   # a release tag, or @main
+- uses: gurov/brevier@v0.6.0   # a release tag, or @main
   with:
     urls: |
       https://example.com/

@@ -90,6 +90,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.6.0" date="2026-10-06" type="development">
+      <description>
+        <p>Links can be followed from the keyboard: Tab and Shift+Tab mark the
+          next and previous link, Enter follows it. A page that names the one
+          after it ends with a Next line, and Space at its end goes on. Pages
+          that name an older encoding only inside themselves open instead of
+          failing, and site menus that shared the article's container stay
+          out of the text. The mouse's back and forward buttons work.</p>
+      </description>
+    </release>
     <release version="0.5.6" date="2026-10-06" type="development">
       <description>
         <p>A formula with a subscript or a bracket sits on the line instead of

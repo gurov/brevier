@@ -1,0 +1,4 @@
+• A page that names the next one (a series, a book chapter, a thread's next page) ends with a Next: line.
+• Pages in older encodings named only inside the page (windows-1251, KOI8-R) open instead of failing.
+• Site menus that shared the article's container no longer appear in the text.
+• A link from another app shows its own address in the address bar.
