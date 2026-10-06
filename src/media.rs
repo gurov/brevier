@@ -48,7 +48,7 @@ pub enum Fit {
     Natural,
 }
 
-/// Во что вписываем картинку. Собрано в одну структуру, потому что все три
+/// Во что вписываем картинку. Собрано в одну структуру, потому что все
 /// числа приходят из типографики окна и меняются вместе.
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
@@ -61,6 +61,11 @@ pub struct Look {
     /// рядом с которым картинка стоит.
     pub font_size: f32,
     pub fit: Fit,
+    /// Сколько пикселей экрана на точку окна (`scale_factor`, #15). Ширина
+    /// и кегль — в точках, а разбираем картинку в пикселях экрана: на экране
+    /// 2× разобранная в точках выходит мылом. Телефон считает в пикселях
+    /// экрана сразу — у него единица.
+    pub density: f32,
 }
 
 /// Готовая к показу картинка: непрозрачный RGBA8 в нужной ширине.
@@ -70,6 +75,13 @@ pub struct Raster {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    /// Сколько пикселей растра на точку окна: показывать его надо размером
+    /// `width / density`. Не всегда плотность экрана — мелкую картинку
+    /// не растягиваем, и её пиксель остаётся точкой.
+    pub density: f32,
+    /// Сколько нижних рядов — под базовой линией строки (#14). У формулы
+    /// это объявляет MathJax; у остального ноль.
+    pub depth: u32,
 }
 
 /// Откуда брать картинку. Разрешается от адреса документа, а не от того,
@@ -200,6 +212,11 @@ fn raster(bytes: &[u8], look: Look) -> Result<Raster, Error> {
     let source = reader.decode().map_err(|e| Error::Media(e.to_string()))?;
     let (w, h) = (source.width().max(1), source.height().max(1));
 
+    // В колонке картинка не шире меры и не крупнее своей натуры — как её
+    // показал бы и браузер. На плотном экране под ту же величину нужно больше
+    // пикселей: берём сколько есть в файле, но не больше, чем покажет экран.
+    let shown = w.min(width);
+    let width = ((shown as f32 * look.density).round() as u32).clamp(1, w);
     // Увеличивать растр незачем: на мере он станет мылом. Уменьшаем
     // качественным фильтром — картинка в статье одна-две, время терпит.
     let source = if w > width {
@@ -215,6 +232,8 @@ fn raster(bytes: &[u8], look: Look) -> Result<Raster, Error> {
         width,
         height,
         rgba: flatten(rgba.into_raw(), look.paper),
+        density: width as f32 / shown as f32,
+        depth: 0,
     })
 }
 
@@ -251,6 +270,9 @@ fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
         // Формула уже нужного роста: трогаем, только если не влезает.
         Fit::Natural => room.min(1.0),
     };
+    // Величина — в точках окна, рисуем — в пикселях экрана: вектор от этого
+    // только выигрывает.
+    let scale = scale * look.density;
     let w = ((size.width() * scale).round() as u32).clamp(1, MAX_SIDE);
     let h = ((size.height() * scale).round() as u32).clamp(1, MAX_SIDE);
 
@@ -274,20 +296,68 @@ fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
         width: w,
         height: h,
         rgba: pixmap.take(),
+        density: look.density,
+        depth: 0,
     };
     Ok(match look.fit {
-        Fit::Natural => trim(raster, look.paper),
+        Fit::Natural => trim(
+            Raster {
+                depth: (sink(bytes, look.font_size) * scale).round() as u32,
+                ..raster
+            },
+            look.paper,
+        ),
         Fit::Column => raster,
     })
+}
+
+/// Насколько формула уходит под базовую линию, в точках окна (#14).
+///
+/// MathJax пишет это на корне svg: `style="vertical-align: -0.671ex"`.
+/// Браузер опускает картинку на столько, а `GtkTextView` ставит холст нижним
+/// краем на базовую линию — и индекс снизу, дробь, хвост у `p` повисали над
+/// строкой. `ex` — половина кегля, как и у usvg, которым считается остальной
+/// размер, иначе глубина разошлась бы с ростом. Подъём (значение больше нуля)
+/// не берём: это уже не вынос, а картинка, поднятая над строкой.
+fn sink(bytes: &[u8], font_size: f32) -> f32 {
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let Some(start) = head.find("<svg") else {
+        return 0.0;
+    };
+    let tag = &head[start..];
+    let tag = &tag[..tag.find('>').unwrap_or(tag.len())];
+    let Some(value) = tag
+        .split_once("vertical-align")
+        .and_then(|(_, rest)| rest.trim_start().strip_prefix(':'))
+        .map(str::trim_start)
+    else {
+        return 0.0;
+    };
+    let end = value
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+')))
+        .unwrap_or(value.len());
+    let Ok(number) = value[..end].parse::<f32>() else {
+        return 0.0;
+    };
+    let unit = &value[end..];
+    let shift = if unit.starts_with("ex") {
+        number * font_size / 2.0
+    } else if unit.starts_with("em") {
+        number * font_size
+    } else {
+        number
+    };
+    (-shift).max(0.0)
 }
 
 /// Срезать пустые поля формулы сверху и снизу.
 ///
 /// MathJax печатает формулу с запасом под базовой линией и объявляет его
-/// через `vertical-align`; браузер этот запас учитывает, а `GtkTextView`
-/// ставит виджет нижним краем ровно на базовую линию — и формула повисает
-/// над строкой. Пустые ряды снизу срезаны — и она садится куда надо; пустые
-/// сверху срезаны заодно, иначе формула раздувает межстрочный интервал.
+/// через `vertical-align`. Пустой низ — запас, где выноса у этой формулы
+/// нет: срезаем его, и глубина (`depth`) убывает на столько же — рисунок
+/// стоит на базовой линии там же, где стоял, а строку зря не раздвигает.
+/// У формулы без объявленной глубины так она и садится на линию. Пустые
+/// ряды сверху срезаны заодно, иначе формула раздувает межстрочный интервал.
 ///
 /// Больше трети высоты не срезаем: пустая картинка должна остаться картинкой,
 /// а не исчезнуть.
@@ -314,10 +384,13 @@ fn trim(raster: Raster, paper: [u8; 3]) -> Raster {
         return raster;
     }
 
+    let cut = raster.height - bottom as u32;
     Raster {
         width: raster.width,
         height: (bottom - top) as u32,
         rgba: raster.rgba[top * row..bottom * row].to_vec(),
+        density: raster.density,
+        depth: raster.depth.saturating_sub(cut),
     }
 }
 
@@ -386,6 +459,7 @@ mod tests {
             paper: PAPER,
             font_size: 22.0,
             fit,
+            density: 1.0,
         }
     }
 
@@ -475,6 +549,73 @@ mod tests {
 
         assert_eq!(natural.height, 22, "пустой низ не срезан");
         assert_eq!(column.height, 30, "в колонке резать нечего");
+    }
+
+    #[test]
+    fn a_formula_knows_how_deep_it_goes() {
+        // Кегль 20: `ex` — 10 точек. Формула ростом 4ex, из них 1ex под
+        // базовой линией, и рисунок доходит до самого низа — вынос настоящий.
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1ex" height="4ex"
+                        style="vertical-align: -1ex;" viewBox="0 0 10 40">
+                        <rect width="10" height="40" fill="#000"/></svg>"##;
+        let raster = decode(svg, None, formula_look(1.0)).unwrap();
+        assert_eq!((raster.height, raster.depth), (40, 10));
+    }
+
+    #[test]
+    fn an_empty_reserve_under_the_baseline_comes_off_the_depth() {
+        // Тот же запас в 1ex, но рисунок кончается на 5 точек выше низа:
+        // пустые ряды срезаны, и глубина убыла ровно на них — рисунок стоит
+        // на базовой линии там же, где стоял.
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1ex" height="4ex"
+                        style="vertical-align: -1ex;" viewBox="0 0 10 40">
+                        <rect width="10" height="35" fill="#000"/></svg>"##;
+        let raster = decode(svg, None, formula_look(1.0)).unwrap();
+        assert_eq!((raster.height, raster.depth), (35, 5));
+    }
+
+    #[test]
+    fn a_dense_screen_gets_a_formula_in_its_own_pixels() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1ex" height="4ex"
+                        style="vertical-align: -1ex;" viewBox="0 0 10 40">
+                        <rect width="10" height="40" fill="#000"/></svg>"##;
+        let raster = decode(svg, None, formula_look(2.0)).unwrap();
+        assert_eq!((raster.width, raster.height, raster.depth), (20, 80, 20));
+        assert_eq!(raster.density, 2.0);
+    }
+
+    #[test]
+    fn a_picture_is_not_blown_up_for_a_dense_screen() {
+        let png = |width, height| {
+            let mut bytes = Vec::new();
+            image::RgbaImage::new(width, height)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .unwrap();
+            bytes
+        };
+        let dense = Look {
+            density: 2.0,
+            ..look(100, Fit::Column)
+        };
+        // Мельче колонки: пикселей больше, чем в файле, не взять — картинка
+        // остаётся своей величины, точка в пиксель.
+        let small = decode(&png(30, 20), None, dense).unwrap();
+        assert_eq!((small.width, small.density), (30, 1.0));
+        // Шире колонки: в колонку, но пикселями экрана, а не точками окна.
+        let large = decode(&png(300, 200), None, dense).unwrap();
+        assert_eq!((large.width, large.height, large.density), (200, 133, 2.0));
+    }
+
+    /// Формула в своей величине при кегле 20 — `ex` в 10 точек.
+    fn formula_look(density: f32) -> Look {
+        Look {
+            font_size: 20.0,
+            density,
+            ..look(500, Fit::Natural)
+        }
     }
 
     #[test]

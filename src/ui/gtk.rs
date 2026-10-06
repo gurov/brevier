@@ -16,9 +16,11 @@ use std::time::Duration;
 
 mod article;
 mod formula;
+mod sharp;
 
 use article::Article;
 use formula::Formula;
+use sharp::Sharp;
 
 use gtk::gio;
 use gtk::glib;
@@ -327,6 +329,10 @@ struct Tab {
     /// на окно; если читатель сменил его, пока эта вкладка была в фоне,
     /// при показе её надо перерисовать под новую ступень.
     zoom_seen: usize,
+    /// При какой плотности экрана (`scale_factor`) разобраны её картинки.
+    /// Окно переехало на другой экран — перерисовать, как при смене ступени:
+    /// картинки разбираются в пикселях экрана (#15).
+    density_seen: i32,
     /// Кэш «назад/вперёд»: уже показанные документы этой вкладки, по адресу.
     /// «Назад» рисует страницу из него сразу, без сети, — как bfcache
     /// у браузеров. Живёт ровно на путь истории: страницы, обрубленные
@@ -446,11 +452,12 @@ struct Shot {
 /// Иллюстрация — в рамку-виджет на якоре: у неё своя строка, подпись
 /// и клик «открыть в полном размере». Формула — в холст прямо в буфере:
 /// виджет посреди строки текста стоит прокрутки, и это замерено
-/// (см. шапку `formula.rs`).
+/// (см. шапку `formula.rs`). У холста помним его место в буфере — по нему
+/// формулу опускают под базовую линию (`sink`).
 #[derive(Clone)]
 enum Slot {
     Frame(gtk::Box),
-    Canvas(Formula),
+    Canvas(Formula, i32),
 }
 
 impl Shot {
@@ -469,7 +476,7 @@ impl Slot {
     fn frame(&self) -> Option<&gtk::Box> {
         match self {
             Slot::Frame(frame) => Some(frame),
-            Slot::Canvas(_) => None,
+            Slot::Canvas(..) => None,
         }
     }
 }
@@ -989,6 +996,15 @@ fn build(app: &Application, start: Vec<String>) {
             });
         });
     }
+    {
+        // Окно переехало на экран другой плотности: картинки открытой вкладки
+        // разобраны под прежнюю — перерисовать (#15). Фоновые догонят при показе.
+        let ui = ui.clone();
+        let state = state.clone();
+        ui.window.clone().connect_scale_factor_notify(move |_| {
+            rezoom_current(&ui, &state);
+        });
+    }
 
     keyboard(&ui, &state, app);
 
@@ -1095,6 +1111,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             resume: None,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
+            density_seen: 1,
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: true,
@@ -1565,6 +1582,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             resume: None,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
+            density_seen: 1,
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: false,
@@ -2588,6 +2606,7 @@ fn show_document(
         tab.feeds = site_rows(&document.feeds);
         tab.document = Some(document.clone());
         tab.zoom_seen = seen;
+        tab.density_seen = density(ui);
     }
     drop(borrowed);
     sync(ui, state, None);
@@ -3052,6 +3071,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.anchors = page.anchors;
             tab.shots = page.shots.clone();
             tab.zoom_seen = seen;
+            tab.density_seen = density(ui);
         }
     }
     sync(ui, state, None);
@@ -3079,7 +3099,8 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
 /// Догнать общий масштаб на вкладке, которую только что показали. Если
 /// читатель сменил ступень, пока эта вкладка была в фоне, перерисовать её
 /// под новую. Место чтения держится смещением в буфере — от масштаба оно
-/// не зависит, поэтому `redraw` вернёт читателя туда же.
+/// не зависит, поэтому `redraw` вернёт читателя туда же. Так же догоняется
+/// и плотность экрана, когда окно переехало на другой.
 fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
     let Some(index) = ui.notebook.current_page().map(|page| page as usize) else {
         return;
@@ -3087,7 +3108,9 @@ fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
     let stale = {
         let borrowed = state.borrow();
         borrowed.tabs.get(index).is_some_and(|tab| {
-            !tab.pending && tab.document.is_some() && tab.zoom_seen != current_zoom(&borrowed)
+            !tab.pending
+                && tab.document.is_some()
+                && (tab.zoom_seen != current_zoom(&borrowed) || tab.density_seen != density(ui))
         })
     };
     if stale {
@@ -3132,6 +3155,13 @@ fn measure_px() -> i32 {
 /// формулы в `ex`, и они обязаны быть ростом с текст — на любой ступени.
 fn text_px() -> f32 {
     (f64::from(TEXT_SIZE) * zoom() * dpi() / 72.0) as f32
+}
+
+/// Сколько пикселей экрана на точку окна. Целое: дробный масштаб GTK
+/// округляет вверх, и картинка, разобранная с запасом, на экран ложится
+/// уменьшенной, а не растянутой.
+fn density(ui: &Ui) -> i32 {
+    ui.window.scale_factor().max(1)
 }
 
 fn dpi() -> f64 {
@@ -3393,6 +3423,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         tab.marks = page.marks;
         tab.anchors = page.anchors;
         tab.zoom_seen = seen;
+        tab.density_seen = density(ui);
     }
     drop(borrowed);
     sync(ui, state, None);
@@ -3694,8 +3725,9 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
                 inline: true,
             } => {
                 let canvas = Formula::new();
+                let at = end.offset();
                 buffer.insert_paintable(&mut end, &canvas);
-                shots.push(Shot::new(source, alt, true, Slot::Canvas(canvas)));
+                shots.push(Shot::new(source, alt, true, Slot::Canvas(canvas, at)));
             }
             Block::Image {
                 source,
@@ -4241,7 +4273,7 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
     // Формула живёт холстом в буфере: ставить в неё нечего, надо только
     // решить, чем её показывать до картинки. Исходник `{\displaystyle b}`
     // читается плохо, но лучше пустого места посреди фразы.
-    if let Slot::Canvas(canvas) = &shot.slot {
+    if let Slot::Canvas(canvas, _) = &shot.slot {
         let waiting = trouble.is_some() || !state.borrow().images;
         let layout = waiting.then(|| {
             let view = view_of(state, id);
@@ -4390,6 +4422,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         } else {
             media::Fit::Column
         },
+        density: density(ui) as f32,
     };
     let ui = ui.clone();
     let state = state.clone();
@@ -4442,7 +4475,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
                 // Картинка выше окна вырастет из заглушки в полный рост
                 // и толкнёт текст под глазами — держим место чтения.
                 let hold = hold_reading_place(&ui, &state, id, &shot);
-                show_shot(&shot, raster);
+                show_shot(&shot, raster, view_of(&state, id).as_ref());
                 if let Some((view, place)) = hold {
                     settle(&view, place, 0.0);
                 }
@@ -4459,8 +4492,40 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     });
 }
 
+/// Опустить формулу на её глубину под базовой линией (#14).
+///
+/// `GtkTextView` ставит холст нижним краем на базовую линию, а у формулы
+/// с индексом снизу или дробью часть рисунка — под ней; MathJax это
+/// объявляет, ядро переводит в пиксели (`Raster::depth`). Опускаем тегом
+/// `rise` на единственном знаке холста — строка расступается под вынос
+/// сама, как под букву с хвостом. Тег на глубину, а не на формулу: разных
+/// глубин на странице единицы, формул — сотни.
+fn sink(buffer: &gtk::TextBuffer, canvas: &Formula, at: i32, depth: i32) {
+    if depth <= 0 {
+        return;
+    }
+    let from = buffer.iter_at_offset(at);
+    // Страницу успели перерисовать (масштаб): на этом месте уже другой холст.
+    if from.paintable().as_ref() != Some(canvas.upcast_ref::<gtk::gdk::Paintable>()) {
+        return;
+    }
+    let mut to = from;
+    to.forward_char();
+    let name = format!("sink{depth}");
+    let table = buffer.tag_table();
+    let tag = table.lookup(&name).unwrap_or_else(|| {
+        let tag = gtk::TextTag::builder()
+            .name(name.as_str())
+            .rise(-depth * pango::SCALE)
+            .build();
+        table.add(&tag);
+        tag
+    });
+    buffer.apply_tag(&tag, &from, &to);
+}
+
 /// Показать разобранную картинку с подписью.
-fn show_shot(shot: &Shot, raster: Raster) {
+fn show_shot(shot: &Shot, raster: Raster, view: Option<&gtk::TextView>) {
     let bytes = glib::Bytes::from_owned(raster.rgba);
     let texture = gtk::gdk::MemoryTexture::new(
         raster.width as i32,
@@ -4473,9 +4538,16 @@ fn show_shot(shot: &Shot, raster: Raster) {
         raster.width as usize * 4,
     );
 
+    // Растр — в пикселях экрана, место — в точках окна (#15).
+    let image = Sharp::new(texture.upcast_ref(), raster.density);
+
     // Формула — холст в буфере: меняем в нём картинку, виджета тут нет вовсе.
-    if let Slot::Canvas(canvas) = &shot.slot {
-        canvas.set_texture(texture.upcast_ref());
+    if let Slot::Canvas(canvas, at) = &shot.slot {
+        canvas.set_image(&image);
+        let depth = (raster.depth as f32 / raster.density).round() as i32;
+        if let Some(view) = view {
+            sink(&view.buffer(), canvas, *at, depth);
+        }
         return;
     }
     let Some(frame) = shot.slot.frame() else {
@@ -4487,17 +4559,17 @@ fn show_shot(shot: &Shot, raster: Raster) {
     // GTK на снимок без раскладки.
     let picture = match frame.first_child().and_downcast::<gtk::Picture>() {
         Some(picture) => {
-            picture.set_paintable(Some(&texture));
+            picture.set_paintable(Some(&image));
             picture
         }
         None => {
-            let picture = gtk::Picture::for_paintable(&texture);
+            let picture = gtk::Picture::for_paintable(&image);
             fill(frame, &picture);
             picture
         }
     };
     picture.set_can_shrink(true);
-    picture.set_size_request(raster.width as i32, raster.height as i32);
+    picture.set_size_request(image.width(), image.height());
     picture.set_cursor_from_name(Some("pointer"));
     picture.set_halign(gtk::Align::Center);
     picture.set_tooltip_text(Some(&shot.source.display()));
@@ -4514,7 +4586,7 @@ fn show_shot(shot: &Shot, raster: Raster) {
     if !shot.alt.is_empty() {
         // Подпись стоит под картинкой, а не под колонкой: узкая картинка
         // висит по центру, и подпись у левого поля выглядела бы чужой.
-        let narrow = raster.width < measure_px() as u32;
+        let narrow = image.width() < measure_px();
         let caption = gtk::Label::builder()
             .label(&shot.alt)
             .wrap(true)

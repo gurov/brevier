@@ -25,12 +25,15 @@ use gtk::pango;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
+use super::sharp::Sharp;
+
 mod imp {
     use super::*;
 
     pub struct Formula {
-        /// Картинка, когда приехала.
-        pub texture: RefCell<Option<gdk::Texture>>,
+        /// Картинка, когда приехала. С плотностью: на экране 2× она разобрана
+        /// в его пикселях, а место занимает в точках (#15).
+        pub image: RefCell<Option<Sharp>>,
         /// Чем заменить её, пока не приехала: исходник формулы, уже
         /// разложенный. Раскладку делает окно — у холста нет своего
         /// контекста Pango.
@@ -41,7 +44,7 @@ mod imp {
     impl Default for Formula {
         fn default() -> Self {
             Self {
-                texture: RefCell::new(None),
+                image: RefCell::new(None),
                 fallback: RefCell::new(None),
                 // Настоящую краску холст получает вместе с исходником:
                 // она зависит от темы, а у `RGBA` умолчания нет.
@@ -61,8 +64,8 @@ mod imp {
 
     impl PaintableImpl for Formula {
         fn intrinsic_width(&self) -> i32 {
-            if let Some(texture) = self.texture.borrow().as_ref() {
-                return texture.width();
+            if let Some(image) = self.image.borrow().as_ref() {
+                return image.width();
             }
             match self.fallback.borrow().as_ref() {
                 Some(layout) => layout.pixel_size().0.max(1),
@@ -74,8 +77,8 @@ mod imp {
         }
 
         fn intrinsic_height(&self) -> i32 {
-            if let Some(texture) = self.texture.borrow().as_ref() {
-                return texture.height();
+            if let Some(image) = self.image.borrow().as_ref() {
+                return image.height();
             }
             match self.fallback.borrow().as_ref() {
                 // Не вся высота раскладки, а до базовой линии: `GtkTextView`
@@ -89,8 +92,8 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
-            if let Some(texture) = self.texture.borrow().as_ref() {
-                texture.snapshot(snapshot, width, height);
+            if let Some(image) = self.image.borrow().as_ref() {
+                image.snapshot(snapshot, width, height);
                 return;
             }
             let Some(layout) = self.fallback.borrow().clone() else {
@@ -121,8 +124,8 @@ impl Formula {
 
     /// Картинка приехала. Меняются и содержимое, и размер: до этого холст
     /// был размером с исходник формулы или с пиксель.
-    pub fn set_texture(&self, texture: &gdk::Texture) {
-        self.imp().texture.replace(Some(texture.clone()));
+    pub fn set_image(&self, image: &Sharp) {
+        self.imp().image.replace(Some(image.clone()));
         self.invalidate_size();
         self.invalidate_contents();
     }

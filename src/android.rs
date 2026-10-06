@@ -177,6 +177,8 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
             paper: [(paper >> 16) as u8, (paper >> 8) as u8, paper as u8],
             font_size,
             fit: if natural { Fit::Natural } else { Fit::Column },
+            // Телефон считает в пикселях экрана сразу.
+            density: 1.0,
         };
         env.byte_array_from_slice(&image(&source, look))
     });
