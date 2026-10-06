@@ -1748,6 +1748,9 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     let keys = gtk::EventControllerKey::new();
     {
         let scroller = scroller.clone();
+        let ui = ui.clone();
+        let state = state.clone();
+        let view = view.clone();
         keys.connect_key_pressed(move |_, key, _, modifiers| {
             if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
                 return glib::Propagation::Proceed;
@@ -1755,6 +1758,22 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             let adjustment = scroller.vadjustment();
             let page = adjustment.page_size();
             let step = page / 10.0;
+            // Пробел в самом конце листал бы в пустоту — он открывает
+            // следующую страницу, если страница её назвала (#35): та же
+            // клавиша, что листала до сих пор, листает и дальше.
+            let at_end = adjustment.value() + page >= adjustment.upper() - 1.0;
+            if key == gtk::gdk::Key::space && at_end {
+                let next = state.borrow_mut().find(id).and_then(|tab| {
+                    tab.document
+                        .as_ref()
+                        .and_then(|document| document.next.as_ref())
+                        .map(|next| next.address.clone())
+                });
+                if let Some(next) = next {
+                    follow_link(&ui, &state, id, &view, &next, false);
+                    return glib::Propagation::Stop;
+                }
+            }
             let to = match key {
                 gtk::gdk::Key::space | gtk::gdk::Key::Page_Down => adjustment.value() + page * 0.9,
                 gtk::gdk::Key::BackSpace | gtk::gdk::Key::Page_Up => {
@@ -3600,6 +3619,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         site: Vec::new(),
         feeds: Vec::new(),
         lang: None,
+        next: None,
     };
     dress(state, view);
     let page = render(view, &document, None);

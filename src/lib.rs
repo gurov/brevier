@@ -101,6 +101,10 @@ pub struct Document {
     /// Язык страницы (`<html lang>`), если объявлен. Окно берёт по нему
     /// переносы; без языка их нет.
     pub lang: Option<String>,
+    /// Следующая страница, если страница её назвала (`rel="next"`, #35).
+    /// Под текстом — строкой «Next: …»; в сохранённый markdown не идёт:
+    /// это не слова автора.
+    pub next: Option<Link>,
 }
 
 /// Установить провайдер шифров. `rustls` собран без встроенного, выбираем явно;
@@ -148,6 +152,7 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
         site: Vec::new(),
         feeds: Vec::new(),
         lang: None,
+        next: None,
     })
 }
 
@@ -169,6 +174,7 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             feeds: Vec::new(),
             // Родной текст без HTML — языка мы не знаем.
             lang: None,
+            next: None,
             address,
         }),
         ContentKind::Html => from_html(&page.body, &page.url),
@@ -201,6 +207,7 @@ pub fn from_feed(xml: &str, url: &str) -> Result<Document, Error> {
         site: Vec::new(),
         feeds: Vec::new(),
         lang: None,
+        next: None,
     })
 }
 
@@ -224,6 +231,7 @@ pub fn from_search(html: &str, url: &str) -> Result<Document, Error> {
         site: Vec::new(),
         feeds: Vec::new(),
         lang: None,
+        next: None,
     })
 }
 
@@ -239,6 +247,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
     let site = article.site.clone();
     let feeds = article.feeds.clone();
     let lang = article.lang.clone();
+    let next = article.next.clone();
     let reading = markdown::from_article(&article)?;
 
     Ok(Document {
@@ -250,6 +259,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
         site,
         feeds,
         lang,
+        next,
         title: if title.trim().is_empty() {
             url.to_owned()
         } else {
@@ -296,6 +306,7 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         feeds: Vec::new(),
         // README — родной markdown, `<html lang>` в нём нет.
         lang: None,
+        next: None,
         address,
     })
 }
@@ -342,6 +353,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         site: Vec::new(),
         feeds: Vec::new(),
         lang: None,
+        next: None,
     })
 }
 

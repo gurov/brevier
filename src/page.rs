@@ -246,6 +246,9 @@ impl Page {
         for node in root.children() {
             writer.block(node, &[]);
         }
+        if let Some(next) = &document.next {
+            writer.next(next);
+        }
 
         let mut page = writer.page;
         // Картинка занимает экран, но в тексте это один знак: страница
@@ -571,6 +574,24 @@ impl Writer<'_> {
             end: self.chars,
             styles: styles.to_vec(),
         });
+    }
+
+    /// Строка под текстом: следующая страница, которую назвала сама страница
+    /// (`rel="next"`, #35). Дочитал — и дальше не надо искать её в меню.
+    /// Ссылка обычная: её открывают щелчком, Tab и Enter, нажатием на телефоне.
+    fn next(&mut self, next: &crate::Link) {
+        if !self.starts_line() {
+            self.put("\n", &[Style::Body]);
+        }
+        self.put("Next: ", &[Style::Body, Style::Dim]);
+        let start = self.chars;
+        self.put(&next.title, &[Style::Body, Style::Link]);
+        self.page.links.push(Link {
+            start,
+            end: self.chars,
+            target: next.address.clone(),
+        });
+        self.put("\n", &[Style::Body]);
     }
 
     /// Где сейчас конец текста: в символах и в байтах.
@@ -1205,7 +1226,39 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         }
+    }
+
+    #[test]
+    fn the_next_page_is_a_line_under_the_text() {
+        let mut document = doc("# Part one\n\nThe text of part one.\n");
+        document.next = Some(crate::Link {
+            title: "Part two".to_owned(),
+            address: "https://e.com/2".to_owned(),
+        });
+        let page = Page::of(&document);
+        assert!(
+            page.text
+                .ends_with("The text of part one.\nNext: Part two\n"),
+            "{:?}",
+            page.text
+        );
+        let link = page.links.last().unwrap();
+        assert_eq!(link.target, "https://e.com/2");
+        let shown: String = page
+            .text
+            .chars()
+            .skip(link.start)
+            .take(link.end - link.start)
+            .collect();
+        assert_eq!(shown, "Part two");
+        // Без следующей страницы строки нет.
+        assert!(
+            !Page::of(&doc("# Part one\n\nText.\n"))
+                .text
+                .contains("Next:")
+        );
     }
 
     fn styles_at(page: &Page, offset: usize) -> Vec<String> {

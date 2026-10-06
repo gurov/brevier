@@ -259,6 +259,7 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         };
         assert_eq!(suggested_name(&document), "Как-это-работает.zip");
 
@@ -297,6 +298,7 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         };
         assert_eq!(suggested_name(&document), "Plain.md");
 

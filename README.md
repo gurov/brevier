@@ -196,7 +196,9 @@ The reports go to the job summary; the lowest score is the step's `score` output
 
 Ctrl+click and middle-click open a link in a new tab; middle-click a tab closes it.
 The mouse's back and forward buttons go back and forward. Hovering a link shows where it
-goes. Past the last link, `Tab` moves on to the header and the shelf, as in a browser. Settings, history and bookmarks are one menu in the
+goes. Past the last link, `Tab` moves on to the header and the shelf, as in a browser.
+A page that names the one after it (`rel="next"`: a series, a book chapter, a thread's
+second page) ends with a **Next:** line, and `Space` at the very end goes on to it. Settings, history and bookmarks are one menu in the
 header, under Reload and **Check this page**. Selection, copying and the context menu come
 from GTK.
 

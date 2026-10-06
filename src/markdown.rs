@@ -2195,6 +2195,7 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2251,6 +2252,7 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2289,6 +2291,7 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2313,6 +2316,7 @@ mod tests {
             site: Vec::new(),
             feeds: Vec::new(),
             lang: None,
+            next: None,
         };
 
         let reading = from_article(&article).unwrap();

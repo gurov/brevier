@@ -40,6 +40,8 @@ pub struct Article {
     /// для переносов (`typeset`); без него переносов нет, и `--check` про
     /// это говорит. Разбор по элементам (`lang` на абзаце) — на будущее.
     pub lang: Option<String>,
+    /// Следующая страница, которую назвала сама страница, — см. [`next_page`].
+    pub next: Option<Link>,
 }
 
 /// Строка навигации: подпись и адрес.
@@ -187,6 +189,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let thumbs = thumbs(&doc, url);
     let navigation = site(&doc, url);
     let feeds = crate::feed::advertised(&doc, url);
+    let next = next_page(&doc, url);
     let listing = listing(&doc, url);
     // Язык страницы — до того, как `Readability` заберёт документ себе.
     let lang = html_lang(&doc);
@@ -250,6 +253,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         notes,
         site: navigation,
         feeds,
+        next,
         lang,
     })
 }
@@ -1600,6 +1604,53 @@ fn is_note_mark(text: &str) -> bool {
             .all(|c| c.is_ascii_digit() || "[]()（）【】 \u{00a0}".contains(c))
 }
 
+/// Следующая страница, которую назвала сама страница (#35): многостраничная
+/// статья, серия, глава книги на mdBook или Sphinx, вторая страница треда.
+/// Признак по разметке, а не по сайту — `rel="next"`: сначала у ссылки
+/// `<a>` (у неё есть подпись), потом у `<link>` в шапке. Подпись — текст
+/// ссылки, без него её `title`, без него сам адрес. Ссылка на эту же
+/// страницу и не-веб адреса — не следующая страница.
+fn next_page(doc: &Document, url: &str) -> Option<Link> {
+    let base = Url::parse(url).ok();
+    let bare = |address: &str| {
+        Url::parse(address).ok().map(|mut url| {
+            url.set_fragment(None);
+            url.to_string()
+        })
+    };
+    let here = bare(url);
+    for selector in ["a[rel][href]", "link[rel][href]"] {
+        for node in doc.select(selector).nodes() {
+            let rel = node.attr("rel").unwrap_or_default().to_ascii_lowercase();
+            if !rel.split_ascii_whitespace().any(|token| token == "next") {
+                continue;
+            }
+            let Some(address) = absolute(base.as_ref(), &node.attr("href").unwrap_or_default())
+            else {
+                continue;
+            };
+            if !address.starts_with("http://") && !address.starts_with("https://") {
+                continue;
+            }
+            if bare(&address) == here {
+                continue;
+            }
+            let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let text = if selector.starts_with('a') {
+                words(&node.text())
+            } else {
+                String::new()
+            };
+            let title = [text, words(&node.attr("title").unwrap_or_default())]
+                .into_iter()
+                .find(|title| !title.is_empty())
+                .unwrap_or_else(|| address.clone());
+            return Some(Link { title, address });
+        }
+    }
+    None
+}
+
 fn absolute(base: Option<&Url>, link: &str) -> Option<String> {
     let link = link.trim();
     if link.is_empty() || link.starts_with("data:") {
@@ -1861,6 +1912,54 @@ mod tests {
         <meta name=\"robots\" content=\"noindex,nofollow\">\n</head>\n<body>\n<script>\n\
         document.cookie = \"hc=1; path=/; max-age=3600\";\nlocation.replace(location.href);\n\
         </script>\n<noscript>\n<meta http-equiv=\"refresh\" content=\"2\">\n</noscript>\n</body>\n</html>\n";
+
+    /// Страница с тем, что ей надо сказать о следующей: `head` — в шапку,
+    /// `nav` — после статьи.
+    fn series(head: &str, nav: &str) -> String {
+        let text = TEXT;
+        format!(
+            "<html><head>{head}</head><body><article><h1>Часть первая</h1><p>{text}</p><p>{text}</p><p>{text}</p></article>{nav}</body></html>"
+        )
+    }
+
+    #[test]
+    fn the_page_names_its_next_page() {
+        let url = "https://e.com/series/1/";
+        // Ссылка в тексте или меню — с её подписью; слова сводятся в строку.
+        let page = series(
+            "",
+            r#"<nav><a href="/series/2/" rel="next">Дальше:
+            часть вторая →</a></nav>"#,
+        );
+        let next = extract(&page, url).unwrap().next.unwrap();
+        assert_eq!(next.address, "https://e.com/series/2/");
+        assert_eq!(next.title, "Дальше: часть вторая →");
+        // Значок без текста (mdBook) — подпись из `title`.
+        let page = series(
+            "",
+            r#"<a rel="next prefetch" href="ch02.html" title="Next chapter"><i class="fa"></i></a>"#,
+        );
+        let next = extract(&page, url).unwrap().next.unwrap();
+        assert_eq!(
+            (next.address.as_str(), next.title.as_str()),
+            ("https://e.com/series/1/ch02.html", "Next chapter")
+        );
+        // Только `<link>` в шапке — подписью сам адрес.
+        let page = series(r#"<link rel="next" href="https://e.com/series/2/">"#, "");
+        let next = extract(&page, url).unwrap().next.unwrap();
+        assert_eq!(next.title, "https://e.com/series/2/");
+    }
+
+    #[test]
+    fn a_link_to_itself_or_off_the_web_is_not_a_next_page() {
+        let url = "https://e.com/series/1/";
+        let page = series(
+            "",
+            r##"<a rel="next" href="#comments">к обсуждению</a><a rel="next" href="mailto:a@e.com">почта</a>"##,
+        );
+        assert_eq!(extract(&page, url).unwrap().next, None);
+        assert_eq!(extract(&series("", ""), url).unwrap().next, None);
+    }
 
     #[test]
     fn a_script_that_reloads_the_page_is_a_gate_not_an_empty_page() {

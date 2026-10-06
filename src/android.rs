@@ -353,6 +353,7 @@ fn intro() -> String {
         site: Vec::new(),
         feeds: Vec::new(),
         lang: None,
+        next: None,
     };
     let mut out = String::from("{\"title\":");
     json_string(&mut out, &document.title);
