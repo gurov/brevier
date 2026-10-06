@@ -181,6 +181,8 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Enter` | open the address |
 | `Space` / `Backspace`, `PageDown` / `PageUp` | page down / up |
 | arrows, `Home`/`End` | line, top, bottom |
+| `Tab` / `Shift+Tab` | mark the next / previous link on the page |
+| `Enter` / `Ctrl+Enter` on a marked link | follow it / open it in a new tab |
 | `Ctrl+L` | focus the address bar |
 | `Ctrl+R`, `F5` | load the page afresh, past the saved copy |
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
@@ -193,7 +195,8 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Ctrl+O` | hand the page to your system browser |
 
 Ctrl+click and middle-click open a link in a new tab; middle-click a tab closes it.
-Hovering a link shows where it goes. Settings, history and bookmarks are one menu in the
+The mouse's back and forward buttons go back and forward. Hovering a link shows where it
+goes. Past the last link, `Tab` moves on to the header and the shelf, as in a browser. Settings, history and bookmarks are one menu in the
 header, under Reload and **Check this page**. Selection, copying and the context menu come
 from GTK.
 

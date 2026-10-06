@@ -289,6 +289,9 @@ struct Tab {
     history: History,
     /// Ссылки в тексте: где начинается, где кончается, куда ведёт.
     links: Vec<page::Link>,
+    /// Ссылка под отметкой клавиатуры — номер в `links` (#34). Новая
+    /// отрисовка её снимает: тег уходит вместе с текстом.
+    focus: Option<usize>,
     /// Куда прыгать по оглавлению — смещения в буфере, а не доли высоты.
     marks: Vec<page::Mark>,
     /// Якоря заголовков: по ним находится место для ссылки вида `#anchor`.
@@ -749,6 +752,23 @@ fn build(app: &Application, start: Vec<String>) {
             .clone()
             .connect_clicked(move |_| step(&ui, &state, true));
     }
+    // Боковые кнопки мыши — «назад» и «вперёд», как в любом браузере (#34).
+    // Восьмая и девятая: так их называют и X11, и Wayland. Каждый жест
+    // слушает свою кнопку, поэтому левую и среднюю он не трогает.
+    for (button, backwards) in [(8, true), (9, false)] {
+        let window = ui.window.clone();
+        let ui = ui.clone();
+        let state = state.clone();
+        let side = gtk::GestureClick::builder()
+            .button(button)
+            .propagation_phase(gtk::PropagationPhase::Capture)
+            .build();
+        side.connect_pressed(move |gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            step(&ui, &state, backwards);
+        });
+        window.add_controller(side);
+    }
     {
         // История открывается вкладкой, как `Ctrl+H` в хроме: читатель
         // пришёл за ней, не бросив того, что читает.
@@ -1098,6 +1118,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             label: label.clone(),
             history: History::new(),
             links: Vec::new(),
+            focus: None,
             marks: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
@@ -1569,6 +1590,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             label: label.clone(),
             history,
             links: Vec::new(),
+            focus: None,
             marks: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
@@ -1651,8 +1673,10 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                 .current_event_state()
                 .contains(gtk::gdk::ModifierType::CONTROL_MASK);
             let middle = gesture.current_button() == gtk::gdk::BUTTON_MIDDLE;
-            let plain = !ctrl && !middle;
-
+            let primary = gesture.current_button() == gtk::gdk::BUTTON_PRIMARY;
+            if !middle && !primary {
+                return;
+            }
             let target = {
                 let mut borrowed = state.borrow_mut();
                 let Some(tab) = borrowed.find(id) else { return };
@@ -1660,25 +1684,9 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                 else {
                     return;
                 };
-                // Ссылка внутрь этой же страницы — не загрузка, а прыжок
-                // по буферу: место заголовка мы знаем точно.
-                let here = tab.history.current().map(Address::display);
-                if plain
-                    && let Some(fragment) = page::fragment_of(&target, here.as_deref())
-                    && jump(&view, &tab.anchors, &fragment)
-                {
-                    return;
-                }
                 target
             };
-            let Ok(address) = address::parse(&target) else {
-                return;
-            };
-            if ctrl || middle {
-                new_tab(&ui, &state, Some(address));
-            } else if gesture.current_button() == gtk::gdk::BUTTON_PRIMARY {
-                open(&ui, &state, id, address, true);
-            }
+            follow_link(&ui, &state, id, &view, &target, ctrl || middle);
         });
     }
     view.add_controller(click);
@@ -1764,6 +1772,49 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         });
     }
     view.add_controller(keys);
+
+    // Ссылки с клавиатуры (#34): Tab и Shift+Tab ходят по ссылкам статьи,
+    // начиная с видимых, Enter открывает, Ctrl+Enter — вкладкой, Escape
+    // снимает отметку. За последней ссылкой Tab уходит дальше по окну —
+    // в шапку и на полку, как в браузере.
+    let link_keys = gtk::EventControllerKey::new();
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let view = view.clone();
+        link_keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let ctrl = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+            let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+            let handled = match key {
+                gtk::gdk::Key::Tab | gtk::gdk::Key::KP_Tab if !ctrl => {
+                    move_link_focus(&state, id, &view, !shift)
+                }
+                gtk::gdk::Key::ISO_Left_Tab if !ctrl => move_link_focus(&state, id, &view, false),
+                gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter => {
+                    let target = state.borrow_mut().find(id).and_then(|tab| {
+                        tab.focus
+                            .and_then(|at| tab.links.get(at))
+                            .map(|link| link.target.clone())
+                    });
+                    match target {
+                        Some(target) => {
+                            follow_link(&ui, &state, id, &view, &target, ctrl);
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                gtk::gdk::Key::Escape => drop_link_focus(&state, id, &view),
+                _ => false,
+            };
+            if handled {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    view.add_controller(link_keys);
 
     // Масштаб колесом с Ctrl, как в браузере. Шаги копим: у мыши одно
     // движение колеса это ровно единица, а тачпад сыплет долями, и без
@@ -2599,6 +2650,7 @@ fn show_document(
         tab.label.set_text(&clip(&document.title, TAB_LABEL));
         tab.label.set_tooltip_text(Some(&document.title));
         tab.links = page.links;
+        tab.focus = None;
         tab.marks = page.marks;
         tab.anchors = page.anchors;
         tab.shots = page.shots.clone();
@@ -2939,8 +2991,18 @@ fn page_css(dark: bool) -> String {
     )
 }
 
+/// Подложка ссылки под отметкой клавиатуры: цвет ссылки на пятую часть.
+fn focus_color(dark: bool) -> gtk::gdk::RGBA {
+    let mut color = gtk::gdk::RGBA::parse(colors(dark).link).unwrap_or(gtk::gdk::RGBA::BLUE);
+    color.set_alpha(0.22);
+    color
+}
+
 fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
     let table = buffer.tag_table();
+    if let Some(tag) = table.lookup("focus") {
+        tag.set_property("background-rgba", focus_color(dark));
+    }
     let colors = colors(dark);
     let paint = |name: &str, property: &str, value: &str| {
         if let Some(tag) = table.lookup(name) {
@@ -3067,6 +3129,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         let seen = current_zoom(&borrowed);
         if let Some(tab) = borrowed.find(id) {
             tab.links = page.links;
+            tab.focus = None;
             tab.marks = page.marks;
             tab.anchors = page.anchors;
             tab.shots = page.shots.clone();
@@ -3357,6 +3420,130 @@ fn use_bundled_fonts() {
 }
 
 /// Ссылка под точкой окна, если она там есть.
+/// Перейти по ссылке статьи — по клику или с клавиатуры. Ссылка внутрь
+/// этой же страницы — не загрузка, а прыжок по буферу: место заголовка
+/// мы знаем точно. `aside` — новой вкладкой (Ctrl, средняя кнопка).
+fn follow_link(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    view: &gtk::TextView,
+    target: &str,
+    aside: bool,
+) {
+    if !aside {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else { return };
+        let here = tab.history.current().map(Address::display);
+        if let Some(fragment) = page::fragment_of(target, here.as_deref())
+            && jump(view, &tab.anchors, &fragment)
+        {
+            return;
+        }
+    }
+    let Ok(address) = address::parse(target) else {
+        return;
+    };
+    if aside {
+        new_tab(ui, state, Some(address));
+    } else {
+        open(ui, state, id, address, true);
+    }
+}
+
+/// Отметить следующую ссылку статьи (`forward`) или предыдущую (#34).
+/// Отметка на экране — шаг от неё; ушла с экрана — с того, что видно
+/// сейчас. Отвечает, нашлась ли ссылка: за последней Tab уходит дальше
+/// по окну.
+fn move_link_focus(
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    view: &gtk::TextView,
+    forward: bool,
+) -> bool {
+    // Под заимствованием только копия: прокрутка ниже зовёт обработчики,
+    // которые сами берут состояние.
+    let (links, focus) = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else {
+            return false;
+        };
+        let links: Vec<(usize, usize)> = tab
+            .links
+            .iter()
+            .map(|link| (link.start, link.end))
+            .collect();
+        (links, tab.focus.filter(|at| *at < tab.links.len()))
+    };
+
+    let buffer = view.buffer();
+    let iter = |offset: usize| buffer.iter_at_offset(offset as i32);
+    // Видно ли — по месту строки на экране, а не по смещениям: смещение
+    // у края окна GTK отдаёт, только когда точка над текстом.
+    let seen = view.visible_rect();
+    let (top, bottom) = (seen.y(), seen.y() + seen.height());
+    let line = |offset: usize| {
+        let place = view.iter_location(&iter(offset));
+        (place.y(), place.y() + place.height())
+    };
+    let on_screen = |(start, _): (usize, usize)| {
+        let (above, below) = line(start);
+        below > top && above < bottom
+    };
+    let next = match (focus.filter(|at| on_screen(links[*at])), forward) {
+        (Some(at), true) => Some(at + 1).filter(|next| *next < links.len()),
+        (Some(at), false) => at.checked_sub(1),
+        (None, true) => links.iter().position(|&(start, _)| line(start).1 > top),
+        (None, false) => links.iter().rposition(|&(start, _)| line(start).0 < bottom),
+    };
+    if let Some(tab) = state.borrow_mut().find(id) {
+        tab.focus = next;
+    }
+
+    if let Some((start, end)) = focus.map(|at| links[at]) {
+        buffer.remove_tag_by_name("focus", &iter(start), &iter(end));
+    }
+    let Some((start, end)) = next.map(|at| links[at]) else {
+        return false;
+    };
+    buffer.apply_tag_by_name("focus", &iter(start), &iter(end));
+    // Каретку — на ссылку: курсор не виден, но экранный чтец идёт за ней.
+    buffer.place_cursor(&iter(start));
+    // Докручиваем, только если ссылка видна не целиком.
+    let (above, _) = line(start);
+    let (_, below) = line(end.saturating_sub(1).max(start));
+    if above < top || below > bottom {
+        scroll_to(view, start as i32, 0.3);
+    }
+    true
+}
+
+/// Снять отметку со ссылки. Отвечает, была ли она.
+fn drop_link_focus(state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView) -> bool {
+    let range = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else {
+            return false;
+        };
+        let range = tab
+            .focus
+            .and_then(|at| tab.links.get(at))
+            .map(|link| (link.start, link.end));
+        tab.focus = None;
+        range
+    };
+    let Some((start, end)) = range else {
+        return false;
+    };
+    let buffer = view.buffer();
+    buffer.remove_tag_by_name(
+        "focus",
+        &buffer.iter_at_offset(start as i32),
+        &buffer.iter_at_offset(end as i32),
+    );
+    true
+}
+
 fn link_at<'a>(
     view: &gtk::TextView,
     links: &'a [page::Link],
@@ -3420,6 +3607,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
     let seen = current_zoom(&borrowed);
     if let Some(tab) = borrowed.find(id) {
         tab.links = page.links;
+        tab.focus = None;
         tab.marks = page.marks;
         tab.anchors = page.anchors;
         tab.zoom_seen = seen;
@@ -3669,6 +3857,11 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             ("pixels-below-lines", &(extra / 2)),
         ],
     );
+
+    // Ссылка под отметкой клавиатуры (#34): бледная подложка цвета ссылки —
+    // видна, но текст не перекрикивает. До подсветки поиска: найденное
+    // важнее, его и показываем поверх.
+    style(buffer, "focus", &[("background-rgba", &focus_color(dark))]);
 
     // Подсветка поиска. Заводится последней: у тегов, наложенных позже,
     // приоритет выше, и жёлтое ложится поверх цвета ссылки.
