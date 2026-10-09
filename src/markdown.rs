@@ -105,7 +105,7 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
     // открывший главную блога, не получал ничего: ни списка, ни ссылок,
     // по которым он бы ушёл в статью. Страница показывается как есть,
     // а «это список, а не статья» интерфейс говорит словами.
-    let (text, kind) = match strip_teasers(&doc) {
+    let (text, kind) = match strip_teasers(&doc, article.claims_article) {
         Teasers::Article(text) => (text, Kind::Article),
         Teasers::Listing => (doc, Kind::Listing),
     };
@@ -1117,7 +1117,12 @@ const TAIL_STARTS_AT: f32 = 0.6;
 /// целиком ссылка) от статьи в 745 слов доезжало десять, у foxnews —
 /// восемнадцать из 542. Вне хвоста заголовок-ссылка остаётся: лишняя строка
 /// читателю дешевле потерянного абзаца.
-fn strip_teasers(md: &str) -> Teasers {
+///
+/// Лентой не бывает страница, которая сама объявила себя этой статьёй
+/// (`claims`, см. `extract::claims_article`): у неё три заголовка-анонса —
+/// это витрина «читайте ещё» посреди текста, как у NPR и Metro, а не лента.
+/// Хвост у неё режется по тем же правилам, что у любой статьи.
+fn strip_teasers(md: &str, claims: bool) -> Teasers {
     let lines: Vec<&str> = md.lines().collect();
     let teasers: Vec<usize> = lines
         .iter()
@@ -1127,7 +1132,7 @@ fn strip_teasers(md: &str) -> Teasers {
         .collect();
 
     let tail_starts = (lines.len() as f32 * TAIL_STARTS_AT) as usize;
-    if teasers.len() >= 3 && teasers[0] < tail_starts {
+    if !claims && teasers.len() >= 3 && teasers[0] < tail_starts {
         return Teasers::Listing;
     }
 
@@ -1135,7 +1140,17 @@ fn strip_teasers(md: &str) -> Teasers {
     // виджета это требование стоит внутри `teaser_grid_start` (сетка обязана
     // доходить до конца документа), для заголовка — здесь. Берём то,
     // что встретилось раньше.
-    let heading = teasers.iter().copied().find(|&at| at >= tail_starts);
+    //
+    // У статьи, которая объявила себя статьёй, витрина анонсов стоит и посреди
+    // текста (NPR, Byline Times, expansion.mx): заголовок-анонс в последних
+    // сорока процентах ещё не значит, что дальше один хвост, и прежнее
+    // правило срезало вместе с ним абзацы самой статьи. Там режем с того
+    // анонса, после которого прозы уже нет.
+    let heading = teasers
+        .iter()
+        .copied()
+        .filter(|&at| at >= tail_starts)
+        .find(|&at| !claims || !lines[at + 1..].iter().any(|line| is_prose(line)));
     let widget = teaser_grid_start(&lines);
     let (mut cut, label) = match (heading, widget) {
         (Some(heading), Some(at)) if at < heading => (at, true),
@@ -1175,6 +1190,42 @@ fn strip_teasers(md: &str) -> Teasers {
 
     let kept = lines[..cut].join("\n");
     Teasers::Article(kept.trim_end().to_owned() + "\n")
+}
+
+/// Короче этого строка — подводка анонса или подпись, а не абзац статьи.
+const PROSE_WORDS: usize = 25;
+
+/// Абзац прозы: не заголовок, не картинка, не пункт и не цитата, длинный
+/// и не из одних ссылок. Подводки анонсов короче: «The meeting comes as
+/// Trump threatens to ban U.S. diesel exports.»
+fn is_prose(line: &str) -> bool {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with(['#', '!', '-', '*', '>', '|', '`', '[']) {
+        return false;
+    }
+    let mut plain = String::with_capacity(line.len());
+    let mut linked = 0;
+    let mut rest = line;
+    while let Some(open) = rest.find('[') {
+        plain.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after
+            .find("](")
+            .and_then(|mid| after[mid..].find(')').map(|end| (mid, mid + end)))
+        {
+            Some((mid, end)) => {
+                linked += after[..mid].split_whitespace().count();
+                plain.push_str(&after[..mid]);
+                rest = &after[end + 1..];
+            }
+            None => {
+                rest = after;
+            }
+        }
+    }
+    plain.push_str(rest);
+    let words = plain.split_whitespace().count();
+    words >= PROSE_WORDS && linked * 2 < words
 }
 
 /// Сколько анонсов подряд превращают хвост в сетку «читайте ещё».
@@ -2149,7 +2200,7 @@ mod tests {
     #[test]
     fn trailing_teaser_widget_is_cut() {
         let md = "# Статья\n\nТекст статьи, ради которого всё затевалось.\n\nЕщё абзац.\n\n                  Здесь текст, а дальше начинается витрина.\n\nHere's another article just for you:\n\n                  ## [Другая статья](https://e.com/other)\n\nАнонс другой статьи.\n";
-        let Teasers::Article(kept) = strip_teasers(md) else {
+        let Teasers::Article(kept) = strip_teasers(md, false) else {
             panic!("статью приняли за ленту");
         };
         assert!(
@@ -2165,16 +2216,41 @@ mod tests {
     #[test]
     fn a_heading_link_at_the_top_leaves_the_article_alone() {
         let md = "# Статья\n\n### [SmartNews](https://e.com/smart-news/)\n\nПервый абзац, ради которого всё затевалось.\n\nВторой абзац, он тоже должен доехать.\n\nТретий абзац, и на нём статья кончается.\n";
-        let Teasers::Article(kept) = strip_teasers(md) else {
+        let Teasers::Article(kept) = strip_teasers(md, false) else {
             panic!("статью приняли за ленту");
         };
         assert!(kept.contains("Третий абзац"), "статью срезало:\n{kept}");
     }
 
+    /// Статья, которая объявила себя статьёй, с витриной «читайте ещё»
+    /// посреди текста — не лента (NPR, Metro). Хвост режется с того анонса,
+    /// после которого прозы нет, а не с первого в последних сорока процентах:
+    /// иначе уезжали абзацы самой статьи.
+    #[test]
+    fn a_claimed_article_with_teasers_inside_keeps_its_text() {
+        let prose = "Это абзац самой статьи, длинный и связный, в нём больше двадцати пяти \
+            слов, потому что статью пишут предложениями, а не подводками к чужим \
+            заголовкам, и читатель пришёл именно за ним.";
+        let md = format!(
+            "# Статья\n\n{prose}\n\n## [Анонс один](https://e.com/1)\n\n\
+             ## [Анонс два](https://e.com/2)\n\n## [Анонс три](https://e.com/3)\n\n\
+             {prose} Середина.\n\n{prose} Конец статьи.\n\n\
+             ## [Читайте ещё](https://e.com/4)\n\nКороткая подводка к анонсу.\n\n\
+             ## [И ещё](https://e.com/5)\n"
+        );
+        assert!(matches!(strip_teasers(&md, false), Teasers::Listing));
+        let Teasers::Article(kept) = strip_teasers(&md, true) else {
+            panic!("статью приняли за ленту");
+        };
+        assert!(kept.contains("Конец статьи"), "{kept}");
+        assert!(!kept.contains("Читайте ещё"), "{kept}");
+        assert!(!kept.contains("И ещё"), "{kept}");
+    }
+
     #[test]
     fn a_page_of_teasers_is_not_an_article() {
         let md = "# Блог компании\n\n## [Первая](https://e.com/1)\n\nанонс\n\n                  ## [Вторая](https://e.com/2)\n\nанонс\n\n## [Третья](https://e.com/3)\n\nанонс\n";
-        assert!(matches!(strip_teasers(md), Teasers::Listing));
+        assert!(matches!(strip_teasers(md, false), Teasers::Listing));
     }
 
     /// Главная блога — не ошибка и не пустая страница: читателю нужен
@@ -2196,6 +2272,7 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            claims_article: false,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2253,6 +2330,7 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            claims_article: false,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2292,6 +2370,7 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            claims_article: false,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2317,6 +2396,7 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            claims_article: false,
         };
 
         let reading = from_article(&article).unwrap();
@@ -2327,7 +2407,7 @@ mod tests {
     fn anchor_headings_are_not_teasers() {
         // Так размечены заголовки в документации Rust и на fasterthanli.me.
         let md = "# Статья\n\n## [Раздел](#section)\n\nтекст\n\n## [Другой](#other)\n\nтекст\n\n                  ## [Третий](#third)\n\nтекст\n";
-        let Teasers::Article(kept) = strip_teasers(md) else {
+        let Teasers::Article(kept) = strip_teasers(md, false) else {
             panic!("якоря приняли за анонсы");
         };
         assert_eq!(kept, md);
@@ -2390,7 +2470,7 @@ mod tail_tests {
     use super::*;
 
     fn article(body: &str) -> String {
-        match strip_teasers(body) {
+        match strip_teasers(body, false) {
             Teasers::Article(text) => strip_chrome(&text),
             Teasers::Listing => "СТАТЬИ НЕТ".to_owned(),
         }

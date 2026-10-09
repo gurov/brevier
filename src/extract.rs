@@ -42,6 +42,9 @@ pub struct Article {
     pub lang: Option<String>,
     /// Следующая страница, которую назвала сама страница, — см. [`next_page`].
     pub next: Option<Link>,
+    /// Страница объявила себя этой самой статьёй — см. [`claims_article`].
+    /// Тогда заголовки-анонсы в ней — витрина рядом со статьёй, а не лента.
+    pub claims_article: bool,
 }
 
 /// Строка навигации: подпись и адрес.
@@ -212,9 +215,22 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         return Err(empty(html));
     }
 
+    let claim = claims_article(&source, url, &article.title);
+    let claims_article = claim.is_some();
     let content_html = article.content.to_string();
+    // Страница, которая объявила себя этой статьёй, не лента, даже если
+    // статья лежит среди карточек: у aawsat и openDemocracy под ней уже
+    // подгружены следующие статьи, и найденная Readability выглядела одной
+    // из них. Кроме случая, когда объявленный текст статьи вдвое длиннее
+    // найденного: тогда Readability взяла обрывок (у El Comercio — тизер
+    // над платной частью в 718 слов), а лента его хотя бы показывает целиком.
+    let fragment = claim.is_some_and(|body| {
+        body > 2 * squeeze(&Document::from(content_html.as_str()).text())
+            .split_whitespace()
+            .count()
+    });
     let listing_html = listing
-        .filter(|listing| listing.holds(&content_html))
+        .filter(|listing| (!claims_article || fragment) && listing.holds(&content_html))
         .map(|listing| listing.html);
 
     // Сироты возвращаем только в статью: в ленте абзацев статьи нет,
@@ -263,7 +279,109 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         feeds,
         next,
         lang,
+        claims_article,
     })
+}
+
+/// Объявила ли страница себя той статьёй, которую мы извлекли.
+///
+/// Признак — JSON-LD schema.org: `NewsArticle`, `Article`, `BlogPosting`
+/// и их родня. Его ставит почти любое издание, потому что по нему Google
+/// строит карточку, — это стандарт, а не вёрстка сайта. Решает он две
+/// вещи: правило «три заголовка-ссылки — это лента» (`markdown::strip_teasers`)
+/// и «извлечено одно из карточек» (`listing`) статью лентой не объявляют —
+/// статья с блоком «читайте ещё» посередине (NPR, Metro, i, El Tiempo)
+/// иначе становилась списком ссылок. Замер 9 октября 2026 по новостным сайтам:
+/// списком ошибочно называлось 16 статей из 712, у 13 из них JSON-LD
+/// есть и заголовок в нём совпадает.
+///
+/// Узко с трёх сторон, и каждая поймана на главных: объявление
+/// **одно** (eltiempo и bluradio кладут на главную 159 и 49 `NewsArticle` —
+/// по одному на анонс, и заголовок одного из них совпадает с тем, что
+/// вытащила Readability); его `headline` совпадает с заголовком статьи;
+/// адрес — не корень сайта (jungefreiheit и telesur объявляют статьёй саму
+/// главную с именем сайта в `headline`). `og:type` для этого не годится:
+/// `article` стоит у 23 главных из 236.
+///
+/// Ответ — `Some(слов в articleBody)`, если объявила (ноль, когда текста
+/// в объявлении нет), и `None`, если нет.
+fn claims_article(doc: &Document, url: &str, title: &str) -> Option<usize> {
+    let root = Url::parse(url).is_ok_and(|url| matches!(url.path(), "" | "/"));
+    if root {
+        return None;
+    }
+    let mut headlines: Vec<String> = Vec::new();
+    let mut body = 0;
+    for script in doc.select("script[type='application/ld+json']").nodes() {
+        let Some(value) = crate::json::parse(script.text().trim()) else {
+            continue;
+        };
+        for item in ld_items(&value) {
+            if !is_article_type(item) {
+                continue;
+            }
+            let headline = item.text("headline").or_else(|| item.text("name"));
+            // Сущности HTML внутри JSON — обычное дело: i пишет одно и то же
+            // объявление дважды, тире в одном `–`, в другом `&#8211;`.
+            let headline = Document::from(format!("<p>{}</p>", headline.unwrap_or_default()));
+            let headline = plain_words(&headline.select("p").text());
+            if !headlines.contains(&headline) {
+                headlines.push(headline);
+            }
+            let words = item
+                .text("articleBody")
+                .map_or(0, |text| text.split_whitespace().count());
+            body = body.max(words);
+        }
+    }
+    let [headline] = headlines.as_slice() else {
+        return None;
+    };
+    let title = plain_words(title);
+    let same = !headline.is_empty()
+        && !title.is_empty()
+        && (title.contains(headline) || headline.contains(&title));
+    same.then_some(body)
+}
+
+/// Верхние объекты JSON-LD: сам документ, элементы массива и `@graph`.
+/// Глубже не идём: там анонсы (`ItemList` главной) и автор статьи.
+fn ld_items(value: &crate::json::Value) -> Vec<&crate::json::Value> {
+    let top: Vec<&crate::json::Value> = match value {
+        crate::json::Value::Array(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    let mut items = Vec::new();
+    for item in top {
+        items.push(item);
+        if let Some(graph) = item.get("@graph") {
+            items.extend(graph.as_array());
+        }
+    }
+    items
+}
+
+/// `Article`, `NewsArticle`, `ReportageNewsArticle`, `BlogPosting`… — тип
+/// строкой или массивом строк.
+fn is_article_type(item: &crate::json::Value) -> bool {
+    let article = |kind: &str| kind.ends_with("Article") || kind.ends_with("BlogPosting");
+    match item.get("@type") {
+        Some(crate::json::Value::String(kind)) => article(kind),
+        Some(crate::json::Value::Array(kinds)) => {
+            kinds.iter().filter_map(|kind| kind.as_str()).any(article)
+        }
+        _ => false,
+    }
+}
+
+/// Слова строки в нижнем регистре через пробел — без знаков препинания,
+/// кавычек и разметки: «“Tiene talento…”» и «Tiene talento…» одно и то же.
+fn plain_words(text: &str) -> String {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Язык страницы из `lang` на `<html>`. Пустое и отсутствующее — одно и то же:
@@ -3101,5 +3219,57 @@ mod tests {
             "{}",
             article.content_html
         );
+    }
+
+    fn ld(json: &str) -> String {
+        format!("<script type=\"application/ld+json\">{json}</script>")
+    }
+
+    /// Страница объявила себя статьёй — одной, с тем же заголовком и не
+    /// на корне сайта. Тип бывает строкой и массивом, объявление — в `@graph`.
+    #[test]
+    fn a_page_claims_the_article_it_carries() {
+        let claims = |head: &str, url: &str, title: &str| {
+            claims_article(&Document::from(format!("<head>{head}</head>")), url, title).is_some()
+        };
+        let news = ld(r#"{"@type":"NewsArticle","headline":"“Tiene talento, pero carencias”"}"#);
+        let post = "https://e.com/2026/10/09/post";
+        assert!(claims(
+            &news,
+            post,
+            "Tiene talento, pero carencias | El Comercio"
+        ));
+        assert!(!claims(&news, post, "Совсем другой заголовок"));
+        // Главная объявляет себя статьёй с именем сайта — не верим.
+        assert!(!claims(
+            &news,
+            "https://e.com/",
+            "Tiene talento, pero carencias"
+        ));
+        let graph = ld(
+            r#"{"@graph":[{"@type":"WebPage","name":"x"},{"@type":["ReportageNewsArticle"],"headline":"Nuevo giro"}]}"#,
+        );
+        assert!(claims(&graph, post, "Nuevo giro"));
+        // Анонсы главной — по объявлению на каждый: это не одна статья.
+        let many = format!(
+            "{}{}",
+            ld(r#"{"@type":"NewsArticle","headline":"Nuevo giro"}"#),
+            ld(r#"{"@type":"NewsArticle","headline":"Otra noticia"}"#)
+        );
+        assert!(!claims(&many, post, "Nuevo giro"));
+        // Один и тот же заголовок дважды (i повторяет объявление, и в одном
+        // тире записано сущностью) — одна статья.
+        let twice = format!(
+            "{news}{}",
+            ld(r#"{"@type":"NewsArticle","headline":"“Tiene talento &#8211; pero carencias”"}"#)
+        );
+        assert!(claims(&twice, post, "Tiene talento, pero carencias"));
+        // Битый JSON и чужой тип — не объявление.
+        assert!(!claims(&ld("{\"@type\":"), post, "Nuevo giro"));
+        assert!(!claims(
+            &ld(r#"{"@type":"VideoObject","name":"Nuevo giro"}"#),
+            post,
+            "Nuevo giro"
+        ));
     }
 }
