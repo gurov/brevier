@@ -236,7 +236,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // Сироты возвращаем только в статью: в ленте абзацев статьи нет,
     // а решение «лента или статья» принято по строгому содержимому.
     let content_html = if listing_html.is_none() {
-        restore(&source, &content_html, url, &article.title).unwrap_or(content_html)
+        restore(&source, &content_html, url, &article.title, claims_article).unwrap_or(content_html)
     } else {
         content_html
     };
@@ -287,11 +287,12 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
 ///
 /// Признак — JSON-LD schema.org: `NewsArticle`, `Article`, `BlogPosting`
 /// и их родня. Его ставит почти любое издание, потому что по нему Google
-/// строит карточку, — это стандарт, а не вёрстка сайта. Решает он две
+/// строит карточку, — это стандарт, а не вёрстка сайта. Решает он три
 /// вещи: правило «три заголовка-ссылки — это лента» (`markdown::strip_teasers`)
 /// и «извлечено одно из карточек» (`listing`) статью лентой не объявляют —
 /// статья с блоком «читайте ещё» посередине (NPR, Metro, i, El Tiempo)
-/// иначе становилась списком ссылок. Замер 9 октября 2026 по новостным сайтам:
+/// иначе становилась списком ссылок; и `restore` ищет её начало выше
+/// первого взятого абзаца. Замер 9 октября 2026 по новостным сайтам:
 /// списком ошибочно называлось 16 статей из 712, у 13 из них JSON-LD
 /// есть и заголовок в нём совпадает.
 ///
@@ -1039,7 +1040,13 @@ fn captioned(image: &NodeRef) -> bool {
 /// Порядок сохраняем, вставляя накопленное одним куском: `after_html`
 /// ставит новое сразу за якорем, и два вызова подряд перевернули бы пару
 /// абзацев местами.
-fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<String> {
+fn restore(
+    source: &Document,
+    content: &str,
+    base: &str,
+    title: &str,
+    claims: bool,
+) -> Option<String> {
     let article = Document::from(content.to_string());
 
     let mut places: HashMap<String, NodeRef> = HashMap::new();
@@ -1095,6 +1102,39 @@ fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<
     };
     let first = page.iter().position(|(_, piece)| inside_article(piece))?;
     let last = page.iter().rposition(|(_, piece)| inside_article(piece))?;
+    // Верхняя граница — заголовок самой статьи, если он стоит выше первого
+    // взятого абзаца, а страница объявила себя этой статьёй (`claims`, см.
+    // `claims_article`): между ними лежит её начало, а не шапка сайта.
+    // На главной `<h1>` бывает именем сайта, и над первым анонсом там
+    // лежат другие анонсы, а не начало чего-либо.
+    // Readability берёт один узел-кандидат, а статья бывает разложена
+    // по соседним обёрткам: у BBC каждый кусок текста — свой `data-block`,
+    // и кандидатом становился второй, после подзаголовка, — статья
+    // начиналась с середины, без лида и первых абзацев. Замер 9 октября
+    // 2026 по новостным сайтам: так теряли начало BBC (две статьи из шести),
+    // expansion.mx, cooperativa, ciperchile. Выше `<h1>` по-прежнему шапка.
+    let start = page[..first]
+        .iter()
+        .rposition(
+            |(node, piece)| matches!(piece, Piece::Head(text) if is_title(node, text, title)),
+        )
+        .filter(|_| claims)
+        .map_or(first, |at| at + 1);
+    // Между заголовком и первым взятым абзацем лежит не только начало
+    // статьи: спонсоры (fasterthanli.me), биографии авторов (Фаулер,
+    // smashing), подпись «23 комментария». Начало от них отличает вид:
+    // статью набирают одним и тем же блоком от первого абзаца до последнего,
+    // а у врезки он свой. Поэтому оттуда берём только абзац того же вида
+    // (`block_kind`), что у абзацев статьи, а заголовок — только вслед за таким абзацем
+    // (подзаголовок раздела, а не «Contents» над оглавлением). Картинки
+    // оттуда не берём: заглавную ставит `with_cover`, а размеры одной
+    // и той же картинки в адаптивной вёрстке приезжали бы парой.
+    let body_blocks: HashSet<(String, String, String)> = page[first..=last]
+        .iter()
+        .filter(|(_, piece)| inside_article(piece))
+        .filter_map(|(node, _)| block_kind(node))
+        .collect();
+    let mut lede = false;
 
     let mut anchor: Option<NodeRef> = None;
     let mut pending: Vec<String> = Vec::new();
@@ -1104,9 +1144,12 @@ fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<
     let mut heads: HashSet<String> = HashSet::new();
     let mut used: HashSet<dom_query::NodeId> = HashSet::new();
 
-    for (node, piece) in &page[first..=last] {
+    for (at, (node, piece)) in page.iter().enumerate().take(last + 1).skip(start) {
+        let above = at < first;
         let (key, words) = match piece {
             Piece::Para(key, words) => (key, *words),
+            Piece::Head(_) | Piece::Shot(_) if above && !lede => continue,
+            Piece::Shot(_) if above => continue,
             // Заголовок, которого в статье нет, встаёт перед ближайшим
             // следующим её абзацем — то есть туда же, куда его накопленным
             // куском поставит якорь. Отдельного места ему не нужно.
@@ -1147,17 +1190,29 @@ fn restore(source: &Document, content: &str, base: &str, title: &str) -> Option<
             if !used.insert(place.id) {
                 continue;
             }
-            if let Some(previous) = anchor.take()
-                && !pending.is_empty()
-            {
-                previous.after_html(pending.concat());
+            let next = place_after(place);
+            if !pending.is_empty() {
+                match anchor.take() {
+                    Some(previous) => previous.after_html(pending.concat()),
+                    // Накопленное выше первого абзаца статьи — её начало:
+                    // встаёт перед ним, а не за ним.
+                    None => next.before_html(pending.concat()),
+                }
                 pending.clear();
             }
-            anchor = Some(place_after(place));
+            anchor = Some(next);
             continue;
         }
         if !worth_restoring(node, words) || inside.contains(key.as_str()) {
             continue;
+        }
+        if above {
+            // Абзац, который целиком ссылка, — анонс или реклама подписки
+            // (LBC), а не начало статьи.
+            if !block_kind(node).is_some_and(|kind| body_blocks.contains(&kind)) || all_link(node) {
+                continue;
+            }
+            lede = true;
         }
         let block = lost_block(node, &places);
         if !blocks.insert(block.id) {
@@ -1354,6 +1409,42 @@ fn unpermalink(doc: &Document) {
 /// по форме: заголовок это короткая строка (`HEAD_CHARS`), он не лежит
 /// в обвязке (`ASIDE_TAGS`) и не лежит в таблице — там он подпись
 /// к таблице, а не раздел статьи.
+/// Вид абзаца: его класс, тег и класс обёртки. По нему узнаётся начало
+/// статьи выше первого взятого абзаца (см. `restore`). Свой класс нужен
+/// не меньше обёртки: список спонсоров fasterthanli.me лежит в той же
+/// обёртке, что и статья, но абзацем `class="sponsor-list"`.
+fn block_kind(node: &NodeRef) -> Option<(String, String, String)> {
+    let class = |node: &NodeRef| {
+        node.attr("class")
+            .map(|class| class.to_string())
+            .unwrap_or_default()
+    };
+    let parent = node.parent()?;
+    Some((class(node), parent.node_name()?.to_string(), class(&parent)))
+}
+
+/// Весь текст узла — текст его ссылок.
+fn all_link(node: &NodeRef) -> bool {
+    let links: String = node
+        .descendants()
+        .iter()
+        .filter(|inner| inner.node_name().as_deref() == Some("a"))
+        .map(|link| squeeze(&link.text()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    !links.is_empty() && squeeze(&links) == squeeze(&node.text())
+}
+
+/// `<h1>` с названием статьи — верхняя граница её текста (см. `restore`).
+/// Название сверяем словами: `<title>` бывает с именем сайта, `<h1>` — без.
+fn is_title(node: &NodeRef, text: &str, title: &str) -> bool {
+    if node.node_name().as_deref() != Some("h1") {
+        return false;
+    }
+    let (head, title) = (plain_words(text), plain_words(title));
+    !head.is_empty() && !title.is_empty() && (title.contains(&head) || head.contains(&title))
+}
+
 fn worth_heading(node: &NodeRef, text: &str, title: &str) -> bool {
     if text.chars().count() > HEAD_CHARS {
         return false;
@@ -2625,7 +2716,8 @@ mod tests {
              <p>Последний абзац статьи, на котором она заканчивается тут</p>\
              </div>";
 
-        let restored = restore(&source, content, "https://example.org/post", "").expect("ничего");
+        let restored =
+            restore(&source, content, "https://example.org/post", "", false).expect("ничего");
 
         assert!(restored.contains("Выпавший абзац"), "{restored}");
         assert!(
@@ -2680,6 +2772,7 @@ mod tests {
             content,
             "https://example.org/post",
             "Заголовок статьи, он же её название",
+            false,
         )
         .expect("заголовки не вернулись");
 
@@ -2713,7 +2806,7 @@ mod tests {
              <h2>Раздел про шину</h2>\
              <p>Последний абзац статьи, на котором она заканчивается тут</p>\
              </div>";
-        assert!(restore(&source, content, "https://example.org/post", "").is_none());
+        assert!(restore(&source, content, "https://example.org/post", "", false).is_none());
     }
 
     /// Значок ссылки на сам заголовок — не текст заголовка.
@@ -2764,6 +2857,7 @@ mod tests {
             &format!("<div id=\"readability-page-1\">{head}{tail}</div>"),
             "https://example.org/post",
             "",
+            false,
         )
         .expect("сноска не вернулась");
         assert_eq!(restored.matches("Сноска про шину").count(), 1, "{restored}");
@@ -2776,7 +2870,8 @@ mod tests {
                 &Document::from(page(&note)),
                 &already,
                 "https://example.org/post",
-                ""
+                "",
+                false
             )
             .is_none()
         );
@@ -2797,7 +2892,7 @@ mod tests {
              <p>Первый абзац статьи, с которого всё начинается тут</p>\
              <p>Последний абзац статьи, на котором она заканчивается тут</p>\
              </div>";
-        assert!(restore(&source, content, "https://example.org/post", "").is_none());
+        assert!(restore(&source, content, "https://example.org/post", "", false).is_none());
     }
 
     /// Значок против картинки: правило проверяется на всех местах сразу,
@@ -3271,5 +3366,52 @@ mod tests {
             post,
             "Nuevo giro"
         ));
+    }
+
+    /// Начало статьи между `<h1>` и первым взятым абзацем возвращается
+    /// перед ним, в своём порядке, с подзаголовком (BBC). Спонсоры в той же
+    /// обёртке, но своим классом, и анонс-ссылка — нет. Без объявления
+    /// статьи граница прежняя.
+    #[test]
+    fn the_lost_lede_above_the_first_paragraph_comes_back() {
+        let source = Document::from(
+            "<body><article><h1>Обзор диагнозов</h1>\
+             <div class=\"text\"><p class=\"sponsors\">Спасибо спонсорам: Анна, Борис, Вера, Глеб, Дина, Егор, Жанна</p></div>\
+             <div class=\"text\"><p class=\"par\">Лид статьи, ради которого её и открыли, в нём главное</p>\
+             <p class=\"par\">Второй абзац начала, он тоже пропадал вместе с лидом</p>\
+             <p class=\"par\"><a href=\"/subscribe\">Подпишитесь на рассылку и получайте новости каждое утро</a></p></div>\
+             <h2>Долгое ожидание</h2>\
+             <div class=\"text\"><p class=\"par\">Первый абзац, который взяло извлечение, середина статьи</p>\
+             <p class=\"par\">Последний абзац статьи, на котором она заканчивается тут</p></div>\
+             </article></body>",
+        );
+        let content = "<div id=\"readability-page-1\">\
+             <p class=\"par\">Первый абзац, который взяло извлечение, середина статьи</p>\
+             <p class=\"par\">Последний абзац статьи, на котором она заканчивается тут</p>\
+             </div>";
+
+        let restored =
+            restore(&source, content, "https://e.com/a", "Обзор диагнозов", true).expect("ничего");
+        let at = |text: &str| {
+            restored
+                .find(text)
+                .unwrap_or_else(|| panic!("нет «{text}»: {restored}"))
+        };
+        assert!(at("Лид статьи") < at("Второй абзац начала"));
+        assert!(at("Второй абзац начала") < at("Долгое ожидание"));
+        assert!(at("Долгое ожидание") < at("Первый абзац, который взяло"));
+        assert!(!restored.contains("спонсорам"), "{restored}");
+        assert!(!restored.contains("Подпишитесь"), "{restored}");
+
+        assert!(
+            restore(
+                &source,
+                content,
+                "https://e.com/a",
+                "Обзор диагнозов",
+                false
+            )
+            .is_none()
+        );
     }
 }
