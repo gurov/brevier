@@ -177,6 +177,8 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let cfg = Config::default();
 
     let doc = Document::from(html);
+    // Первым: остальные проходы должны видеть статью на её месте.
+    unstream(&doc);
     deicon(&doc);
     keep_lang(&doc);
     keep_verse_class(&doc);
@@ -467,6 +469,157 @@ fn deicon(doc: &Document) {
             image.remove_from_parent();
         }
     }
+}
+
+/// Вызовы потокового SSR React, которые переносят готовый кусок на его место.
+/// `$RC` — граница Suspense дождалась содержимого, `$RR` — то же, но после
+/// загрузки стилей, `$RS` — кусок встаёт на место заглушки `P:…`. `$RX`
+/// («рисовать на клиенте») не трогаем: на его месте остаётся запасное.
+const STREAM_CALLS: [&str; 3] = ["$RC(", "$RR(", "$RS("];
+
+/// Собрать страницу, которую React отдал потоком (потоковый SSR).
+///
+/// Next.js и всё, что рисует React на сервере потоком, отдают статью
+/// не на её месте, а в хвосте документа — в `<div hidden id="S:3">`, —
+/// а на месте оставляют `<template id="B:7">` и заглушку: серые полосы
+/// «идёт загрузка». На место кусок переносит строчка скрипта
+/// `$RC("B:7","S:3")`. Без скрипта читатель получал заглушку, а сама статья
+/// лежала в скрытом узле, который Readability честно выбрасывает: у Anadolu
+/// от статьи доезжал один лид, у N+ — строка «Por Redacción».
+///
+/// Мы делаем ровно эту перестановку, ничего не исполняя: имена вызовов
+/// и их аргументы — фиксированная форма протокола React, такая же
+/// разметка, как `<noscript>`, только записанная строкой. Номера кусков
+/// и границ не совпадают (`$RC("B:17","S:10")` у Anadolu), поэтому пары
+/// берутся из вызовов, а не угадываются по числу. Порядок — порядок
+/// вызовов в документе: кусок может держать заглушку, которую заполнит
+/// следующий.
+fn unstream(doc: &Document) {
+    let calls: Vec<(String, String, String)> = doc
+        .select("script:not([src])")
+        .nodes()
+        .iter()
+        .flat_map(|script| stream_calls(&script.text()))
+        .collect();
+    if calls.is_empty() {
+        return;
+    }
+    let mut parts: HashMap<String, NodeRef> = HashMap::new();
+    for node in doc.select("[id]").nodes() {
+        if let Some(id) = node.attr("id")
+            && is_stream_id(&id)
+        {
+            parts.insert(id.to_string(), *node);
+        }
+    }
+    for (call, first, second) in &calls {
+        if call == "$RS(" {
+            // Кусок `S:…` встаёт на место заглушки `P:…`.
+            let (Some(segment), Some(placeholder)) = (parts.get(first), parts.get(second)) else {
+                continue;
+            };
+            for child in segment.children() {
+                placeholder.insert_before(&child);
+            }
+            placeholder.remove_from_parent();
+            segment.remove_from_parent();
+        } else {
+            let (Some(boundary), Some(content)) = (parts.get(first), parts.get(second)) else {
+                continue;
+            };
+            fill_boundary(boundary, content);
+        }
+    }
+}
+
+/// Вызовы `$RC/$RR/$RS("…","…"` из текста скрипта, в порядке текста: имя
+/// и два первых аргумента. Аргументы — короткие идентификаторы вида `B:7`;
+/// всё, что на них не похоже (определение самой функции, переменная вместо
+/// строки), пропускаем.
+fn stream_calls(code: &str) -> Vec<(String, String, String)> {
+    let mut found: Vec<(usize, (String, String, String))> = Vec::new();
+    for call in STREAM_CALLS {
+        for (at, _) in code.match_indices(call) {
+            let rest = &code[at + call.len()..];
+            let Some((first, rest)) = quoted(rest) else {
+                continue;
+            };
+            let Some(rest) = rest.trim_start().strip_prefix(',') else {
+                continue;
+            };
+            let Some((second, _)) = quoted(rest.trim_start()) else {
+                continue;
+            };
+            if is_stream_id(first) && is_stream_id(second) {
+                found.push((at, (call.to_owned(), first.to_owned(), second.to_owned())));
+            }
+        }
+    }
+    found.sort_by_key(|(at, _)| *at);
+    found.into_iter().map(|(_, call)| call).collect()
+}
+
+/// Строка в двойных кавычках в начале текста и остаток за ней.
+fn quoted(text: &str) -> Option<(&str, &str)> {
+    let inner = text.strip_prefix('"')?;
+    let end = inner.find('"')?;
+    Some((&inner[..end], &inner[end + 1..]))
+}
+
+/// `B:7`, `S:3`, `P:12` — идентификаторы кусков и границ у React.
+fn is_stream_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    matches!(chars.next(), Some('B' | 'S' | 'P'))
+        && chars.next() == Some(':')
+        && id.len() > 2
+        && id[2..].chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Граница Suspense получает своё содержимое — как в `$RC` у React.
+///
+/// Перед `<template id="B:…">` стоит комментарий `<!--$?-->`, после
+/// заглушки — `<!--/$-->`. Всё между ними (сам шаблон и заглушка) уходит,
+/// на их место встают дети `<div hidden id="S:…">`. Вложенные границы
+/// внутри заглушки считаются по своим комментариям, чтобы закрывающий
+/// чужой границы не приняли за свой. Если формы нет — ничего не трогаем.
+fn fill_boundary(boundary: &NodeRef, content: &NodeRef) {
+    let Some(start) = boundary.prev_sibling() else {
+        return;
+    };
+    if comment_text(&start).as_deref() != Some("$?") {
+        return;
+    }
+    let mut depth = 0;
+    let mut node = start.next_sibling();
+    while let Some(current) = node {
+        if let Some(text) = comment_text(&current) {
+            if text == "/$" {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            } else if matches!(text.as_str(), "$" | "$?" | "$!") {
+                depth += 1;
+            }
+        }
+        node = current.next_sibling();
+        current.remove_from_parent();
+    }
+    let Some(end) = node else {
+        return;
+    };
+    for child in content.children() {
+        end.insert_before(&child);
+    }
+    content.remove_from_parent();
+}
+
+fn comment_text(node: &NodeRef) -> Option<String> {
+    node.query(|tree| match &tree.data {
+        dom_query::NodeData::Comment { contents } => Some(contents.to_string()),
+        _ => None,
+    })
+    .flatten()
 }
 
 /// Что страница сама исключила из печати. Имена из соглашений, а не
@@ -2890,5 +3043,63 @@ mod tests {
         let bare = page.replacen("<html lang=\"ru\">", "<html>", 1);
         let article = extract(&bare, "https://example.org/post").unwrap();
         assert_eq!(article.lang, None);
+    }
+
+    /// Потоковый SSR React: статья лежит в скрытом куске в хвосте,
+    /// на её месте — заглушка; `$RC` с несовпадающими номерами ставит
+    /// кусок на место, заглушка уходит.
+    #[test]
+    fn a_streamed_react_boundary_is_filled_in_place() {
+        let doc = Document::from(
+            "<body><main><h1>Заголовок</h1>\
+             <!--$?--><template id=\"B:17\"></template><div class=\"skeleton\">Загрузка…</div><!--/$-->\
+             <p>После статьи</p></main>\
+             <div hidden id=\"S:10\"><p>Текст статьи из потока</p></div>\
+             <script>$RC=function(b,c){};$RC(\"B:17\",\"S:10\")</script></body>",
+        );
+        unstream(&doc);
+        let body = doc.select("main").html().to_string();
+        assert!(body.contains("Текст статьи из потока"), "{body}");
+        assert!(!body.contains("Загрузка"), "{body}");
+        assert!(
+            body.find("Текст статьи").unwrap() < body.find("После статьи").unwrap(),
+            "{body}"
+        );
+        assert!(doc.select("[hidden]").is_empty());
+    }
+
+    /// `$RS` ставит кусок на место заглушки `P:…`; вызов без такой формы
+    /// (определение функции) и чужие идентификаторы ничего не трогают.
+    #[test]
+    fn a_streamed_segment_replaces_its_placeholder() {
+        let doc = Document::from(
+            "<body><main><template id=\"P:2\"></template></main>\
+             <div hidden id=\"S:2\"><p>Кусок</p></div>\
+             <div hidden id=\"S:9\"><p>Ничей</p></div>\
+             <script>$RS=function(a,b){};$RS(\"S:2\",\"P:2\");$RS(x,\"P:9\")</script></body>",
+        );
+        unstream(&doc);
+        assert_eq!(doc.select("main").text().trim(), "Кусок");
+        assert!(doc.select("template").is_empty());
+        assert_eq!(doc.select("[hidden]").text().trim(), "Ничей");
+    }
+
+    /// Весь путь: статья, отданная потоком, доезжает до читателя
+    /// (у Anadolu от неё оставался один лид).
+    #[test]
+    fn a_streamed_article_is_extracted() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article><h1>Эрроу</h1><p>Лид статьи.</p>\
+             <!--$?--><template id=\"B:0\"></template><div></div><!--/$--></article>\
+             <div hidden id=\"S:0\"><p>{text}</p><p>{text}</p><p>{text}</p></div>\
+             <script>$RC(\"B:0\",\"S:0\")</script></body></html>"
+        );
+        let article = extract(&page, "https://example.org/post").unwrap();
+        assert!(
+            article.content_html.contains("Кеннет Эрроу"),
+            "{}",
+            article.content_html
+        );
     }
 }
