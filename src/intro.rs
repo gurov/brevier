@@ -9,6 +9,11 @@
 //! Коротко по существу: читатель открыл окно, чтобы читать, а не изучать
 //! программу. Вернувшемуся читателю нужнее всего то, где он был, — поэтому
 //! сверху недавнее, а рассказ о программе под ним (#27).
+//!
+//! Рассказ — о том, что можно сделать отсюда, а не о замысле: что набрать
+//! в адресной строке (примеры кликаются) и пять вещей, которых не видно,
+//! пока не наткнёшься. Язык простой, короткими фразами: читают это
+//! и те, для кого английский не родной (переписано 9 октября 2026).
 
 use crate::store::Store;
 
@@ -27,28 +32,37 @@ pub fn page(store: &Store, touch: bool) -> String {
     }
 }
 
+/// В строке клавиш клавиша и её подпись держатся неразрывным пробелом:
+/// иначе строка рвётся между «**Ctrl+H**» и «history».
 pub const MARKDOWN: &str = "\
 # Brevier
 
-A reader for the web, without JavaScript.
+Brevier shows web pages as plain, easy-to-read text. It leaves out scripts
+and the site's own design, so every site looks the same.
 
-Brevier fetches a page, throws away the site's scripts, styling and furniture,
-and sets what is left in typography chosen by you rather than by the site.
-It reads markdown documentation straight out of repositories, too.
+## Type in the address bar
 
-## Start with
+- an address: [danluu.com](https://danluu.com/)
+- words, to search the web: [borrow checker](https://lite.duckduckgo.com/lite/?q=borrow+checker)
+- a GitHub or GitLab repository, to read its docs: [gh:rust-lang/book](gh:rust-lang/book)
+- a site's feed, to see its latest posts: [blog.rust-lang.org/feed.xml](https://blog.rust-lang.org/feed.xml)
+- the path to a Markdown file on this computer
 
-- [danluu.com/keyboard-latency/](https://danluu.com/keyboard-latency/) — an article
-- [gh:BurntSushi/ripgrep](gh:BurntSushi/ripgrep) — a repository
-- the path to a `.md` file on this machine
+## Good to know
 
-## Worth knowing
+- Some sites need JavaScript and show nothing here. **Ctrl+O** opens the page
+  in your usual browser.
+- On most pages, a panel on the right lists the parts of the page, the site's
+  feeds and the site's own menu.
+- When a page names the next one, it ends with a **Next:** link. **Space** at
+  the very end goes there.
+- **Back** returns you to the place where you stopped reading.
+- Pages you read this week open from a copy on this computer. **Ctrl+R** loads
+  a fresh one.
 
-Pages that need JavaScript will not render here. That is the point, not a
-defect — when it happens, **Ctrl+O** hands the address to your usual browser.
-
-**Ctrl+L** address · **Ctrl+T** new tab · **Ctrl+H** history · **Ctrl+F** find
-· **Ctrl+S** save
+**Ctrl+L**\u{a0}address · **Ctrl+T**\u{a0}new\u{a0}tab · **Ctrl+F**\u{a0}find
+· **Ctrl+D**\u{a0}bookmark · **Ctrl+H**\u{a0}history · **Ctrl+S**\u{a0}save
+· **Tab**\u{a0}next\u{a0}link
 ";
 
 /// Та же страница для сенсорного экрана. Клавиш на телефоне нет, а путь
@@ -57,27 +71,31 @@ defect — when it happens, **Ctrl+O** hands the address to your usual browser.
 pub const TOUCH: &str = "\
 # Brevier
 
-A reader for the web, without JavaScript.
+Brevier shows web pages as plain, easy-to-read text. It leaves out scripts
+and the site's own design, so every site looks the same.
 
-Brevier fetches a page, throws away the site's scripts, styling and furniture,
-and sets what is left in typography chosen by you rather than by the site.
-It reads markdown documentation straight out of repositories, too.
+## Type in the address bar
 
-## Start with
+- an address: [danluu.com](https://danluu.com/)
+- words, to search the web: [borrow checker](https://lite.duckduckgo.com/lite/?q=borrow+checker)
+- a GitHub or GitLab repository, to read its docs: [gh:rust-lang/book](gh:rust-lang/book)
+- a site's feed, to see its latest posts: [blog.rust-lang.org/feed.xml](https://blog.rust-lang.org/feed.xml)
 
-- [danluu.com/keyboard-latency/](https://danluu.com/keyboard-latency/) — an article
-- [gh:BurntSushi/ripgrep](gh:BurntSushi/ripgrep) — a repository
-- a link shared to Brevier from any other app
+Links shared from other apps open here too.
 
-## Worth knowing
+## Good to know
 
-Pages that need JavaScript will not render here. That is the point, not a
-defect — when it happens, **Open in your browser** in the menu hands the
-address to your usual browser.
+- Some sites need JavaScript and show nothing here. **Open in your browser**
+  in the menu sends the page to your usual browser.
+- The list button at the top shows the parts of the page, the site's feeds
+  and the site's own menu.
+- When a page names the next one, it ends with a **Next:** link.
+- Press and hold a link to open it in a new tab.
+- Pages you read this week open from a copy on your phone. **Reload** in the
+  menu loads a fresh one.
 
-The list button at the top is the contents; find on page, zoom, history and
-bookmarks are in the menu. Pinch the page to change its size; long-press
-a link to open it in a new tab.
+Find on page, bookmarks, history and settings are in the menu. Pinch the page
+to make it bigger or smaller.
 ";
 
 #[cfg(test)]
@@ -100,6 +118,15 @@ mod tests {
         let store = Store::at(journal("first"));
         assert_eq!(page(&store, false), MARKDOWN);
         assert_eq!(page(&store, true), TOUCH);
+    }
+
+    /// Пример поиска — ссылка на ту же выдачу, что даёт адресная строка:
+    /// поменяется поисковик — тест напомнит поменять и пример.
+    #[test]
+    fn the_search_example_is_a_real_search() {
+        let link = format!("({})", crate::hosts::search_url("borrow checker"));
+        assert!(MARKDOWN.contains(&link), "{link}");
+        assert!(TOUCH.contains(&link), "{link}");
     }
 
     #[test]
