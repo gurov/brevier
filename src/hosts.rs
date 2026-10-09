@@ -243,6 +243,17 @@ const WAYBACK_AVAILABLE: &str = "https://archive.org/wayback/available";
 /// Ответ Availability API — один снимок, а не список: килобайта хватает.
 const MAX_AVAILABLE: u64 = 64 * 1024;
 
+/// Список снимков Wayback (CDX): кто сохранён, когда и с каким ответом.
+const WAYBACK_CDX: &str = "https://web.archive.org/cdx/search/cdx";
+
+/// Ответ CDX — одна строка (`limit=-1`).
+const MAX_CDX: u64 = 64 * 1024;
+
+/// Сколько ждать CDX. У страницы с тысячами снимков он отвечал 16–50 секунд
+/// (Google Reader, 9 октября 2026) — дольше обычных 30 на запрос; ждёт
+/// читатель, который сам нажал кнопку, и ложное «копии нет» хуже ожидания.
+const CDX_PATIENCE: std::time::Duration = std::time::Duration::from_secs(90);
+
 /// Есть ли смысл искать страницу у Wayback; ответ — её адрес без решётки.
 ///
 /// Не для всего: выдача поиска, сам архив и машина без имени в сети
@@ -268,24 +279,57 @@ pub fn for_wayback(url: &str) -> Option<String> {
 /// `web.archive.org/web/<адрес>` ведёт на последний снимок любой, а у мёртвой
 /// страницы это обычно снимок её 404: обходчик архива заходит по старым
 /// ссылкам и прилежно сохраняет отказ (у Google Reader на 9 октября 2026 —
-/// снимок 404 того же утра). Поэтому сначала вопрос Availability API, и он
-/// отвечает живым снимком. Список снимков (CDX) с фильтром по ответу точнее,
-/// но отвечал 16–29 секунд при наших 30 на запрос — замер 9 октября 2026.
-/// Запрос — по нажатию читателя, не раньше.
+/// снимок 404 того же утра). Поэтому спрашиваем живой снимок, и по нажатию
+/// читателя, не раньше.
+///
+/// Сначала Availability API: отвечает за секунду и снимки отказов
+/// пропускает, но ненадёжен — тот же вопрос через полчаса получил пустой
+/// ответ, трижды подряд (9 октября 2026). Пусто или отказ — список снимков
+/// (CDX) с фильтром по ответу 200: точно, но медленно (`CDX_PATIENCE`).
 ///
 /// Снимок открывается видом без `id_`: ссылки и картинки в нём Wayback
 /// переписал на свои снимки, и сайт, которого нет, читается внутри архива,
 /// а не по мёртвым адресам. Текст статьи в обоих видах один и тот же —
-/// сверено 9 октября 2026, тулбар Wayback в него не попадает.
+/// сверено 9 октября 2026; тулбар, который Wayback вставляет в страницу,
+/// вырезает извлечение (`without_wayback_toolbar`).
 pub fn wayback_latest(url: &str, ua: crate::fetch::UserAgent) -> Result<String, crate::Error> {
-    let blob = crate::fetch::binary(&available_query(url), ua, "application/json", MAX_AVAILABLE)?;
-    available_snapshot(&String::from_utf8_lossy(&blob.bytes)).ok_or(crate::Error::NotInWayback)
+    let available =
+        crate::fetch::binary(&available_query(url), ua, "application/json", MAX_AVAILABLE);
+    if let Ok(blob) = available
+        && let Some(snapshot) = available_snapshot(&String::from_utf8_lossy(&blob.bytes))
+    {
+        return Ok(snapshot);
+    }
+    let cdx =
+        crate::fetch::binary_within(&cdx_query(url), ua, "text/plain", MAX_CDX, CDX_PATIENCE)?;
+    latest_snapshot(&String::from_utf8_lossy(&cdx.bytes)).ok_or(crate::Error::NotInWayback)
 }
 
 fn available_query(url: &str) -> String {
     let mut query = Url::parse(WAYBACK_AVAILABLE).expect("адрес Availability API разбирается");
     query.query_pairs_mut().append_pair("url", url);
     query.into()
+}
+
+/// Запрос к CDX: последний снимок с ответом 200, время и адрес как сохранён.
+fn cdx_query(url: &str) -> String {
+    let mut query = Url::parse(WAYBACK_CDX).expect("адрес CDX разбирается");
+    query
+        .query_pairs_mut()
+        .append_pair("url", url)
+        .append_pair("filter", "statuscode:200")
+        .append_pair("fl", "timestamp,original")
+        .append_pair("limit", "-1");
+    query.into()
+}
+
+/// Адрес снимка из ответа CDX: строки «время адрес», последняя — свежая.
+fn latest_snapshot(cdx: &str) -> Option<String> {
+    cdx.lines().rev().find_map(|line| {
+        let (stamp, original) = line.trim().split_once(' ')?;
+        (stamp.len() >= 8 && stamp.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| format!("{WAYBACK}{stamp}/{original}"))
+    })
 }
 
 /// Адрес снимка из ответа: только живой снимок, с ответом 2xx.
@@ -308,6 +352,22 @@ fn available_snapshot(json: &str) -> Option<String> {
 /// браузер читателя.
 pub fn wayback_calendar(url: &str) -> String {
     format!("{WAYBACK}*/{url}")
+}
+
+/// Снимок Wayback без тулбара, который архив вставляет в страницу между
+/// своими комментариями. Его строка «The Wayback Machine - <адрес>» видна
+/// только при печати, а Readability у короткой страницы брал её в текст.
+pub fn without_wayback_toolbar(html: &str) -> std::borrow::Cow<'_, str> {
+    const BEGIN: &str = "<!-- BEGIN WAYBACK TOOLBAR INSERT -->";
+    const END: &str = "<!-- END WAYBACK TOOLBAR INSERT -->";
+    let Some(start) = html.find(BEGIN) else {
+        return std::borrow::Cow::Borrowed(html);
+    };
+    let Some(length) = html[start..].find(END) else {
+        return std::borrow::Cow::Borrowed(html);
+    };
+    let end = start + length + END.len();
+    std::borrow::Cow::Owned(format!("{}{}", &html[..start], &html[end..]))
 }
 
 /// Снимок ли это Wayback, и если да — чей и от какого дня. Строка над
@@ -764,6 +824,45 @@ mod tests {
             None
         );
         assert_eq!(available_snapshot("<html>Temporarily Offline</html>"), None);
+    }
+
+    /// Запасной путь — CDX: только снимки с ответом 200, последний; из ответа
+    /// берётся последняя строка, пустой ответ — снимка нет.
+    #[test]
+    fn the_cdx_gives_the_latest_good_snapshot_when_asked() {
+        assert_eq!(
+            cdx_query("https://www.google.com/reader/about/?a=1&b=2"),
+            "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fwww.google.com%2Freader%2Fabout%2F%3Fa%3D1%26b%3D2\
+             &filter=statuscode%3A200&fl=timestamp%2Coriginal&limit=-1"
+        );
+        assert_eq!(
+            latest_snapshot(
+                "20130101000000 http://www.google.com/reader/about/\n\
+                 20210503140021 https://www.google.com/reader/about/\n"
+            )
+            .as_deref(),
+            Some("https://web.archive.org/web/20210503140021/https://www.google.com/reader/about/")
+        );
+        assert_eq!(latest_snapshot(""), None);
+        assert_eq!(latest_snapshot("<html>Temporarily Offline</html>"), None);
+    }
+
+    /// Тулбар Wayback вырезается целиком, страница вокруг остаётся; без
+    /// его комментариев страница не трогается.
+    #[test]
+    fn the_wayback_toolbar_is_not_the_page() {
+        let snapshot = "<body><!-- BEGIN WAYBACK TOOLBAR INSERT --><div id=\"wm-ipp-print\">\
+            The Wayback Machine - https://web.archive.org/web/2021/https://a.org/</div>\
+            <!-- END WAYBACK TOOLBAR INSERT --><h1>Reader</h1></body>";
+        assert_eq!(
+            without_wayback_toolbar(snapshot),
+            "<body><h1>Reader</h1></body>"
+        );
+        let plain = "<body><h1>Reader</h1></body>";
+        assert!(matches!(
+            without_wayback_toolbar(plain),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     /// Снимок узнаётся по адресу: чей он и от какого дня.

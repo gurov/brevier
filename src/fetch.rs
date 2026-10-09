@@ -232,9 +232,23 @@ fn book(url: &str, part: usize, ua: UserAgent) -> Result<Page, Error> {
 /// это дело того, кто заказывал: `media` умеет отличить svg от png в байтах,
 /// а сервера ошибаются в заголовке чаще, чем хотелось бы.
 pub fn binary(url: &str, ua: UserAgent, accept: &str, limit: u64) -> Result<Blob, Error> {
+    binary_within(url, ua, accept, limit, TIMEOUT)
+}
+
+/// То же со своим потолком времени: для ответа, который заведомо долгий
+/// и которого читатель ждёт сам, нажав кнопку (список снимков Wayback, #9).
+pub fn binary_within(
+    url: &str,
+    ua: UserAgent,
+    accept: &str,
+    limit: u64,
+    timeout: Duration,
+) -> Result<Blob, Error> {
     let parsed = target(url)?;
 
-    let mut res: Response<Body> = agent(ua, accept).get(parsed.as_str()).call()?;
+    let mut res: Response<Body> = agent_within(ua, accept, timeout)
+        .get(parsed.as_str())
+        .call()?;
     let final_url = res.get_uri().to_string();
     let mime = res
         .body()
@@ -540,6 +554,10 @@ fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
 }
 
 fn agent(ua: UserAgent, accept: &str) -> Agent {
+    agent_within(ua, accept, TIMEOUT)
+}
+
+fn agent_within(ua: UserAgent, accept: &str, timeout: Duration) -> Agent {
     let tls = TlsConfig::builder()
         // Никогда не трогать disable_verification, даже временно.
         .root_certs(RootCerts::PlatformVerifier)
@@ -553,7 +571,7 @@ fn agent(ua: UserAgent, accept: &str) -> Agent {
         // Цепочку переходов меряет `--check`; стоит это список адресов
         // на запрос, а не запрос.
         .save_redirect_history(true)
-        .timeout_global(Some(TIMEOUT))
+        .timeout_global(Some(timeout))
         .build()
         .new_agent()
 }

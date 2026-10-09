@@ -179,6 +179,13 @@ fn empty(html: &str) -> Error {
 pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let cfg = Config::default();
 
+    // Тулбар снимка Wayback (#9) — не страница: у короткой страницы
+    // Readability брал его строку для печати вместе с текстом.
+    let html = match crate::hosts::wayback_snapshot(url) {
+        Some(_) => crate::hosts::without_wayback_toolbar(html),
+        None => std::borrow::Cow::Borrowed(html),
+    };
+    let html = html.as_ref();
     let doc = Document::from(html);
     // Первым: остальные проходы должны видеть статью на её месте.
     unstream(&doc);
