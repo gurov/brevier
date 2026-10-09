@@ -80,6 +80,17 @@ class MainActivity : Activity(), ArticleHost {
     private lateinit var needle: EditText
     private lateinit var tally: TextView
     private lateinit var notice: TextView
+    /** Полоса прогресса под статьёй (#19). */
+    private lateinit var strip: ProgressStrip
+    /** Когда читатель последний раз трогал страницу: время чтения идёт, пока недавно (#19). */
+    private var lastTouch = android.os.SystemClock.uptimeMillis()
+    /** Тик чтения раз в секунду, пока приложение на экране (#19). */
+    private val ticker = object : Runnable {
+        override fun run() {
+            tickReading()
+            main.postDelayed(this, 1000)
+        }
+    }
     private lateinit var shelf: Shelf
     private lateinit var tabList: TabList
     private lateinit var settings: SettingsPage
@@ -134,7 +145,16 @@ class MainActivity : Activity(), ArticleHost {
 
     override fun onPause() {
         super.onPause()
+        main.removeCallbacks(ticker)
+        currentTab()?.let { leaveReading(it) }
         rememberSession()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        main.removeCallbacks(ticker)
+        main.postDelayed(ticker, 1000)
+        lastTouch = android.os.SystemClock.uptimeMillis()
     }
 
     /**
@@ -215,6 +235,10 @@ class MainActivity : Activity(), ArticleHost {
 
         stage = FrameLayout(this)
         column.addView(stage, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        strip = ProgressStrip(this)
+        strip.source = { stripSource() }
+        column.addView(strip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(7f)))
 
         findBar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -443,6 +467,7 @@ class MainActivity : Activity(), ArticleHost {
         fillBar()
         fillFindBar()
         shelf.paint(p)
+        strip.palette = p
         tabList.paint(p)
         // Панели системы прозрачные (тема), окно рисуется под ними на любой
         // версии, а не только на Android 15, где это обязательно: отступы от
@@ -490,6 +515,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun closeTab(index: Int) {
         if (index !in tabs.indices) return
         val tab = tabs.removeAt(index)
+        leaveReading(tab)
         // Уходя, бросаем загрузку: слушать её больше некому.
         tab.generation += 1
         tab.view = null
@@ -587,6 +613,9 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     private fun open(tab: Tab, address: String, remember: Boolean, fresh: Boolean = false) {
+        leaveReading(tab)
+        // Предложить продолжить — только странице, открытой заново и без якоря (#19).
+        tab.freshVisit = remember && !address.contains('#')
         if (remember) {
             // Место на покидаемой странице — чтобы «назад» вернул сюда.
             val view = tab.view
@@ -695,8 +724,13 @@ class MainActivity : Activity(), ArticleHost {
             else if (loaded.served) notice(SERVED_MARKDOWN)
         }
         if (loaded.ok) seekEntries(tab, loaded)
+        // Продолжить с прошлого места — предложение, а не прыжок (#19).
+        val at = loaded.continueAt
+        if (tab.freshVisit && at != null && tab == currentTab()) offerContinue(tab, at, loaded.continueShare)
+        tab.freshVisit = false
         sync()
         rememberSession()
+        strip.invalidate()
     }
 
     /** Перерисовать видимую вкладку под новую ступень или тему, не теряя места чтения. */
@@ -720,6 +754,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun step(backwards: Boolean) {
         val tab = currentTab() ?: return
         val view = tab.view ?: return
+        leaveReading(tab)
         if (tab.shown != null) tab.setPlace(view.place())
         val moved = if (backwards) tab.back() else tab.forward()
         if (!moved) return
@@ -833,7 +868,12 @@ class MainActivity : Activity(), ArticleHost {
             project.forEach { rows += ShelfRow.Open(it.title, it.address, dim = false) }
         }
         if (project.isNotEmpty() && marks.isNotEmpty()) rows += ShelfRow.Header("On this page")
-        marks.forEach { rows += ShelfRow.Jump(it.title, it.level, it.at, it.heading) }
+        // Веха несёт своё место в подписи (#19): «40% · Начало абзаца…».
+        val length = shown?.page?.text?.length ?: 0
+        marks.forEach {
+            val title = if (it.heading || length == 0) it.title else "${Math.round(it.at * 100f / length)}% · ${it.title}"
+            rows += ShelfRow.Jump(title, it.level, it.at, it.heading)
+        }
         val feeds = shown?.feeds ?: emptyList()
         if (feeds.isNotEmpty()) {
             rows += ShelfRow.Header(if (feeds.size == 1) "This site has a feed" else "This site has feeds")
@@ -970,10 +1010,12 @@ class MainActivity : Activity(), ArticleHost {
      */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) touched = event.rawX.toInt() to event.rawY.toInt()
+        lastTouch = android.os.SystemClock.uptimeMillis()
         return super.dispatchTouchEvent(event)
     }
 
     override fun scrolled() {
+        strip.invalidate()
         val view = currentTab()?.view ?: return
         if (!shelf.open) return
         // Мерим не по верхней кромке, а по той строке, куда ставит заголовок
@@ -1161,6 +1203,74 @@ class MainActivity : Activity(), ArticleHost {
             return
         }
         go(target)
+    }
+
+    // ── прогресс чтения (#19) ────────────────────────────────────────────────
+
+    /** Страница, у которой есть что считать: статья, а не список и не своя. */
+    private fun readable(tab: Tab): Loaded? =
+        tab.shown?.takeIf { it.ok && !it.internal && !it.listing && tab.view != null }
+
+    /**
+     * Секунда чтения: приложение на экране, страницу трогали в последние
+     * минуты — видимое уходит ядру, доли возвращаются полке, полоса
+     * перерисовывается.
+     */
+    private fun tickReading() {
+        val tab = currentTab() ?: return
+        val shown = readable(tab) ?: return
+        val view = tab.view ?: return
+        val present = hasWindowFocus() &&
+            android.os.SystemClock.uptimeMillis() - lastTouch < PRESENT_MS
+        if (!present || tab.loading) return
+        val from = view.offsetAt(view.scrollY) ?: return
+        val to = view.offsetAt(view.scrollY + view.height) ?: shown.page.text.length
+        shelf.shares(Core.readingTick(shown.address, from, to))
+        strip.invalidate()
+    }
+
+    /** Уходя со страницы, сказать ядру, где остановились: запомненная запишется. */
+    private fun leaveReading(tab: Tab) {
+        val shown = readable(tab) ?: return
+        val view = tab.view ?: return
+        Core.readingLeave(shown.address, view.place())
+    }
+
+    /** Что рисовать полосе: докуда дошли, длина текста, начала разделов. */
+    private fun stripSource(): Triple<Int, Int, List<Int>>? {
+        val tab = currentTab() ?: return null
+        val shown = readable(tab) ?: return null
+        val view = tab.view ?: return null
+        // Страница в экран — пути нет.
+        val content = view.getChildAt(0)?.height ?: 0
+        if (content <= view.height) return null
+        val total = shown.page.text.length
+        val reached = view.offsetAt(view.scrollY + view.height) ?: total
+        return Triple(reached, total, shown.page.contents.map { it.at })
+    }
+
+    /**
+     * «Continue from 45%» — строкой, которую можно нажать: страница открыта
+     * сверху, а продолжить или перечитать — решает читатель. Висит минуту.
+     */
+    private fun offerContinue(tab: Tab, at: Int, share: Int) {
+        val said = "Continue from $share%"
+        notice.text = android.text.SpannableString(said).apply {
+            setSpan(android.text.style.UnderlineSpan(), 0, said.length, 0)
+        }
+        notice.visibility = View.VISIBLE
+        notice.setOnClickListener {
+            notice.visibility = View.GONE
+            notice.setOnClickListener(null)
+            if (tab == currentTab()) tab.view?.settle(at, ANCHOR_ALIGN)
+        }
+        main.removeCallbacksAndMessages(NOTICE)
+        main.postAtTime({
+            if (notice.text.toString() == said) {
+                notice.visibility = View.GONE
+                notice.setOnClickListener(null)
+            }
+        }, NOTICE, android.os.SystemClock.uptimeMillis() + 60_000)
     }
 
     // ── подсказки ───────────────────────────────────────────────────────────
@@ -1516,6 +1626,8 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Строка состояния внизу: сама и убирается. */
     private fun notice(said: String) {
+        // Обычная строка не нажимается: предложение «Continue» (#19) ушло.
+        notice.setOnClickListener(null)
         notice.text = said
         notice.visibility = View.VISIBLE
         main.removeCallbacksAndMessages(NOTICE)
@@ -1557,6 +1669,7 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Клавиатура — у планшетов и телефонов с чехлом: те же сочетания, что на десктопе. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        lastTouch = android.os.SystemClock.uptimeMillis()
         if (event.action == KeyEvent.ACTION_DOWN && event.isCtrlPressed) {
             val done = when (event.keyCode) {
                 KeyEvent.KEYCODE_L -> { address.requestFocus(); address.selectAll(); true }
@@ -1606,6 +1719,8 @@ class MainActivity : Activity(), ArticleHost {
         const val MAX_FILE = 8L * 1024 * 1024
         const val SERVED_MARKDOWN = "Served as Markdown by the site — the author's exact text."
         const val INSECURE = "Not secure: this page came over plain http, so anyone on the way can read and change it."
+        /** Сколько читатель «здесь» после последнего касания (#19): три минуты. */
+        const val PRESENT_MS = 180_000L
         /** Начало адреса поиска по архиву (#8). */
         const val ARCHIVE_SEARCH = "brevier:archive?q="
     }

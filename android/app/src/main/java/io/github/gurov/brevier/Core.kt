@@ -41,6 +41,21 @@ object Core {
     fun open(address: String, fresh: Boolean = false): JSONObject =
         obj("open", utcOffset(), address, if (fresh) "1" else "0")
     fun follow(here: String, target: String): JSONObject = obj("follow", here, target)
+
+    /**
+     * Секунда чтения (#19): видимое `[from, to)` в UTF-16. Ответ — доли
+     * прочитанного по разделам полки, в порядке её строк.
+     */
+    fun readingTick(address: String, from: Int, to: Int): FloatArray {
+        val shares = obj("reading.tick", address, from, to, utcOffset()).optJSONArray("shares")
+            ?: return FloatArray(0)
+        return FloatArray(shares.length()) { shares.optDouble(it).toFloat() }
+    }
+
+    /** Уход со страницы (#19): запомненная записывается с местом у верха экрана. */
+    fun readingLeave(address: String, top: Int) {
+        call("reading.leave", listOf(address, top.toString(), utcOffset().toString()).joinToString(FIELD.toString()))
+    }
     fun suggest(typed: String): JSONArray = list("suggest", typed)
     fun titleOf(address: String): String? = obj("title", address).text("title")
     fun kept(address: String): Boolean = obj("kept", address).optBoolean("kept")

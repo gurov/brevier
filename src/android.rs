@@ -46,6 +46,7 @@ use crate::media::{self, Fit, Look, Source};
 use crate::outline;
 use crate::page::{self, Page, json_string};
 use crate::palette;
+use crate::reading::{self, Progress, Readings};
 use crate::repo;
 use crate::save;
 use crate::store::{self, HINTS, Marks, Settings, Stamp, Store};
@@ -69,7 +70,22 @@ struct Core {
     /// Сырые байты уже скачанных картинок по адресу: «назад» декодирует
     /// их из памяти, а не тянет из сети заново.
     blobs: Blobs,
+    /// Запомненные долгие чтения (#19): `reading.tsv`.
+    readings: Readings,
+    /// Прогресс открытых страниц по адресу (#19): сам счёт, текст страницы
+    /// (телефон считает в UTF-16, ядро — в знаках) и начала разделов полки.
+    progress: VecDeque<Reading>,
 }
+
+/// Прогресс одной страницы на телефоне.
+struct Reading {
+    progress: Progress,
+    text: String,
+    starts: Vec<usize>,
+}
+
+/// Сколько страниц держать с прогрессом — по числу документов в памяти.
+const READINGS: usize = 16;
 
 #[derive(Default)]
 struct Blobs {
@@ -110,6 +126,8 @@ fn core() -> std::sync::MutexGuard<'static, Core> {
             marks: Marks::open(),
             documents: VecDeque::new(),
             blobs: Blobs::default(),
+            readings: Readings::open(),
+            progress: VecDeque::new(),
         })
     });
     // Отравленный мьютекс значит, что какой-то вызов упал посреди правки.
@@ -252,7 +270,28 @@ fn call(method: &str, arg: &str) -> String {
             remember(arg);
             "{}".to_owned()
         }
+        "reading.tick" => reading_tick(
+            field(0),
+            field(1).parse().unwrap_or(0),
+            field(2).parse().unwrap_or(0),
+            field(3).parse().unwrap_or(0),
+        ),
+        "reading.leave" => {
+            reading_leave(
+                field(0),
+                field(1).parse().unwrap_or(0),
+                field(2).parse().unwrap_or(0),
+            );
+            "{}".to_owned()
+        }
         "forget" => {
+            {
+                let mut core = core();
+                core.readings.forget();
+                for reading in core.progress.iter_mut() {
+                    reading.progress.reset();
+                }
+            }
             core().store.forget();
             // Копии страниц и архив — такой же след прочитанного, как журнал.
             Cache::open().forget();
@@ -470,8 +509,30 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
     };
     let page = Page::of(&document);
 
-    let kept = {
+    let (kept, offer) = {
         let mut core = core();
+        // Прогресс чтения (#19): у статьи, не у списка ссылок и не у своих
+        // страниц. Что предложить продолжить — решает интерфейс, ядро только
+        // знает, откуда.
+        let mut offer = None;
+        if document.kind == Kind::Article && !matches!(document.address, Address::Internal(_)) {
+            let key = document.address.display();
+            let mut progress = Progress::new(&key, &page.text, &page.anchors);
+            if let Some(saved) = core.readings.find(&key).cloned() {
+                progress.restore(&saved);
+                offer = reading::offer(&progress, &saved);
+            }
+            core.progress
+                .retain(|known| known.progress.address != progress.address);
+            core.progress.push_back(Reading {
+                progress,
+                text: page.text.clone(),
+                starts: page.contents.iter().map(|mark| mark.offset).collect(),
+            });
+            while core.progress.len() > READINGS {
+                core.progress.pop_front();
+            }
+        }
         // В историю идёт то, что открылось, и адрес итоговый — после
         // редиректов.
         core.store.record_with(
@@ -486,7 +547,7 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
         while core.documents.len() > DOCUMENTS {
             core.documents.pop_front();
         }
-        core.marks.has(&key)
+        (core.marks.has(&key), offer)
     };
 
     let mut out = String::from("{\"ok\":true,");
@@ -506,6 +567,12 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
     if let Some(anchor) = anchor {
         out.push_str(",\"anchor\":");
         json_string(&mut out, &anchor);
+    }
+    // Откуда продолжить, если страницу уже читали долго (#19): место —
+    // в UTF-16, как и всё на телефоне.
+    if let Some((at, share)) = offer {
+        let at = page::utf16_offsets(&page.text, &[(at, at)])[0].0;
+        out.push_str(&format!(",\"continue\":{{\"at\":{at},\"share\":{share}}}"));
     }
     // Навигация сайта и его ленты. Адрес разбираем нашим же разбором: ссылка
     // на github из меню должна открыться режимом репозитория, как ссылка
@@ -608,6 +675,57 @@ fn bookmark(offset: i32, typed: &str, title: &str) -> String {
     };
     let kept = core().marks.toggle(&address, title, offset);
     format!("{{\"kept\":{kept}}}")
+}
+
+/// Секунда чтения (#19): видимое `[from, to)` в UTF-16. Ответ — доли
+/// прочитанного по разделам полки, в порядке её строк.
+fn reading_tick(address: &str, from: usize, to: usize, offset: i32) -> String {
+    let mut core = core();
+    let key = address.split('#').next().unwrap_or(address);
+    let Some(reading) = core
+        .progress
+        .iter_mut()
+        .find(|known| known.progress.address == key)
+    else {
+        return "{\"shares\":[]}".to_owned();
+    };
+    let (from, to) = (
+        page::chars_of_utf16(&reading.text, from),
+        page::chars_of_utf16(&reading.text, to),
+    );
+    let save = reading
+        .progress
+        .tick(from, to, 1)
+        .then(|| reading.progress.saved(Stamp::now(offset)));
+    let shares = reading.progress.shares(&reading.starts);
+    if let Some(saved) = save {
+        core.readings.put(saved);
+    }
+    let shares: Vec<String> = shares.iter().map(|share| format!("{share:.3}")).collect();
+    format!("{{\"shares\":[{}]}}", shares.join(","))
+}
+
+/// Уход со страницы (#19): место — то, что у верха экрана; запомненная
+/// страница записывается.
+fn reading_leave(address: &str, top: usize, offset: i32) {
+    let mut core = core();
+    let key = address.split('#').next().unwrap_or(address);
+    let Some(reading) = core
+        .progress
+        .iter_mut()
+        .find(|known| known.progress.address == key)
+    else {
+        return;
+    };
+    let top = page::chars_of_utf16(&reading.text, top);
+    reading.progress.set_place(top);
+    let saved = reading
+        .progress
+        .remembered()
+        .then(|| reading.progress.saved(Stamp::now(offset)));
+    if let Some(saved) = saved {
+        core.readings.put(saved);
+    }
 }
 
 fn settings() -> String {

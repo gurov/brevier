@@ -82,6 +82,10 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
     private val list = ListView(context)
     private var rows: List<ShelfRow> = emptyList()
     private var here = -1
+    /** Доли прочитанного по разделам (#19) — в порядке строк оглавления. */
+    private var shares = FloatArray(0)
+    /** Номер строки среди строк оглавления: по нему берётся её доля. */
+    private var jumps = IntArray(0)
     private lateinit var palette: Palette
 
     init {
@@ -117,7 +121,17 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
     fun fill(rows: List<ShelfRow>) {
         this.rows = rows
         here = -1
+        var jump = 0
+        jumps = IntArray(rows.size) { index -> if (rows[index] is ShelfRow.Jump) jump++ else -1 }
+        shares = FloatArray(0)
         (list.adapter as Adapter).notifyDataSetChanged()
+    }
+
+    /** Свежие доли прочитанного (#19). Перерисовываем, только если что-то сдвинулось. */
+    fun shares(next: FloatArray) {
+        if (next.contentEquals(shares)) return
+        shares = next
+        if (open) (list.adapter as Adapter).notifyDataSetChanged()
     }
 
     val empty: Boolean get() = rows.isEmpty()
@@ -180,7 +194,14 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
                     // Веха — не структура автора, а наша выжимка. Пусть это видно.
                     view.setTextColor(if (row.heading) palette.ink else palette.dim)
                     view.setPadding(side + context.dp(12f) * (row.level - 1).coerceAtLeast(0), context.dp(7f), side, context.dp(7f))
-                    view.background = if (position == here) GradientDrawable().apply { setColor(palette.chosen) } else pressable(palette.touched, 0f)
+                    val base = if (position == here) GradientDrawable().apply { setColor(palette.chosen) } else pressable(palette.touched, 0f)
+                    // Справа — тонкая полоска: сколько раздела прочитано (#19).
+                    val share = shares.getOrNull(jumps.getOrElse(position) { -1 }) ?: 0f
+                    view.background = if (share > 0f) {
+                        android.graphics.drawable.LayerDrawable(arrayOf(base, ShareMark(share, palette.rule, palette.dim, context.dp(3f), context.dp(7f))))
+                    } else {
+                        base
+                    }
                 }
                 is ShelfRow.Open -> {
                     view.text = row.title
@@ -193,6 +214,77 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
             }
             return view
         }
+    }
+}
+
+/**
+ * Доля прочитанного раздела (#19) — тонкая полоска у правого края строки
+ * оглавления: дорожка и залитое сверху. Молчит, пока раздел не начат.
+ */
+class ShareMark(
+    private val share: Float,
+    private val track: Int,
+    private val fill: Int,
+    private val width: Int,
+    private val inset: Int,
+) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint()
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        val right = bounds.right - inset
+        val left = right - width
+        val top = bounds.top + inset
+        val bottom = bounds.bottom - inset
+        if (bottom <= top) return
+        paint.color = track
+        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        paint.color = fill
+        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), top + (bottom - top) * share.coerceIn(0f, 1f), paint)
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+}
+
+/**
+ * Полоса внизу статьи (#19): тонкая линия, докуда дошли — темнее, начала
+ * разделов — точками, как в читалках книг (CoolReader). Что рисовать,
+ * отдаёт `source`: докуда дошли, длина текста и начала разделов — в UTF-16.
+ */
+class ProgressStrip(context: Context) : View(context) {
+    var palette: Palette? = null
+        set(value) {
+            field = value
+            // Фон — бумага: полоса часть страницы, а не окна.
+            value?.let { setBackgroundColor(it.paper) }
+            invalidate()
+        }
+    var source: () -> Triple<Int, Int, List<Int>>? = { null }
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val palette = palette ?: return
+        val (reached, total, marks) = source() ?: return
+        if (total <= 0) return
+        val margin = context.dp(14f).toFloat()
+        val span = (width - margin * 2).coerceAtLeast(1f)
+        val y = height / 2f
+        fun x(at: Int) = margin + span * (at.coerceIn(0, total).toFloat() / total)
+        paint.color = palette.rule
+        paint.strokeWidth = context.dp(1f).toFloat()
+        canvas.drawLine(margin, y, margin + span, y, paint)
+        paint.color = palette.dim
+        paint.strokeWidth = context.dp(2f).toFloat()
+        canvas.drawLine(margin, y, x(reached), y, paint)
+        val radius = context.dp(1.6f).toFloat()
+        for (at in marks) {
+            paint.color = palette.dim
+            paint.alpha = if (at <= reached) 230 else 110
+            canvas.drawCircle(x(at), y, radius, paint)
+        }
+        paint.alpha = 255
     }
 }
 

@@ -117,6 +117,9 @@ class Loaded(
     /** Отказ: заголовок и чем открыть страницу снаружи, если это поможет. */
     val headline: String?,
     val offer: String?,
+    /** Откуда продолжить, если страницу уже читали долго (#19): UTF-16 и проценты. */
+    val continueAt: Int?,
+    val continueShare: Int,
 ) {
     companion object {
         fun of(json: JSONObject, asked: String): Loaded {
@@ -141,6 +144,8 @@ class Loaded(
                 page = Page.of(json.getJSONObject("page")),
                 headline = if (ok) null else json.optString("headline"),
                 offer = json.text("offer"),
+                continueAt = json.optJSONObject("continue")?.optInt("at"),
+                continueShare = json.optJSONObject("continue")?.optInt("share") ?: 0,
             )
         }
 

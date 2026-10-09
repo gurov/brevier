@@ -197,6 +197,10 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   (the section you are reading is marked), the site's feeds and the site's own menu. Drag
   the divider to resize it.
 - **Back and forward return to the same spot**, instantly, without loading the page again.
+- **Pick up where you stopped.** A page you read for more than ten minutes remembers where
+  you were and what you have read. Open it again and the status line offers **Continue
+  from 43%**. The shelf shows how much of each section you have read, and a thin bar under
+  the text shows how far you are, with a dot for each section.
 - **Next page.** A page that names the one after it — a series, a book chapter, a thread's
   next page — ends with a **Next:** line, and `Space` at the very end goes there.
 - **A new tab shows the five pages you read last.**
@@ -300,6 +304,7 @@ History, open tabs and bookmarks are plain text, one line per entry:
 ~/.local/share/brevier/session.tsv     # the tabs you left open
 ~/.local/share/brevier/bookmarks.tsv   # the pages you kept
 ~/.local/share/brevier/archive/        # a copy of every article you read
+~/.local/share/brevier/reading.tsv     # where you stopped in long pages
 ```
 
 The archive holds one file per page, `<host>/<date>-<title>.md.lz4`: Markdown with a short
