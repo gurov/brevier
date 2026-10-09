@@ -35,7 +35,7 @@ them](assets/screenshot-article.png)
 **Linux, Flatpak.** One file. The runtime brings GTK, so any distribution will do:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.6.0/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.7.0/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -49,14 +49,14 @@ local files (a `.md`, a saved feed) can't be opened.
 Ubuntu) and no wish for a sandbox:
 
 ```sh
-tar xf brevier-0.6.0-x86_64-linux.tar.gz
-cd brevier-0.6.0-x86_64-linux && ./install.sh
+tar xf brevier-0.7.0-x86_64-linux.tar.gz
+cd brevier-0.7.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` installs into `~/.local`, needs no root, and `--uninstall` removes it again.
 
 **Android** 7.0 or later, 64-bit ARM. Download
-[`brevier-0.6.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.6.0/brevier-0.6.0-arm64.apk)
+[`brevier-0.7.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.7.0/brevier-0.7.0-arm64.apk)
 on the phone and open it; Android asks once to allow installs from the app you opened it
 with. Updates install over it as long as they are signed with the same release key:
 
@@ -141,7 +141,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action:
 
 ```yaml
-- uses: gurov/brevier@v0.6.0   # a release tag, or @main
+- uses: gurov/brevier@v0.7.0   # a release tag, or @main
   with:
     urls: |
       https://example.com/
