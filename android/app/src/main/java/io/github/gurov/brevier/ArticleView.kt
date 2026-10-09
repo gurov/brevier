@@ -95,6 +95,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     private var laid = 0
     private var eager = false
     private var offer: String? = null
+    private var ways: List<Entry> = emptyList()
     /** Подсветка поиска — её получают и куски, досыпанные позже. */
     private var marks: IntArray? = null
     private var markHere = -1
@@ -112,9 +113,17 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     /**
      * Показать страницу. `offer` — кнопка «Open in your browser» под текстом
-     * отказа: предлагать её решает ядро.
+     * отказа, `ways` — копии страницы (#9) кнопками над ней: предлагать их
+     * решает ядро.
      */
-    fun show(page: Page, metrics: Metrics, dark: Boolean, eager: Boolean, offer: String? = null) {
+    fun show(
+        page: Page,
+        metrics: Metrics,
+        dark: Boolean,
+        eager: Boolean,
+        offer: String? = null,
+        ways: List<Entry> = emptyList(),
+    ) {
         generation += 1
         this.page = page
         this.metrics = metrics
@@ -132,6 +141,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         markHere = -1
         this.eager = eager
         this.offer = offer
+        this.ways = ways
         fitColumn(width)
 
         // Первый экран — сразу и целиком, остальное — по куску за кадр.
@@ -168,9 +178,12 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         if (pending.isEmpty()) finish()
     }
 
-    /** Все куски на месте: кнопка отказа и поле внизу. */
+    /** Все куски на месте: кнопки отказа и поле внизу. */
     private fun finish() {
-        offer?.let { addOffer(it) }
+        // Копия открывается здесь же, как ссылка; первая кнопка — с воздухом
+        // от текста, остальные — плотнее.
+        ways.forEachIndexed { index, way -> addButton(way.title, index == 0) { host.follow(way.address, false) } }
+        offer?.let { target -> addButton("Open in your browser", ways.isEmpty()) { host.openOutside(target) } }
         // Пустое место внизу: последнюю строку можно поднять с края экрана.
         column.addView(View(context), LinearLayout.LayoutParams(1, (metrics.text * 4).toInt()))
     }
@@ -240,9 +253,9 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
      * Кнопка, а не только пункт меню: на странице, где ничего не показалось,
      * читателю нужен выход, а не память о меню.
      */
-    private fun addOffer(target: String) {
+    private fun addButton(label: String, first: Boolean, action: () -> Unit) {
         val button = Button(context).apply {
-            text = "Open in your browser"
+            text = label
             isAllCaps = false
             typeface = fonts.regular
             setTextColor(palette.ink)
@@ -255,10 +268,10 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             setPadding(side, metrics.px(8f).toInt(), side, metrics.px(8f).toInt())
             minHeight = 0
             minimumHeight = 0
-            setOnClickListener { host.openOutside(target) }
+            setOnClickListener { action() }
         }
         column.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = (metrics.extra * 2).toInt()
+            topMargin = if (first) (metrics.extra * 2).toInt() else metrics.px(8f).toInt()
             gravity = Gravity.START
         })
     }

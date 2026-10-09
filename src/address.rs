@@ -38,6 +38,10 @@ pub enum Internal {
     Check(Option<String>),
     /// Архив прочитанного (#8): весь список, поиск по нему или одна копия.
     Archive(ArchivePage),
+    /// Снимок страницы у Wayback Machine (#9): `brevier:wayback/https://…`.
+    /// Свой адрес, а не адрес снимка: какой снимок последний живой, узнают
+    /// только по нажатию, запросом к Wayback.
+    Wayback(String),
 }
 
 /// Что из архива открыто.
@@ -59,6 +63,7 @@ impl Internal {
             Internal::Bookmarks => "bookmarks",
             Internal::Check(_) => "check",
             Internal::Archive(_) => "archive",
+            Internal::Wayback(_) => "wayback",
         }
     }
 
@@ -86,6 +91,13 @@ impl Internal {
             let path = percent_decoded(path);
             return (path.ends_with(crate::archive::EXTENSION) && !path.contains(".."))
                 .then_some(Internal::Archive(ArchivePage::Copy(path)));
+        }
+        // Снимок ищут у веб-страницы, как и проверяют только её.
+        if let Some(page) = name.strip_prefix("wayback/") {
+            return match parse(page) {
+                Ok(Address::Web(url)) => Some(Internal::Wayback(url)),
+                _ => None,
+            };
         }
         // Проверяют веб-страницу: у репозитория и файла сайта нет, а своя
         // страница проверки не требует. Голый домен разбирается как везде.
@@ -300,6 +312,8 @@ impl Address {
             Address::File(path) => format!("file://{}", path.display()),
             // Проверка — о странице, и снаружи ей соответствует сама страница.
             Address::Internal(Internal::Check(Some(url))) => url.clone(),
+            // Браузеру — календарь Wayback: в нём видны все снимки страницы.
+            Address::Internal(Internal::Wayback(url)) => crate::hosts::wayback_calendar(url),
             // Остальным внутренним страницам снаружи соответствия нет. Пустая
             // строка здесь честнее выдуманного адреса: окно по ней и понимает,
             // что отдавать чужому браузеру нечего.
@@ -347,6 +361,7 @@ impl Address {
             }
             Address::File(path) => path.display().to_string(),
             Address::Internal(Internal::Check(Some(url))) => format!("brevier:check/{url}"),
+            Address::Internal(Internal::Wayback(url)) => format!("brevier:wayback/{url}"),
             Address::Internal(Internal::Archive(ArchivePage::Search(query))) => {
                 format!("brevier:archive?q={query}")
             }
@@ -685,6 +700,24 @@ mod tests {
         assert!(copy.external().is_empty());
         assert!(parse("brevier:archive/../history.tsv").is_err());
         assert!(parse("brevier:archive/../../x.md.lz4").is_err());
+    }
+
+    /// Снимок Wayback (#9) — адрес страницы внутри своего; снаружи —
+    /// календарь снимков.
+    #[test]
+    fn a_wayback_address_carries_the_page() {
+        let wayback = parse("brevier:wayback/https://example.com/a?b=c").unwrap();
+        assert_eq!(
+            wayback,
+            Address::Internal(Internal::Wayback("https://example.com/a?b=c".to_owned()))
+        );
+        assert_eq!(parse(&wayback.display()).unwrap(), wayback);
+        assert_eq!(
+            wayback.external(),
+            "https://web.archive.org/web/*/https://example.com/a?b=c"
+        );
+        assert!(parse("brevier:wayback/gh:o/n").is_err());
+        assert!(parse("brevier:wayback").is_err());
     }
 
     #[test]

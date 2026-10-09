@@ -40,7 +40,7 @@ use jni::objects::{JByteArray, JClass, JIntArray, JObject, JString};
 use crate::address::{self, Address};
 use crate::archive::Archive;
 use crate::cache::{self, Cache};
-use crate::failure::describe;
+use crate::failure::{describe, describe_page};
 use crate::fetch::UserAgent;
 use crate::media::{self, Fit, Look, Source};
 use crate::outline;
@@ -475,6 +475,21 @@ fn failure_json(failure: &crate::failure::Failure, external: Option<String>) -> 
         out.push_str(",\"offer\":");
         json_string(&mut out, &external);
     }
+    // Копии страницы (#9): кнопками, открываются в самом Brevier.
+    if !failure.ways.is_empty() {
+        out.push_str(",\"ways\":[");
+        for (index, way) in failure.ways.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"title\":");
+            json_string(&mut out, way.label);
+            out.push_str(",\"address\":");
+            json_string(&mut out, &way.address);
+            out.push('}');
+        }
+        out.push(']');
+    }
     out.push('}');
     out
 }
@@ -504,7 +519,10 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
                 }
                 document
             }
-            Err(error) => return failure_json(&describe(&error), Some(external)),
+            Err(error) => {
+                let failure = describe_page(&error, &address, &Archive::open());
+                return failure_json(&failure, Some(external));
+            }
         },
     };
     let page = Page::of(&document);

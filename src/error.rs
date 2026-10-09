@@ -43,6 +43,9 @@ pub enum Error {
     /// скрипты. Отдельно от пустого извлечения: виновата не страница,
     /// а заслон перед ней, и лечится он браузером.
     ScriptGate,
+    /// У Wayback Machine нет снимка страницы со статусом 200 (#9): она
+    /// не сохранена или сохранены одни отказы.
+    NotInWayback,
 }
 
 impl Error {
@@ -57,7 +60,10 @@ impl Error {
             Error::EmptyExtraction => 5,
             // Тот же код, что у http-статуса: для прогонов это отказ
             // сервера, а не наша поломка.
-            Error::HostingLimit | Error::SearchChallenge | Error::ScriptGate => 3,
+            Error::HostingLimit
+            | Error::SearchChallenge
+            | Error::ScriptGate
+            | Error::NotInWayback => 3,
             Error::Convert(_) | Error::Feed(_) => 6,
             Error::Media(_) => 7,
         }
@@ -84,6 +90,7 @@ impl fmt::Display for Error {
                 write!(f, "the search engine asked to prove a human is searching")
             }
             Error::ScriptGate => write!(f, "the site lets in only clients that run JavaScript"),
+            Error::NotInWayback => write!(f, "the Wayback Machine has no copy of the page"),
         }
     }
 }

@@ -109,6 +109,7 @@ brevier brevier:history                 # what you have read, by day
 brevier brevier:archive                 # a copy of every article you read
 brevier "brevier:archive?q=latency"     # …searched for words
 brevier brevier:archive/<host>/<file>   # one copy, printed as `lz4 -d` would
+brevier brevier:wayback/<url>           # the Wayback Machine's latest good copy
 brevier "borrow checker"                # not an address: a search
 brevier "?danluu.com"                   # a leading ? searches for anything
 ```
@@ -230,7 +231,10 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   are kept.
 - **Plain `http` pages are marked "Not secure".** There is no padlock: people read it as
   "this site is trustworthy", when it only means "the connection is encrypted".
-- **A page that can't be shown says why** and offers **Open in your browser**.
+- **A page that can't be shown says why** and offers **Open in your browser**. If you read
+  it before, it offers **your copy** from the archive too. If the page is gone, it offers
+  **the Wayback copy**: the latest one the Wayback Machine saved of the page itself, not
+  of its 404.
 
 A feed in Brevier — the Rust blog's, `blog.rust-lang.org/feed.xml`:
 
@@ -331,6 +335,8 @@ window writes these files; `brevier <url>` on the command line keeps no history.
 - **Very few per-site rules.** reddit is read through its `.rss` feeds (its pages are empty
   without JavaScript); royallib's books open part by part; DuckDuckGo Lite results are
   unwrapped from its click tracker. Your search queries go to DuckDuckGo.
+- **The Wayback Machine is asked only when you press the button.** A page that is gone
+  does not send its address to archive.org by itself.
 - **An honest User-Agent:** `Brevier/0.1`. On our test set, pretending to be a browser lost
   seven pages to anti-bot 403s and won none.
 - **TLS trust comes from your operating system** (`rustls` with

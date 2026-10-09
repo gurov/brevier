@@ -29,7 +29,7 @@ use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow};
 
 use brevier::address::{self, Address, ArchivePage, Internal, Repo};
-use brevier::failure::describe;
+use brevier::failure::{Failure, describe, describe_page};
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
     ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, HANG, HEADING_WEIGHTS, HEADINGS, INDENT,
@@ -820,7 +820,7 @@ fn build(app: &Application, start: Vec<String>) {
                 Err(error) => {
                     let problem = describe(&error);
                     if let Some(tab) = current(&ui, &state) {
-                        show_message(&tab, problem.headline, &problem.detail, None);
+                        show_message(&tab, problem.headline, &problem.detail, &[]);
                     }
                 }
             }
@@ -2087,7 +2087,7 @@ fn current(ui: &Ui, state: &Rc<RefCell<State>>) -> Option<gtk::TextView> {
 /// Большая страница едет секунды, и неподвижная надпись всё это время
 /// выглядит как зависшая программа.
 fn show_loading(view: &gtk::TextView, dots: usize) {
-    show_message(view, &format!("Loading{}", ".".repeat(dots)), "", None);
+    show_message(view, &format!("Loading{}", ".".repeat(dots)), "", &[]);
 }
 
 /// Заводить часы на время загрузки. Останавливаются сами: вкладку закрыли,
@@ -2504,7 +2504,7 @@ fn take_hint(ui: &Ui, state: &Rc<RefCell<State>>, address: &str) {
         Err(error) => {
             let problem = describe(&error);
             if let Some(view) = current(ui, state) {
-                show_message(&view, problem.headline, &problem.detail, None);
+                show_message(&view, problem.headline, &problem.detail, &[]);
             }
         }
     }
@@ -2664,9 +2664,11 @@ fn open_with(
     let anchor = page::anchor_in(&address);
     // Ключ кэша — тот адрес, которым по вкладке и ходят «назад/вперёд».
     // Внутренние страницы (сама история) не кэшируем: они обязаны показывать
-    // то, что на диске, а не слепок момента.
+    // то, что на диске, а не слепок момента. Снимок Wayback (#9) — страница
+    // из сети, как любая: два запроса к архиву на шаг назад ни к чему.
     let key = address.display();
-    let cacheable = !matches!(address, Address::Internal(_));
+    let cacheable = !matches!(address, Address::Internal(_))
+        || matches!(address, Address::Internal(Internal::Wayback(_)));
     leave_page(state, id);
     let (generation, cached) = {
         let mut state = state.borrow_mut();
@@ -2743,7 +2745,11 @@ fn open_with(
     let offset = local_offset();
     glib::spawn_future_local(async move {
         let loaded = gio::spawn_blocking(move || {
-            let document = brevier::open(&address, UserAgent::Honest)?;
+            // Отказ объясняем здесь же, в потоке: объяснение заглядывает
+            // в архив за копией страницы (#9).
+            let document = brevier::open(&address, UserAgent::Honest).map_err(|error| {
+                describe_page(&error, &address, &brevier::archive::Archive::open())
+            })?;
             // На диск — здесь же, в потоке: кэш сам решает, годится ли
             // документ (статья из сети — да, лента и свои страницы — нет).
             brevier::cache::Cache::open().keep(&address, &document);
@@ -2754,7 +2760,7 @@ fn open_with(
                         .keep(&document, &brevier::store::Stamp::now(offset))
                 })
                 .flatten();
-            Ok::<_, brevier::Error>((document, copy))
+            Ok::<_, Failure>((document, copy))
         })
         .await;
 
@@ -2777,14 +2783,31 @@ fn open_with(
                     tab.pages.insert(key.clone(), document.clone());
                 }
             }
-            Ok(Err(error)) => {
-                let problem = describe(&error);
-                show_message(
-                    &view,
-                    problem.headline,
-                    &problem.detail,
-                    problem.offer_browser.then(|| external.clone()),
-                );
+            Ok(Err(problem)) => {
+                // Копии (#9) открываются здесь же, во вкладке, — как ссылка.
+                // Холостым ходом, а не из обработчика: открытие стирает буфер
+                // с самой кнопкой, и кнопка, уничтоженная посреди своего же
+                // сигнала, роняла окно (SIGSEGV).
+                let mut buttons: Vec<gtk::Button> = problem
+                    .ways
+                    .iter()
+                    .map(|way| {
+                        let button = message_button(way.label);
+                        let (ui, state, target) = (ui.clone(), state.clone(), way.address.clone());
+                        button.connect_clicked(move |_| {
+                            let Ok(address) = address::parse(&target) else {
+                                return;
+                            };
+                            let (ui, state) = (ui.clone(), state.clone());
+                            glib::idle_add_local_once(move || {
+                                open(&ui, &state, id, address, true);
+                            });
+                        });
+                        button
+                    })
+                    .collect();
+                buttons.extend(problem.offer_browser.then(|| browser_button(&external)));
+                show_message(&view, problem.headline, &problem.detail, &buttons);
                 let mut borrowed = state.borrow_mut();
                 if let Some(tab) = borrowed.find(id) {
                     tab.loading = false;
@@ -2806,7 +2829,7 @@ fn open_with(
                 if let Some(tab) = state.borrow_mut().find(id) {
                     tab.loading = false;
                 }
-                show_message(&view, "The load fell through", "", None);
+                show_message(&view, "The load fell through", "", &[]);
             }
         }
     });
@@ -3825,31 +3848,75 @@ fn link_at<'a>(
         .find(|link| offset >= link.start && offset < link.end)
 }
 
-fn show_message(view: &gtk::TextView, headline: &str, detail: &str, offer: Option<String>) {
+/// Стереть страницу вкладки.
+///
+/// Виджеты страницы (кнопки отказа, рамки картинок, таблицы) снимаем
+/// до того, как стирать текст, пока буфер цел. Стёртый вместе с текстом
+/// виджет под указателем меняет состояние наведения у самого `GtkTextView`,
+/// а тот на `state-flags-changed` читает выделение полуудалённого буфера —
+/// SIGSEGV в `gtk_text_buffer_get_selection_bounds` (GTK 4.20; поймано
+/// 9 октября 2026 щелчком по кнопке «Open your copy», #9). Фокус с такого
+/// виджета — на сам текст: клавиши прокрутки остаются у страницы.
+fn wipe(view: &gtk::TextView) {
+    if view.focus_child().is_some() {
+        view.grab_focus();
+    }
     let buffer = view.buffer();
+    let mut at = buffer.start_iter();
+    while let Some((found, after)) =
+        at.forward_search("\u{FFFC}", gtk::TextSearchFlags::empty(), None)
+    {
+        if let Some(anchor) = found.child_anchor() {
+            for widget in anchor.widgets() {
+                view.remove(&widget);
+            }
+        }
+        at = after;
+    }
     buffer.set_text("");
+}
+
+/// Страница-сообщение: заголовок, объяснение и кнопки под ним — одной строкой.
+fn show_message(view: &gtk::TextView, headline: &str, detail: &str, buttons: &[gtk::Button]) {
+    let buffer = view.buffer();
+    wipe(view);
     let mut end = buffer.end_iter();
     buffer.insert_with_tags_by_name(&mut end, headline, &["h2"]);
     if !detail.is_empty() {
         buffer.insert(&mut end, "\n\n");
         buffer.insert(&mut end, detail);
     }
-
-    // Кнопка, а не только Ctrl+O: на странице, где ничего не показалось,
-    // читателю нужен выход, а не память о сочетании клавиш. Что предлагать
-    // её, решает ядро (`Failure::offer_browser`): при любом отказе, кроме
-    // адреса, который не разобрался, — там отдавать браузеру нечего.
-    let Some(target) = offer else { return };
+    if buttons.is_empty() {
+        return;
+    }
     buffer.insert(&mut end, "\n\n");
     let anchor = buffer.create_child_anchor(&mut end);
-    let button = gtk::Button::builder()
-        .label("Open in your browser")
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
         .halign(gtk::Align::Start)
         .build();
+    for button in buttons {
+        row.append(button);
+    }
+    view.add_child_at_anchor(&row, &anchor);
+}
+
+fn message_button(label: &str) -> gtk::Button {
+    gtk::Button::builder().label(label).build()
+}
+
+/// Кнопка, а не только Ctrl+O: на странице, где ничего не показалось,
+/// читателю нужен выход, а не память о сочетании клавиш. Что предлагать
+/// её, решает ядро (`Failure::offer_browser`): при любом отказе, кроме
+/// адреса, который не разобрался, — там отдавать браузеру нечего.
+fn browser_button(target: &str) -> gtk::Button {
+    let button = message_button("Open in your browser");
+    let target = target.to_owned();
     button.connect_clicked(move |_| {
         open_in_system_browser(&target);
     });
-    view.add_child_at_anchor(&button, &anchor);
+    button
 }
 
 /// Начальная страница. Рисуется тем же трактом, что и статья: текст в ядре,
@@ -4170,7 +4237,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
     let page = page::Page::of(document);
 
     let buffer = view.buffer();
-    buffer.set_text("");
+    wipe(view);
 
     let mut shots = Vec::new();
     let mut cells = Vec::new();

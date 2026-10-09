@@ -627,7 +627,9 @@ class MainActivity : Activity(), ArticleHost {
         val generation = tab.generation
         // «Назад» и «вперёд» по уже показанной странице — из памяти, без сети.
         // Свежий заход кэш обходит: там читатель просит именно новую загрузку.
-        val cached = if (!remember && !fresh && !address.startsWith("brevier:")) tab.pages[address] else null
+        // Снимок Wayback (#9) — страница из сети, как любая: из памяти и он.
+        val own = address.startsWith("brevier:") && !address.startsWith("brevier:wayback/")
+        val cached = if (!remember && !fresh && !own) tab.pages[address] else null
         if (cached != null) {
             showDocument(tab, cached)
             return
@@ -685,7 +687,7 @@ class MainActivity : Activity(), ArticleHost {
         val shown = tab.shown
         when {
             shown != null -> {
-                view.show(shown.page, metrics(), dark, eager = images && shown.ok, offer = shown.offer)
+                view.show(shown.page, metrics(), dark, eager = images && shown.ok, offer = shown.offer, ways = shown.ways)
                 val resume = tab.resume
                 tab.resume = null
                 val anchor = if (tab.anchorPending) shown.anchor?.let { shown.page.anchor(it) } else null

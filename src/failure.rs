@@ -9,7 +9,9 @@
 //! дойдут руки, встанет ровно сюда: наружу отсюда торчат готовые строки,
 //! а не куски, которые интерфейс склеивает сам.
 
-use crate::Error;
+use crate::address::{Address, Internal};
+use crate::archive::{self, Archive};
+use crate::{Error, hosts};
 
 /// Ошибка, переведённая с языка тракта на язык читателя.
 ///
@@ -25,6 +27,17 @@ pub struct Failure {
     pub detail: String,
     /// Стоит ли предлагать открыть страницу в системном браузере.
     pub offer_browser: bool,
+    /// Копии страницы (#9): своя из архива, Wayback — кнопками под текстом,
+    /// в этом порядке. Открываются в самом Brevier.
+    pub ways: Vec<Way>,
+}
+
+/// Другой путь к тексту страницы, которая не показалась: её копия.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Way {
+    /// Подпись кнопки.
+    pub label: &'static str,
+    pub address: String,
 }
 
 pub fn describe(error: &Error) -> Failure {
@@ -32,6 +45,7 @@ pub fn describe(error: &Error) -> Failure {
         headline,
         detail,
         offer_browser,
+        ways: Vec::new(),
     };
 
     match error {
@@ -134,11 +148,69 @@ pub fn describe(error: &Error) -> Failure {
                 .to_owned(),
             true,
         ),
+        // Снимки у Wayback есть почти у всего, но у мёртвой страницы
+        // последние — часто снимки её 404: такие не предлагаем вовсе.
+        Error::NotInWayback => failure(
+            "The Wayback Machine has no copy",
+            "It has not saved this page, or saved only errors in its place. In your browser it shows every visit it made to this address."
+                .to_owned(),
+            true,
+        ),
         Error::Media(what) => failure(
             "The image cannot be shown",
             format!("{what}. The text of the article is not affected."),
             true,
         ),
+    }
+}
+
+/// Отказ на странице, которую открывали (#9): к объяснению — её копии.
+///
+/// Своя копия из архива — при любом отказе: она на диске читателя, сети
+/// ей не нужно, и прочитанное однажды остаётся его. Копия Wayback — только
+/// когда страницы, похоже, больше нет: 404, 410, сервер падает или
+/// не отвечает. На 403 она была бы обходом решения сайта, а не выходом.
+///
+/// Кнопкой, а не подменой: копия — не страница, и показать одну вместо
+/// другой, не спросив, значило бы притворяться. Есть ли снимок у Wayback,
+/// заранее не спрашиваем: это запрос к третьей стороне с адресом страницы,
+/// о котором читатель не просил. Спрашивает кнопка — `brevier:wayback/…`,
+/// и снимка нет — так и скажем (`Error::NotInWayback`).
+pub fn describe_page(error: &Error, address: &Address, archive: &Archive) -> Failure {
+    let mut failure = describe(error);
+    if let Some(copy) = archive.latest(address) {
+        failure.detail.push_str(&format!(
+            "\n\nYou read this page on {}, and your archive keeps a copy.",
+            archive::long_date(&copy.read)
+        ));
+        failure.ways.push(Way {
+            label: "Open your copy",
+            address: archive::copy_address(&copy.path),
+        });
+    }
+    if gone(error)
+        && let Address::Web(url) = address
+        && let Some(page) = hosts::for_wayback(url)
+    {
+        failure
+            .detail
+            .push_str("\n\nThe Wayback Machine at archive.org may have saved a copy.");
+        failure.ways.push(Way {
+            label: "Read the Wayback copy",
+            address: Address::Internal(Internal::Wayback(page)).display(),
+        });
+    }
+    failure
+}
+
+/// Похоже ли, что страницы больше нет: адрес пуст, сервер падает или
+/// хоста не слышно. Сертификат — не то: сайт есть, ему не доверяет система.
+fn gone(error: &Error) -> bool {
+    match error {
+        Error::HttpStatus(404 | 410) => true,
+        Error::HttpStatus(code) => *code >= 500,
+        Error::Network(e) => !is_certificate_problem(&e.to_string()),
+        _ => false,
     }
 }
 
@@ -148,4 +220,92 @@ pub fn describe(error: &Error) -> Failure {
 fn is_certificate_problem(message: &str) -> bool {
     let message = message.to_lowercase();
     message.contains("certificate") || message.contains("unknownissuer")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Document;
+    use crate::address::parse;
+    use crate::markdown::Kind;
+    use crate::store::Stamp;
+
+    fn archive_with(url: &str) -> (Archive, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "brevier-failure-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let archive = Archive::at(&dir);
+        let document = Document {
+            address: parse(url).unwrap(),
+            title: "Latency".to_owned(),
+            markdown: "# Latency\n\nText.\n".to_owned(),
+            kind: Kind::Article,
+            served: false,
+            site: Vec::new(),
+            feeds: Vec::new(),
+            lang: None,
+            next: None,
+            archived: None,
+        };
+        archive
+            .keep(&document, &Stamp::parse("2026-10-07T09:00:00Z").unwrap())
+            .unwrap();
+        (archive, dir)
+    }
+
+    /// Страницы нет, а читатель её читал: своя копия первой, Wayback второй,
+    /// и о каждой — фраза под объяснением.
+    #[test]
+    fn a_page_that_is_gone_offers_your_copy_and_the_wayback_one() {
+        let url = "https://danluu.com/keyboard-latency/";
+        let (archive, dir) = archive_with(url);
+        let failure = describe_page(
+            &Error::HttpStatus(404),
+            &parse(&format!("{url}#computers")).unwrap(),
+            &archive,
+        );
+        assert_eq!(
+            failure.ways,
+            vec![
+                Way {
+                    label: "Open your copy",
+                    address: "brevier:archive/danluu.com/2026-10-07-latency.md.lz4".to_owned(),
+                },
+                Way {
+                    label: "Read the Wayback copy",
+                    address: format!("brevier:wayback/{url}"),
+                },
+            ]
+        );
+        assert!(
+            failure
+                .detail
+                .contains("You read this page on 7 October 2026")
+        );
+        assert!(failure.detail.contains("The Wayback Machine"));
+        assert!(failure.offer_browser);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Сайт не пустил — Wayback не выход, а своя копия — да. Нет копии —
+    /// нет и фразы о ней.
+    #[test]
+    fn a_closed_door_offers_only_your_own_copy() {
+        let url = "https://danluu.com/keyboard-latency/";
+        let (archive, dir) = archive_with(url);
+        let closed = describe_page(&Error::HttpStatus(403), &parse(url).unwrap(), &archive);
+        assert_eq!(closed.ways.len(), 1);
+        assert_eq!(closed.ways[0].label, "Open your copy");
+        assert!(!closed.detail.contains("Wayback"));
+
+        let unread = parse("https://danluu.com/input-lag/").unwrap();
+        let gone = describe_page(&Error::HttpStatus(503), &unread, &archive);
+        assert_eq!(gone.ways.len(), 1);
+        assert_eq!(gone.ways[0].label, "Read the Wayback copy");
+        assert!(!gone.detail.contains("You read"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

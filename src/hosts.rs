@@ -5,7 +5,7 @@
 //! получают именованные правила, у каждого — страницы в проверке. Системы
 //! плагинов вокруг нет и не будет: строка таблицы — функция здесь.
 //!
-//! Сейчас в таблице reddit, поисковик и читалка книг royallib. Страницы reddit без JavaScript пусты
+//! Сейчас в таблице reddit, поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
 //! и полным текстом каждой реплики. Цена — вложенности ответов в ленте нет,
@@ -232,6 +232,106 @@ pub fn search_url(query: &str) -> String {
     let mut url = Url::parse(SEARCH).expect("адрес поисковика разбирается");
     url.query_pairs_mut().append_pair("q", query.trim());
     url.into()
+}
+
+/// Wayback Machine (#9): снимки страниц.
+const WAYBACK: &str = "https://web.archive.org/web/";
+
+/// Есть ли у Wayback страница (Availability API): ближайший снимок, живой.
+const WAYBACK_AVAILABLE: &str = "https://archive.org/wayback/available";
+
+/// Ответ Availability API — один снимок, а не список: килобайта хватает.
+const MAX_AVAILABLE: u64 = 64 * 1024;
+
+/// Есть ли смысл искать страницу у Wayback; ответ — её адрес без решётки.
+///
+/// Не для всего: выдача поиска, сам архив и машина без имени в сети
+/// (`localhost`, адрес IP, имя без точки) снимков у Wayback не имеют.
+pub fn for_wayback(url: &str) -> Option<String> {
+    let mut parsed = Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || search_query(url).is_some() {
+        return None;
+    }
+    let url::Host::Domain(host) = parsed.host()? else {
+        return None;
+    };
+    let host = host.to_lowercase();
+    if !host.contains('.') || host == "archive.org" || host.ends_with(".archive.org") {
+        return None;
+    }
+    parsed.set_fragment(None);
+    Some(parsed.into())
+}
+
+/// Последний снимок страницы, который сохранил её саму, а не отказ.
+///
+/// `web.archive.org/web/<адрес>` ведёт на последний снимок любой, а у мёртвой
+/// страницы это обычно снимок её 404: обходчик архива заходит по старым
+/// ссылкам и прилежно сохраняет отказ (у Google Reader на 9 октября 2026 —
+/// снимок 404 того же утра). Поэтому сначала вопрос Availability API, и он
+/// отвечает живым снимком. Список снимков (CDX) с фильтром по ответу точнее,
+/// но отвечал 16–29 секунд при наших 30 на запрос — замер 9 октября 2026.
+/// Запрос — по нажатию читателя, не раньше.
+///
+/// Снимок открывается видом без `id_`: ссылки и картинки в нём Wayback
+/// переписал на свои снимки, и сайт, которого нет, читается внутри архива,
+/// а не по мёртвым адресам. Текст статьи в обоих видах один и тот же —
+/// сверено 9 октября 2026, тулбар Wayback в него не попадает.
+pub fn wayback_latest(url: &str, ua: crate::fetch::UserAgent) -> Result<String, crate::Error> {
+    let blob = crate::fetch::binary(&available_query(url), ua, "application/json", MAX_AVAILABLE)?;
+    available_snapshot(&String::from_utf8_lossy(&blob.bytes)).ok_or(crate::Error::NotInWayback)
+}
+
+fn available_query(url: &str) -> String {
+    let mut query = Url::parse(WAYBACK_AVAILABLE).expect("адрес Availability API разбирается");
+    query.query_pairs_mut().append_pair("url", url);
+    query.into()
+}
+
+/// Адрес снимка из ответа: только живой снимок, с ответом 2xx.
+fn available_snapshot(json: &str) -> Option<String> {
+    let root = crate::json::parse(json)?;
+    let closest = root.get("archived_snapshots")?.get("closest")?;
+    if closest.get("available") != Some(&crate::json::Value::Bool(true))
+        || !closest.text("status")?.starts_with('2')
+    {
+        return None;
+    }
+    let address = closest.text("url")?;
+    Some(match address.strip_prefix("http://web.archive.org/") {
+        Some(rest) => format!("https://web.archive.org/{rest}"),
+        None => address.to_owned(),
+    })
+}
+
+/// Где у Wayback все снимки страницы: его календарь — то, что увидит
+/// браузер читателя.
+pub fn wayback_calendar(url: &str) -> String {
+    format!("{WAYBACK}*/{url}")
+}
+
+/// Снимок ли это Wayback, и если да — чей и от какого дня. Строка над
+/// снимком говорит об этом так же, как над своей копией из архива: снимок —
+/// не страница. Узнаётся по адресу, поэтому строка есть и у снимка, открытого
+/// ссылкой внутри Wayback, из истории или из недельной копии.
+pub fn wayback_snapshot(url: &str) -> Option<crate::Archived> {
+    let rest = url
+        .strip_prefix(WAYBACK)
+        .or_else(|| url.strip_prefix("http://web.archive.org/web/"))?;
+    let (stamp, original) = rest.split_once('/')?;
+    let digits: String = stamp.chars().take_while(char::is_ascii_digit).collect();
+    if digits.len() < 8 || !original.starts_with("http") {
+        return None;
+    }
+    let year = &digits[..4];
+    let month: usize = digits[4..6].parse().ok()?;
+    let day: u32 = digits[6..8].parse().ok()?;
+    let month = crate::store::MONTHS.get(month.checked_sub(1)?)?;
+    Some(crate::Archived {
+        source: original.split('#').next().unwrap_or_default().to_owned(),
+        read: format!("{day} {month} {year}"),
+        wayback: true,
+    })
 }
 
 /// Запрос, если адрес — выдача нашего поисковика. По нему же страница
@@ -615,5 +715,78 @@ mod tests {
             Some("https://example.org/direct".to_owned())
         );
         assert_eq!(unwrap_redirect("javascript:void(0)"), None);
+    }
+
+    /// Wayback ищут для страницы в сети, без решётки; не для выдачи
+    /// поиска, самого архива и машин без имени.
+    #[test]
+    fn the_wayback_is_asked_only_about_pages_on_the_web() {
+        assert_eq!(
+            for_wayback("https://danluu.com/keyboard-latency/?a=1&b=2#computers").as_deref(),
+            Some("https://danluu.com/keyboard-latency/?a=1&b=2")
+        );
+        assert_eq!(
+            for_wayback("http://example.org/").as_deref(),
+            Some("http://example.org/")
+        );
+        for none in [
+            &search_url("borrow checker") as &str,
+            "https://web.archive.org/web/https://example.org/",
+            "https://archive.org/details/x",
+            "http://localhost:8000/page",
+            "http://192.168.1.10/page",
+            "http://nas/page",
+        ] {
+            assert_eq!(for_wayback(none), None, "{none}");
+        }
+    }
+
+    /// Wayback спрашивают о странице и берут только живой снимок; пустой
+    /// ответ, снимок отказа и не JSON — снимка нет.
+    #[test]
+    fn the_snapshot_is_the_latest_one_that_kept_the_page() {
+        assert_eq!(
+            available_query("https://www.google.com/reader/about/?a=1&b=2"),
+            "https://archive.org/wayback/available?url=https%3A%2F%2Fwww.google.com%2Freader%2Fabout%2F%3Fa%3D1%26b%3D2"
+        );
+        let answer = |status: &str| {
+            format!(
+                r#"{{"url": "www.google.com/reader/about/", "archived_snapshots": {{"closest": {{"status": "{status}", "available": true, "url": "http://web.archive.org/web/20210503140021/https://www.google.com/reader/about/", "timestamp": "20210503140021"}}}}}}"#
+            )
+        };
+        assert_eq!(
+            available_snapshot(&answer("200")).as_deref(),
+            Some("https://web.archive.org/web/20210503140021/https://www.google.com/reader/about/")
+        );
+        assert_eq!(available_snapshot(&answer("404")), None);
+        assert_eq!(
+            available_snapshot(r#"{"url": "danluu.com", "archived_snapshots": {}}"#),
+            None
+        );
+        assert_eq!(available_snapshot("<html>Temporarily Offline</html>"), None);
+    }
+
+    /// Снимок узнаётся по адресу: чей он и от какого дня.
+    #[test]
+    fn a_snapshot_says_what_page_it_is_and_from_when() {
+        let snapshot = wayback_snapshot(
+            "https://web.archive.org/web/20130701123456/https://www.google.com/reader/about/?x=1#top",
+        )
+        .unwrap();
+        assert_eq!(snapshot.source, "https://www.google.com/reader/about/?x=1");
+        assert_eq!(snapshot.read, "1 July 2013");
+        assert!(snapshot.wayback);
+        assert!(
+            wayback_snapshot("https://web.archive.org/web/20130701im_/https://a.org/x.png")
+                .is_some()
+        );
+        assert_eq!(
+            wayback_snapshot("https://web.archive.org/web/*/https://a.org/"),
+            None
+        );
+        assert_eq!(
+            wayback_snapshot("https://example.org/web/20130701/https://a.org/"),
+            None
+        );
     }
 }

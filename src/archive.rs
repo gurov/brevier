@@ -155,6 +155,35 @@ impl Archive {
         })
     }
 
+    /// Последняя копия этой страницы, шапкой без текста: её предлагает
+    /// страница отказа (#9). Ищем только в папке хоста — все копии страницы
+    /// лежат там, и весь архив ради одной страницы не читаем. Решётка
+    /// адреса не в счёт: в копию страница ложится без неё.
+    pub fn latest(&self, address: &Address) -> Option<Copy> {
+        let dir = self.dir.as_ref()?;
+        let host = host_of(address)?;
+        let shown = address.display();
+        let source = shown.split('#').next().unwrap_or_default();
+        fs::read_dir(dir.join(&host))
+            .ok()?
+            .flatten()
+            .filter_map(|file| {
+                let name = file.file_name().to_str()?.to_owned();
+                if !name.ends_with(EXTENSION) {
+                    return None;
+                }
+                let head = read_head(&file.path())?;
+                (head.source == source).then(|| Copy {
+                    path: format!("{host}/{name}"),
+                    title: head.title,
+                    source: head.source,
+                    read: head.read,
+                    markdown: String::new(),
+                })
+            })
+            .max_by_key(|copy| moment(&copy.read))
+    }
+
     /// Все копии, свежие сверху: шапки без текста.
     pub fn list(&self) -> Vec<Copy> {
         let mut copies: Vec<Copy> = self
@@ -727,6 +756,37 @@ mod tests {
         assert_eq!(
             crate::markdown::front_matter_title(&copy.markdown).as_deref(),
             Some("Keyboard \"latency\"")
+        );
+    }
+
+    /// Странице отказа (#9) — последняя копия именно этой страницы: соседка
+    /// по хосту не в счёт, решётка в адресе не мешает.
+    #[test]
+    fn the_latest_copy_of_a_page_is_found_by_its_address() {
+        let dir = temporary("latest");
+        let archive = Archive::at(&dir);
+        let url = "https://danluu.com/keyboard-latency/";
+        let page = article(url, "Keyboard latency", "Old text.");
+        archive.keep(&page, &stamp("2026-10-01T09:00:00Z")).unwrap();
+        let page = article(url, "Keyboard latency", "New text.");
+        archive.keep(&page, &stamp("2026-10-07T09:00:00Z")).unwrap();
+        let other = article("https://danluu.com/input-lag/", "Input lag", "…");
+        archive
+            .keep(&other, &stamp("2026-10-08T09:00:00Z"))
+            .unwrap();
+
+        let copy = archive
+            .latest(&parse(&format!("{url}#computers")).unwrap())
+            .expect("не нашли");
+        assert_eq!(copy.path, "danluu.com/2026-10-07-keyboard-latency.md.lz4");
+        assert_eq!(copy.read, stamp("2026-10-07T09:00:00Z"));
+        assert_eq!(
+            archive.latest(&parse("https://danluu.com/branch-prediction/").unwrap()),
+            None
+        );
+        assert_eq!(
+            archive.latest(&parse("https://example.org/").unwrap()),
+            None
         );
     }
 

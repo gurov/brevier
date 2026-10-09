@@ -246,7 +246,13 @@ impl Page {
             inset: None,
             typeset: typesetter.as_ref(),
         };
-        if let Some(archived) = &document.archived {
+        // Снимок Wayback (#9) узнаётся по адресу — откуда бы он ни открылся.
+        let snapshot = document
+            .archived
+            .is_none()
+            .then(|| crate::hosts::wayback_snapshot(&document.address.external()))
+            .flatten();
+        if let Some(archived) = document.archived.as_ref().or(snapshot.as_ref()) {
             writer.archived(archived);
         }
         // Где начинается сам текст: строка над копией из архива — не его часть.
@@ -296,7 +302,9 @@ impl Page {
         put(headline, vec![Style::Heading(2)]);
         if !detail.is_empty() {
             put("\n\n", vec![]);
-            put(detail, vec![Style::Body]);
+            // Абзацы объяснения (#9: о копиях — своими) делит пустая строка;
+            // в модели абзац — строка, воздух после него даёт стиль.
+            put(&detail.replace("\n\n", "\n"), vec![Style::Body]);
         }
         page
     }
@@ -610,12 +618,13 @@ impl Writer<'_> {
         self.put("\n", &[Style::Body]);
     }
 
-    /// Строка над копией из архива (#8): чья это копия и откуда. Блёклая,
-    /// как «Next:», — это не слова автора; адрес — ссылкой на страницу
-    /// в сети, какой она стала.
+    /// Строка над копией из архива (#8) или над снимком Wayback (#9): чья
+    /// это копия и откуда. Блёклая, как «Next:», — это не слова автора;
+    /// адрес — ссылкой на страницу в сети, какой она стала.
     fn archived(&mut self, archived: &crate::Archived) {
+        let whose = if archived.wayback { "Wayback" } else { "Your" };
         self.put(
-            &format!("Your copy from {} · ", archived.read),
+            &format!("{whose} copy from {} · ", archived.read),
             &[Style::Body, Style::Dim],
         );
         let start = self.chars;
@@ -1289,6 +1298,7 @@ mod tests {
         document.archived = Some(crate::Archived {
             source: "https://danluu.com/keyboard-latency/".to_owned(),
             read: "9 October 2026".to_owned(),
+            wayback: false,
         });
         let page = Page::of(&document);
         assert!(
@@ -1319,6 +1329,17 @@ mod tests {
         copy.archived = document.archived.clone();
         assert_eq!(titles(&copy), titles(&live));
         assert_eq!(titles(&copy)[0], "Part 1");
+        // Снимок Wayback (#9) говорит о себе так же — по одному адресу.
+        let mut snapshot = doc("# Latency\n\nText.\n");
+        snapshot.address = Address::Web(
+            "https://web.archive.org/web/20130701123456/https://danluu.com/keyboard-latency/"
+                .to_owned(),
+        );
+        assert!(
+            Page::of(&snapshot)
+                .text
+                .starts_with("Wayback copy from 1 July 2013 · danluu.com\n\nLatency\n")
+        );
         assert_eq!(
             &page.text[..]
                 .chars()

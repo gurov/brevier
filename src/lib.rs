@@ -122,6 +122,9 @@ pub struct Archived {
     pub source: String,
     /// Когда прочитана: «9 October 2026».
     pub read: String,
+    /// Копия не своя, а снимок Wayback Machine (#9); тогда `read` — день
+    /// снимка.
+    pub wayback: bool,
 }
 
 /// Установить провайдер шифров. `rustls` собран без встроенного, выбираем явно;
@@ -158,6 +161,9 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
                 .unwrap_or_else(|| url.clone());
             (format!("Check · {host}"), report.to_markdown())
         }
+        // Снимок Wayback (#9) — страница из сети, только адрес её узнаём
+        // у самого Wayback. Документ — снимка, с его адресом.
+        Internal::Wayback(url) => return open_web(&hosts::wayback_latest(url, ua)?, ua),
         Internal::Archive(ArchivePage::List) => {
             ("Archive".to_owned(), archive::Archive::open().page())
         }
@@ -173,6 +179,7 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
                 archived = Some(Archived {
                     source: copy.source.clone(),
                     read: archive::long_date(&copy.read),
+                    wayback: false,
                 });
                 let title = if copy.title.is_empty() {
                     copy.source.clone()
