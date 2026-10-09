@@ -12,7 +12,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod article;
 mod formula;
@@ -41,11 +41,19 @@ use brevier::palette::{
     FOUND, FOUND_HERE, FOUND_INK, INK_DARK, INK_LIGHT, PAPER_DARK, PAPER_LIGHT, SHELF_DARK,
     SHELF_LIGHT, colors, rgb,
 };
+use brevier::reading::{self, Progress, Readings};
 use brevier::save;
 use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "io.github.gurov.brevier";
+/// Высота полосы прогресса внизу статьи (#19), в точках.
+const BAR_HEIGHT: i32 = 7;
+/// Сколько читатель «здесь» после последнего движения: экран текста читают
+/// около минуты, три — с запасом на длинный абзац.
+const PRESENT: Duration = Duration::from_secs(180);
+/// Сколько висит предложение «Continue from N%» (#19).
+const OFFER_FOR: Duration = Duration::from_secs(60);
 /// Начало адреса поиска по архиву (#8): его ставит `Ctrl+Shift+F`.
 const ARCHIVE_SEARCH: &str = "brevier:archive?q=";
 const BODY_FAMILY: &str = "Noto Sans";
@@ -283,6 +291,12 @@ struct Ui {
     star: gtk::Button,
     /// Строка состояния внизу: что сохранилось, что не загрузилось.
     notice: gtk::Label,
+    /// «Continue from 43%» (#19): предложение, а не прыжок — кнопкой рядом
+    /// со строкой состояния.
+    offer: gtk::Button,
+    /// Тонкая полоса внизу статьи: докуда дочитано и точки разделов —
+    /// как в читалках книг (CoolReader). Рисует `draw_bar`.
+    bar: gtk::DrawingArea,
     /// Поиск по странице: строка внизу окна, как в браузерах.
     search: gtk::SearchBar,
     needle: gtk::SearchEntry,
@@ -339,6 +353,11 @@ struct Tab {
     /// Копия только что загруженной страницы в архиве (#8): путь для строки
     /// журнала. Живёт до показа страницы — ровно как `resume`.
     copy: Option<String>,
+    /// Прогресс чтения открытой страницы (#19): что прочитано, где место.
+    progress: Option<Progress>,
+    /// Страницу открыли заново — ссылкой, адресом, из истории, — а не шагом
+    /// «назад/вперёд»: только тогда предлагаем продолжить с прошлого места.
+    fresh_visit: bool,
     /// Вкладка есть, страницы ещё нет: так возвращается из сессии всё,
     /// кроме той вкладки, что была впереди. Грузится она в тот миг,
     /// когда на неё переключились, — десять восстановленных вкладок
@@ -428,6 +447,18 @@ struct State {
     /// Страницы, отмеченные читателем. В памяти — чтобы звёздочка знала,
     /// зажигаться ли ей, не заглядывая на диск при каждом переходе.
     marks: Marks,
+    /// Запомненные долгие чтения (#19): `reading.tsv`.
+    readings: Readings,
+    /// Когда читатель последний раз что-то делал со страницей: листал,
+    /// нажимал, водил мышью. Время чтения идёт, только пока это было
+    /// недавно (`PRESENT`) и окно активно.
+    last_input: Instant,
+    /// Полоски долей прочитанного у строк оглавления: где начинается раздел,
+    /// его доля и сама полоска.
+    bars: Vec<(usize, Rc<Cell<f32>>, gtk::DrawingArea)>,
+    /// Предложение продолжить, которое сейчас висит у строки состояния:
+    /// чья вкладка и куда.
+    offered: Option<(u64, usize)>,
     /// Это окно отвечает за сессию: оно её подняло, оно её и пишет.
     /// Сессия одна на программу, а окон бывает несколько — иначе второе
     /// окно затирало бы вкладки первого своими.
@@ -605,11 +636,25 @@ fn build(app: &Application, start: Vec<String>) {
         notice: gtk::Label::builder()
             .xalign(0.0)
             .wrap(true)
+            .hexpand(true)
             .margin_start(10)
             .margin_end(10)
             .margin_top(4)
             .margin_bottom(4)
             .visible(false)
+            .build(),
+        offer: gtk::Button::builder()
+            .visible(false)
+            .margin_end(10)
+            .valign(gtk::Align::Center)
+            // Справа и тогда, когда строка состояния уже погасла.
+            .halign(gtk::Align::End)
+            .hexpand(true)
+            .build(),
+        bar: gtk::DrawingArea::builder()
+            .content_height(BAR_HEIGHT)
+            .hexpand(true)
+            .vexpand(false)
             .build(),
         search: gtk::SearchBar::builder().build(),
         needle: gtk::SearchEntry::builder()
@@ -648,6 +693,8 @@ fn build(app: &Application, start: Vec<String>) {
     }
     ui.notebook.set_hexpand(true);
     ui.notebook.set_vexpand(true);
+    // Полоса — часть страницы, и фон у неё бумажный, а не окна.
+    ui.bar.add_css_class("page");
     ui.back.set_sensitive(false);
     ui.forward.set_sensitive(false);
 
@@ -696,7 +743,12 @@ fn build(app: &Application, start: Vec<String>) {
     ui.search.set_show_close_button(true);
     ui.search.connect_entry(&ui.needle);
 
-    ui.split.set_start_child(Some(&ui.notebook));
+    // Полоса прогресса (#19) — под статьёй, а не под полкой: она про текст.
+    let reading_side = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    reading_side.append(&ui.notebook);
+    reading_side.append(&ui.bar);
+    ui.notebook.set_vexpand(true);
+    ui.split.set_start_child(Some(&reading_side));
     ui.split.set_end_child(Some(&ui.shelf));
 
     // Поиск внизу, как в браузерах: строка приходит и уходит, и двигать
@@ -704,7 +756,12 @@ fn build(app: &Application, start: Vec<String>) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&ui.split);
     root.append(&ui.search);
-    root.append(&ui.notice);
+    // Строка состояния и рядом — кнопка предложения, когда оно есть.
+    let status = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    status.append(&ui.notice);
+    status.append(&ui.offer);
+    root.append(&status);
+    ui.offer.add_css_class("flat");
     ui.window.set_child(Some(&root));
     ui.notice.add_css_class("caption");
     ui.save.set_tooltip_text(Some("Save the article (Ctrl+S)"));
@@ -719,6 +776,10 @@ fn build(app: &Application, start: Vec<String>) {
         zoom: ZOOM_NORMAL,
         store: Store::open(),
         marks: Marks::open(),
+        readings: Readings::open(),
+        last_input: Instant::now(),
+        bars: Vec::new(),
+        offered: None,
         // Сессию поднимает и пишет первое окно процесса. Второе окно —
         // это «открой мне ещё одну ссылку», а не «вот мои вкладки».
         keeps_session: OWNS_SESSION.with(|first| first.replace(false)),
@@ -727,6 +788,7 @@ fn build(app: &Application, start: Vec<String>) {
         shelf: Vec::new(),
     }));
     apply_theme(&ui, &state);
+    reading_hooks(&ui, &state);
     {
         // Дверь снаружи: по ней приезжают адреса из второго запуска.
         // Действие принадлежит окну, а не приложению, — окон бывает
@@ -1150,6 +1212,8 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             loading: false,
             resume: None,
             copy: None,
+            progress: None,
+            fresh_visit: false,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
             density_seen: 1,
@@ -1672,6 +1736,8 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             loading: false,
             resume: None,
             copy: None,
+            progress: None,
+            fresh_visit: false,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
             density_seen: 1,
@@ -1723,9 +1789,26 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         let state = state.clone();
         scroller.vadjustment().connect_value_changed(move |_| {
             if current_id(&ui, &state) == Some(id) {
+                touched(&state);
                 follow(&ui, &state);
+                ui.bar.queue_draw();
             }
         });
+    }
+    {
+        // Время чтения идёт, пока читатель здесь (#19): листает, жмёт
+        // клавиши, водит мышью по тексту. Сами события не трогаем.
+        let keys = gtk::EventControllerKey::new();
+        let state2 = state.clone();
+        keys.connect_key_pressed(move |_, _, _, _| {
+            touched(&state2);
+            glib::Propagation::Proceed
+        });
+        view.add_controller(keys);
+        let motion = gtk::EventControllerMotion::new();
+        let state2 = state.clone();
+        motion.connect_motion(move |_, _, _| touched(&state2));
+        view.add_controller(motion);
     }
 
     // ── клик по ссылке
@@ -1967,7 +2050,10 @@ fn close_tab(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
     if index >= state.borrow().tabs.len() {
         return;
     }
-    // Уходя, бросаем загрузку: слушать её больше некому.
+    // Уходя, записываем прочитанное (#19) и бросаем загрузку: слушать её
+    // больше некому.
+    let id = state.borrow().tabs[index].id;
+    leave_page(state, id);
     state.borrow_mut().tabs.remove(index).generation = u64::MAX;
     ui.notebook.remove_page(Some(index as u32));
 
@@ -2136,6 +2222,17 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         brevier::cache::Cache::open().forget();
         // Архив — тоже след прочитанного (#8): «забыть всё» значит всё.
         brevier::archive::Archive::open().forget();
+        // И что прочитано на страницах (#19): файл и счёт в открытых вкладках.
+        {
+            let mut borrowed = state.borrow_mut();
+            borrowed.readings.forget();
+            for tab in &mut borrowed.tabs {
+                if let Some(progress) = tab.progress.as_mut() {
+                    progress.reset();
+                }
+            }
+        }
+        update_bars(&ui, &state);
         // А вот недавнее на начальных страницах — тот же журнал, и оставить
         // его на экране значило бы не забыть.
         let starts: Vec<(u64, gtk::TextView)> = state
@@ -2570,9 +2667,11 @@ fn open_with(
     // то, что на диске, а не слепок момента.
     let key = address.display();
     let cacheable = !matches!(address, Address::Internal(_));
+    leave_page(state, id);
     let (generation, cached) = {
         let mut state = state.borrow_mut();
         let Some(tab) = state.find(id) else { return };
+        tab.fresh_visit = remember && anchor.is_none();
         if remember {
             // Место на покидаемой странице — чтобы «назад» вернул сюда,
             // а не в её начало. У новой вкладки истории ещё нет, и запись
@@ -2754,6 +2853,34 @@ fn show_document(
         copy.as_deref(),
     );
     let seen = current_zoom(&borrowed);
+    // Прогресс чтения (#19) — у статьи, не у списка ссылок и не у своих
+    // страниц. Записанное о ней поднимаем сразу: доли на полке видны с порога.
+    let readable = document.kind == brevier::Kind::Article
+        && !matches!(document.address, Address::Internal(_));
+    let saved = readable
+        .then(|| borrowed.readings.find(&document.address.display()).cloned())
+        .flatten();
+    let progress = readable.then(|| {
+        let mut progress = Progress::new(&document.address.display(), &page.text, &page.anchors);
+        if let Some(saved) = &saved {
+            progress.restore(saved);
+        }
+        progress
+    });
+    let mut offered = None;
+    if let Some(tab) = borrowed.find(id) {
+        // Предложить продолжить — только странице, открытой заново, и без
+        // якоря: «назад», сессия и ссылка на раздел ставят место сами.
+        let fresh = std::mem::take(&mut tab.fresh_visit);
+        if fresh
+            && anchor.is_none()
+            && tab.resume.is_none()
+            && let (Some(progress), Some(saved)) = (&progress, &saved)
+        {
+            offered = reading::offer(progress, saved);
+        }
+        tab.progress = progress;
+    }
     if let Some(tab) = borrowed.find(id) {
         tab.loading = false;
         tab.label.set_text(&clip(&document.title, TAB_LABEL));
@@ -2774,6 +2901,12 @@ fn show_document(
     resume_place(ui, state);
     remember_session(ui, state);
     seek_entries(ui, state, id, &document.address);
+    match offered {
+        Some((at, share)) if current_id(ui, state) == Some(id) => {
+            offer_continue(ui, state, id, at, share);
+        }
+        _ => withdraw_offer(ui, state),
+    }
     // Заглушки оживляем после того, как вкладка узнала про них: клик
     // по заглушке ищет вкладку по номеру.
     let eager = state.borrow().images;
@@ -2885,9 +3018,34 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         format!("{title} — Brevier")
     }));
 
-    let shelf = fill_contents(&ui.contents, &marks, &entries, here.as_ref(), &feeds, &site);
+    let (total, dark) = {
+        let borrowed = state.borrow();
+        let total = ui
+            .notebook
+            .current_page()
+            .and_then(|index| borrowed.tabs.get(index as usize))
+            .and_then(|tab| tab.progress.as_ref())
+            .map(Progress::total)
+            .unwrap_or(0);
+        (total, borrowed.dark)
+    };
+    let (shelf, bars) = fill_contents(
+        &ui.contents,
+        &marks,
+        total,
+        dark,
+        &entries,
+        here.as_ref(),
+        &feeds,
+        &site,
+    );
     let empty = shelf.is_empty();
-    state.borrow_mut().shelf = shelf;
+    {
+        let mut borrowed = state.borrow_mut();
+        borrowed.shelf = shelf;
+        borrowed.bars = bars;
+    }
+    update_bars(ui, state);
     ui.show_contents.set_sensitive(!empty);
     ui.shelf.set_visible(ui.show_contents.is_active() && !empty);
     fit_shelf(ui);
@@ -3992,6 +4150,8 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
 /// приходят из модели ядра как есть; картинки и ячейки таблиц — виджеты,
 /// которые окно поставило само.
 struct Drawn {
+    /// Текст страницы — для прогресса чтения: отпечаток и длина (#19).
+    text: String,
     links: Vec<page::Link>,
     marks: Vec<page::Mark>,
     anchors: Vec<(String, usize)>,
@@ -4082,6 +4242,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
         None => scroll_to(&view, 0, 0.0),
     });
     Drawn {
+        text: page.text,
         links: page.links,
         marks: page.contents,
         anchors: page.anchors,
@@ -4332,14 +4493,21 @@ fn jump(view: &gtk::TextView, anchors: &[(String, usize)], want: &str) -> bool {
 /// об этом читатель должен до нажатия. Оглавление подписывается только
 /// под ней — в одиночку полка и так оглавление, и лишняя строка над ним
 /// ничего не объясняет.
+/// Полоска доли прочитанного у строки оглавления: где начинается раздел,
+/// его доля и сама полоска (#19).
+type ShareBar = (usize, Rc<Cell<f32>>, gtk::DrawingArea);
+
+#[allow(clippy::too_many_arguments)]
 fn fill_contents(
     list: &gtk::ListBox,
     marks: &[page::Mark],
+    total: usize,
+    dark: bool,
     entries: &[Entry],
     here: Option<&Entry>,
     feeds: &[Entry],
     site: &[Entry],
-) -> Vec<Row> {
+) -> (Vec<Row>, Vec<ShareBar>) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -4363,8 +4531,17 @@ fn fill_contents(
         shelf.push(Row::Header);
     }
 
+    let mut bars: Vec<ShareBar> = Vec::new();
     for mark in marks {
-        let (row, label) = shelf_row(&mark.title, i32::from(mark.level.saturating_sub(1)) * 12);
+        // Веха несёт своё место в подписи (#19): «40% · Начало абзаца…» —
+        // заголовка у неё нет, и где она, иначе не понять.
+        let title = if mark.heading || total == 0 {
+            mark.title.clone()
+        } else {
+            reading::waypoint_label(mark, total)
+        };
+        let (row, label, area, share) =
+            shelf_row_with_share(&title, i32::from(mark.level.saturating_sub(1)) * 12, dark);
         if !mark.heading {
             // Веха — не структура автора, а наша выжимка. Пусть это видно.
             label.add_css_class("dim-label");
@@ -4372,6 +4549,7 @@ fn fill_contents(
         list.append(&row);
         // Точное попадание: смещение в буфере, а не доля высоты.
         shelf.push(Row::Jump(mark.offset as i32));
+        bars.push((mark.offset, share, area));
     }
 
     // Ленты сайта — между оглавлением и меню. Подписаны всегда: строка уводит
@@ -4404,7 +4582,7 @@ fn fill_contents(
         shelf.push(Row::Open(entry.address.clone()));
     }
 
-    shelf
+    (shelf, bars)
 }
 
 /// Подпись группы лент: так она и сказана в роадмапе — «This site has a feed».
@@ -4473,6 +4651,58 @@ fn shelf_row(title: &str, indent: i32) -> (gtk::ListBoxRow, gtk::Label) {
     // Строка куда-то ведёт, и курсор обязан это показать — как на ссылке.
     row.set_cursor_from_name(Some("pointer"));
     (row, label)
+}
+
+/// Строка оглавления с полоской справа: доля прочитанного в её разделе
+/// (#19). Тонкая и молчит, пока раздел не начат: полка — для того, что на
+/// странице, а не отчёт о чтении.
+fn shelf_row_with_share(
+    title: &str,
+    indent: i32,
+    dark: bool,
+) -> (gtk::ListBoxRow, gtk::Label, gtk::DrawingArea, Rc<Cell<f32>>) {
+    let (row, label) = shelf_row(title, indent);
+    label.set_hexpand(true);
+    let share = Rc::new(Cell::new(0.0_f32));
+    let area = gtk::DrawingArea::builder()
+        .content_width(3)
+        .margin_end(4)
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    {
+        let share = share.clone();
+        area.set_draw_func(move |_, cairo, width, height| {
+            let part = f64::from(share.get().clamp(0.0, 1.0));
+            if part <= 0.0 {
+                return;
+            }
+            let colors = colors(dark);
+            let paint = |hex: &str, alpha: f64| {
+                let [r, g, b] = rgb(hex);
+                cairo.set_source_rgba(
+                    f64::from(r) / 255.0,
+                    f64::from(g) / 255.0,
+                    f64::from(b) / 255.0,
+                    alpha,
+                );
+            };
+            let (w, h) = (f64::from(width), f64::from(height));
+            paint(colors.rule, 1.0);
+            cairo.rectangle(0.0, 0.0, w, h);
+            let _ = cairo.fill();
+            paint(colors.dim, 0.85);
+            cairo.rectangle(0.0, 0.0, w, h * part);
+            let _ = cairo.fill();
+        });
+    }
+    // Строка — ряд: подпись и полоска; сама строка уже собрана `shelf_row`.
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    row.set_child(None::<&gtk::Widget>);
+    line.append(&label);
+    line.append(&area);
+    row.set_child(Some(&line));
+    (row, label, area, share)
 }
 
 /// Подпись над группой полки. Не строка: нажимать её не на что.
@@ -5010,6 +5240,249 @@ fn notice(ui: &Ui, said: &str) {
             label.set_visible(false);
         }
     });
+}
+
+// ── прогресс чтения (#19) ───────────────────────────────────────────────────
+
+/// Прогресс чтения в окне (#19): тик раз в секунду, кнопка «Continue»,
+/// полоса внизу и «читатель здесь», когда окно стало активным.
+fn reading_hooks(ui: &Ui, state: &Rc<RefCell<State>>) {
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        glib::timeout_add_seconds_local(1, move || {
+            // Окно закрыто — и тикать некому.
+            if !ui.window.is_visible() {
+                return glib::ControlFlow::Break;
+            }
+            tick_reading(&ui, &state);
+            glib::ControlFlow::Continue
+        });
+    }
+    {
+        let ui2 = ui.clone();
+        let state = state.clone();
+        ui.offer.connect_clicked(move |_| take_offer(&ui2, &state));
+    }
+    {
+        let ui2 = ui.clone();
+        let state = state.clone();
+        ui.bar.set_draw_func(move |_, cairo, width, height| {
+            draw_bar(&ui2, &state, cairo, width, height)
+        });
+    }
+    {
+        let state = state.clone();
+        ui.window.connect_is_active_notify(move |window| {
+            if window.is_active() {
+                touched(&state);
+            }
+        });
+    }
+}
+
+/// Уйти со страницы: записать прочитанное, если страница запомнена. Место —
+/// то, что сейчас у верха окна, а не на последнем тике.
+fn leave_page(state: &Rc<RefCell<State>>, id: u64) {
+    let saved = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else { return };
+        let Some(progress) = tab.progress.as_mut() else {
+            return;
+        };
+        progress.set_place(top_of(&tab.view).max(0) as usize);
+        progress
+            .remembered()
+            .then(|| progress.saved(store::Stamp::now(local_offset())))
+    };
+    if let Some(saved) = saved {
+        state.borrow_mut().readings.put(saved);
+    }
+}
+
+/// Предложить продолжить с прошлого места — кнопкой у строки состояния.
+/// Предложение, а не прыжок: открыть страницу заново бывает и намеренно.
+fn offer_continue(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, at: usize, share: u32) {
+    state.borrow_mut().offered = Some((id, at));
+    ui.offer.set_label(&format!("Continue from {share}%"));
+    ui.offer.set_visible(true);
+    notice(ui, "You have read part of this page before.");
+    let button = ui.offer.clone();
+    let label = format!("Continue from {share}%");
+    // Минута: решить, продолжать или перечитать, читатель вправе не сразу.
+    // Раньше предложение уходит само — с уходом со страницы или по нажатию.
+    glib::timeout_add_local_once(OFFER_FOR, move || {
+        if button.label().as_deref() == Some(label.as_str()) {
+            button.set_visible(false);
+        }
+    });
+}
+
+fn withdraw_offer(ui: &Ui, state: &Rc<RefCell<State>>) {
+    if let Ok(mut borrowed) = state.try_borrow_mut() {
+        borrowed.offered = None;
+    }
+    ui.offer.set_visible(false);
+}
+
+/// Принять предложение: туда, где читатель остановился.
+fn take_offer(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let offered = state.borrow_mut().offered.take();
+    ui.offer.set_visible(false);
+    let Some((id, at)) = offered else { return };
+    if let Some(view) = view_of(state, id) {
+        settle(&view, at as i32, ANCHOR_ALIGN);
+    }
+}
+
+/// Видимый кусок текста: смещения у верхнего и нижнего края окна.
+///
+/// По строкам, а не по точке: `iter_at_location` у края окна попадает в поле
+/// колонки, а не в текст, и отвечает «не знаю» — подставленный тогда конец
+/// буфера засчитывал прочитанным весь документ. Нижняя строка, видимая
+/// не целиком, в видимое не идёт.
+fn visible_range(view: &gtk::TextView) -> (usize, usize) {
+    let seen = view.visible_rect();
+    let (top, _) = view.line_at_y(seen.y());
+    let (bottom, _) = view.line_at_y((seen.y() + seen.height() - 1).max(seen.y()));
+    let (top, bottom) = (
+        top.offset().max(0) as usize,
+        bottom.offset().max(0) as usize,
+    );
+    (top, bottom.max(top))
+}
+
+/// Секунда чтения: если читатель здесь — окно активно, страницу недавно
+/// трогали, — открытая страница получает тик, а полка и полоса — свежие доли.
+fn tick_reading(ui: &Ui, state: &Rc<RefCell<State>>) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let saved = {
+        let Ok(mut borrowed) = state.try_borrow_mut() else {
+            return;
+        };
+        let present = ui.window.is_active() && borrowed.last_input.elapsed() < PRESENT;
+        let Some(tab) = borrowed.tabs.get_mut(index as usize) else {
+            return;
+        };
+        if !present || tab.loading || tab.pending || tab.settings {
+            None
+        } else {
+            let (from, to) = visible_range(&tab.view);
+            tab.progress.as_mut().and_then(|progress| {
+                progress
+                    .tick(from, to, 1)
+                    .then(|| progress.saved(store::Stamp::now(local_offset())))
+            })
+        }
+    };
+    if let Some(saved) = saved
+        && let Ok(mut borrowed) = state.try_borrow_mut()
+    {
+        borrowed.readings.put(saved);
+    }
+    update_bars(ui, state);
+}
+
+/// Доли прочитанного — полоскам полки, и перерисовать полосу внизу.
+fn update_bars(ui: &Ui, state: &Rc<RefCell<State>>) {
+    ui.bar.queue_draw();
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let Ok(borrowed) = state.try_borrow() else {
+        return;
+    };
+    let Some(progress) = borrowed
+        .tabs
+        .get(index as usize)
+        .and_then(|tab| tab.progress.as_ref())
+    else {
+        return;
+    };
+    let starts: Vec<usize> = borrowed.bars.iter().map(|(at, _, _)| *at).collect();
+    let shares = progress.shares(&starts);
+    for ((_, cell, area), share) in borrowed.bars.iter().zip(shares) {
+        if (cell.get() - share).abs() > 0.001 {
+            cell.set(share);
+            area.queue_draw();
+        }
+    }
+}
+
+/// Читатель что-то сделал со страницей: время чтения снова идёт.
+fn touched(state: &Rc<RefCell<State>>) {
+    if let Ok(mut borrowed) = state.try_borrow_mut() {
+        borrowed.last_input = Instant::now();
+    }
+}
+
+/// Полоса внизу статьи: тонкая линия, докуда дошли — чуть темнее, точки —
+/// начала разделов оглавления. Ненавязчиво, как в читалках книг: её видно,
+/// когда ищут, и не видно, когда читают.
+fn draw_bar(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    cairo: &gtk::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let Ok(borrowed) = state.try_borrow() else {
+        return;
+    };
+    let Some(tab) = borrowed.tabs.get(index as usize) else {
+        return;
+    };
+    let Some(progress) = tab.progress.as_ref() else {
+        return;
+    };
+    let total = progress.total();
+    // Страница в экран — ни пути, ни полосы.
+    let Some(bar) = tab.view.vadjustment() else {
+        return;
+    };
+    if total == 0 || bar.upper() <= bar.page_size() + 1.0 {
+        return;
+    }
+    let (_, reached) = visible_range(&tab.view);
+    let colors = colors(borrowed.dark);
+    let paint = |hex: &str, alpha: f64| {
+        let [r, g, b] = rgb(hex);
+        cairo.set_source_rgba(
+            f64::from(r) / 255.0,
+            f64::from(g) / 255.0,
+            f64::from(b) / 255.0,
+            alpha,
+        );
+    };
+    let margin = 12.0;
+    let span = (f64::from(width) - margin * 2.0).max(1.0);
+    let y = f64::from(height) / 2.0;
+    let x_of = |at: usize| margin + span * (at.min(total) as f64 / total as f64);
+
+    // Дорожка.
+    paint(colors.rule, 1.0);
+    cairo.set_line_width(1.0);
+    cairo.move_to(margin, y.floor() + 0.5);
+    cairo.line_to(margin + span, y.floor() + 0.5);
+    let _ = cairo.stroke();
+    // Пройденное.
+    paint(colors.dim, 0.9);
+    cairo.set_line_width(2.0);
+    cairo.move_to(margin, y);
+    cairo.line_to(x_of(reached), y);
+    let _ = cairo.stroke();
+    // Разделы — точками: пройденные краской пути, впереди — бледнее.
+    for mark in &tab.marks {
+        let passed = mark.offset <= reached;
+        paint(colors.dim, if passed { 0.9 } else { 0.45 });
+        cairo.arc(x_of(mark.offset), y, 1.8, 0.0, std::f64::consts::TAU);
+        let _ = cairo.fill();
+    }
 }
 
 // ── поиск по странице ───────────────────────────────────────────────────────

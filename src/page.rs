@@ -221,6 +221,9 @@ pub struct Page {
     pub anchors: Vec<(String, usize)>,
     /// Оглавление, уже отобранное: заголовки или вехи.
     pub contents: Vec<Mark>,
+    /// Начала абзацев — все, а не отобранные: из них делятся длинные
+    /// разделы на вехи своего уровня (`reading::inner_waypoints`, #19).
+    pub leads: Vec<Mark>,
     pub blocks: Vec<Placed>,
 }
 
@@ -265,6 +268,12 @@ impl Page {
             .filter(|placed| matches!(placed.block, Block::Image { .. }))
             .count();
         let space = writer.chars + images * IMAGE_CHARS;
+        page.leads = writer
+            .marks
+            .iter()
+            .filter(|mark| !mark.heading && mark.offset >= start)
+            .cloned()
+            .collect();
         page.contents = contents_of(writer.marks, space, start);
         page
     }
@@ -1171,6 +1180,19 @@ impl Units {
             .copied()
             .unwrap_or_else(|| self.0.last().copied().unwrap_or(0))
     }
+}
+
+/// Смещение в UTF-16 — в символах: обратный счёт к [`utf16_offsets`]. Нужен
+/// прогрессу чтения (#19): телефон сообщает видимое в своих единицах.
+pub fn chars_of_utf16(text: &str, unit: usize) -> usize {
+    let mut at = 0;
+    for (chars, ch) in text.chars().enumerate() {
+        if at >= unit {
+            return chars;
+        }
+        at += ch.len_utf16();
+    }
+    text.chars().count()
 }
 
 /// Перевести смещения в символах в единицы UTF-16 для произвольного текста —
