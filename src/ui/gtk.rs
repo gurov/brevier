@@ -522,7 +522,7 @@ fn build(app: &Application, start: Vec<String>) {
             .build(),
         notebook: gtk::Notebook::builder().scrollable(true).build(),
         entry: gtk::Entry::builder()
-            .placeholder_text("address or path to a file")
+            .placeholder_text("address or search")
             .hexpand(true)
             .build(),
         back: gtk::Button::from_icon_name("go-previous-symbolic"),

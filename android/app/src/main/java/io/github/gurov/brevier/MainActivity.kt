@@ -247,7 +247,7 @@ class MainActivity : Activity(), ArticleHost {
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            hint = "address"
+            hint = "address or search"
             typeface = fonts.regular
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setSelectAllOnFocus(true)
