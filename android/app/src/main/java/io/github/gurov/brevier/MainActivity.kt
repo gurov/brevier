@@ -38,6 +38,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListPopupWindow
+import android.widget.PopupWindow
 import android.widget.TextView
 import java.io.File
 
@@ -68,6 +69,7 @@ class MainActivity : Activity(), ArticleHost {
     private lateinit var field: FrameLayout
     private lateinit var address: EditText
     private lateinit var insecure: ImageView
+    private lateinit var clear: ImageButton
     private lateinit var contents: ImageButton
     private lateinit var tabCount: TextView
     private lateinit var more: ImageButton
@@ -80,6 +82,8 @@ class MainActivity : Activity(), ArticleHost {
     private lateinit var tabList: TabList
     private lateinit var settings: SettingsPage
     private lateinit var hints: ListPopupWindow
+    /** Карточка под адресом, пока он в фокусе: страница и что с её адресом сделать (#29). */
+    private var card: PopupWindow? = null
 
     /** Последнее касание экрана, в его координатах (`dispatchTouchEvent`). */
     private var touched = 0 to 0
@@ -262,10 +266,33 @@ class MainActivity : Activity(), ArticleHost {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    if (!quiet && hasFocus()) offerHints(s.toString())
+                    if (!quiet && hasFocus()) {
+                        // Начали печатать — карточка уступает подсказкам;
+                        // стёрли всё — она возвращается, как у браузеров.
+                        val typed = s.toString()
+                        if (typed.isEmpty()) {
+                            hints.dismiss()
+                            showCard()
+                        } else {
+                            hideCard()
+                            offerHints(typed)
+                        }
+                    }
+                    padAddress()
                 }
             })
-            setOnFocusChangeListener { _, focused -> if (!focused) hints.dismiss() }
+            setOnFocusChangeListener { _, focused ->
+                if (focused) {
+                    showCard()
+                } else {
+                    hints.dismiss()
+                    hideCard()
+                    // Ушли из строки, не открыв набранное, — в ней снова адрес
+                    // страницы, а не недописанный текст.
+                    setAddress(currentTab()?.current() ?: "")
+                }
+                padAddress()
+            }
         }
         insecure = ImageView(this).apply {
             setImageResource(R.drawable.ic_insecure)
@@ -274,12 +301,24 @@ class MainActivity : Activity(), ArticleHost {
             tooltip(INSECURE)
             setOnClickListener { notice(INSECURE) }
         }
+        // Крестик в конце строки — стереть набранное, пока строка в работе.
+        clear = iconButton(R.drawable.ic_close, "Clear", palette) {
+            address.setText("")
+            showKeyboard(address)
+        }.apply {
+            visibility = View.GONE
+            val pad = dp(9f)
+            setPadding(pad, pad, pad, pad)
+        }
         field = FrameLayout(this)
         field.addView(address, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL))
         field.addView(insecure, FrameLayout.LayoutParams(dp(18f), dp(18f), Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = dp(10f) })
+        field.addView(clear, FrameLayout.LayoutParams(dp(36f), dp(36f), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = dp(2f) })
 
         hints = ListPopupWindow(this).apply {
-            anchorView = field
+            // Под панелью во всю её ширину, как и карточка: подсказки сменяют
+            // её на том же месте, а не прыгают в узкий столбец под полем.
+            anchorView = bar
             isModal = false
             inputMethodMode = ListPopupWindow.INPUT_METHOD_NEEDED
             setOnItemClickListener { _, _, position, _ ->
@@ -383,6 +422,8 @@ class MainActivity : Activity(), ArticleHost {
         }
         address.background = null
         insecure.imageTintList = ColorStateList.valueOf(p.dim)
+        clear.imageTintList = ColorStateList.valueOf(p.dim)
+        clear.background = pressable(p.touched, dp(18f).toFloat())
         tabCount.setTextColor(p.ink)
         tabCount.background = GradientDrawable().apply {
             setStroke(dp(1.5f), p.ink)
@@ -524,6 +565,7 @@ class MainActivity : Activity(), ArticleHost {
         val text = typed.trim()
         if (text.isEmpty()) return
         hints.dismiss()
+        hideCard()
         currentTab()?.view?.requestFocus()
         address.clearFocus()
         hideKeyboard()
@@ -745,13 +787,25 @@ class MainActivity : Activity(), ArticleHost {
         setAddress(tab.current() ?: "")
         val insecureNow = (tab.current() ?: "").startsWith("http://")
         insecure.visibility = if (insecureNow) View.VISIBLE else View.GONE
-        address.setPadding(if (insecureNow) dp(34f) else dp(14f), 0, dp(12f), 0)
+        padAddress()
         tabCount.text = if (tabs.size > 99) ":D" else tabs.size.toString()
         title = if (tab.current() == null) "Brevier" else "${tab.title} — Brevier"
         fillShelf(tab, shown)
         contents.isEnabled = !shelf.empty
         contents.alpha = if (shelf.empty) 0.35f else 1f
         if (tabList.visibility == View.VISIBLE) fillTabList()
+    }
+
+    /**
+     * Поля строки: слева место значку «Not secure», справа — крестику.
+     * Крестик виден, пока строка в фокусе и в ней есть что стирать.
+     */
+    private fun padAddress() {
+        if (!::clear.isInitialized) return
+        val clearing = address.hasFocus() && address.text.isNotEmpty()
+        clear.visibility = if (clearing) View.VISIBLE else View.GONE
+        val left = if (insecure.visibility == View.VISIBLE) dp(34f) else dp(14f)
+        address.setPadding(left, 0, if (clearing) dp(40f) else dp(12f), 0)
     }
 
     private fun setAddress(text: String) {
@@ -934,6 +988,161 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun zoomLabel() = "${Math.round(type.zoomSteps[zoom] * 100)}%"
 
+    // ── карточка под адресом (#29) ───────────────────────────────────────────
+
+    /**
+     * Под адресом, пока он в фокусе, — что открыто и что с этим адресом
+     * сделать: поделиться, скопировать, править (как у мобильных браузеров:
+     * нажатие выделяет адрес целиком, и новый набор его заменяет, а «править»
+     * ставит курсор в конец). Ниже — «Paste and go», если в буфере что-то
+     * есть. Сам буфер не читаем, пока не нажали: на Android 12 и новее каждое
+     * чтение система объявляет строкой «Brevier pasted from your clipboard»,
+     * а описание буфера (`primaryClipDescription`) читается молча.
+     *
+     * Делимся и копируем внешний адрес страницы (`external`), а не наш:
+     * `gh:owner/repo` за пределами Brevier ничего не значит, а ссылку
+     * на GitHub Brevier и так узнаёт.
+     */
+    private fun showCard() {
+        hideCard()
+        val tab = currentTab() ?: return
+        val shown = tab.shown
+        val outside = shown?.external?.takeIf { it.isNotEmpty() && !shown.internal }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val pasteable = clipboard.hasPrimaryClip() &&
+            clipboard.primaryClipDescription?.hasMimeType("text/*") == true
+        if (outside == null && !pasteable) return
+        if (bar.width == 0) return
+        val p = palette
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4f), 0, dp(4f))
+            background = GradientDrawable().apply {
+                setColor(p.shelf)
+                setStroke(dp(1f), p.rule)
+                cornerRadius = dp(8f).toFloat()
+            }
+        }
+        if (outside != null) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14f), dp(4f), dp(4f), dp(4f))
+            }
+            val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            if (tab.title.isNotEmpty()) text.addView(label(tab.title, fonts, p.ink, 14f).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            text.addView(label(outside, fonts, p.dim, 12f).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.MIDDLE
+            })
+            row.addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(iconButton(R.drawable.ic_share, "Share", p) { shareAddress(outside, tab.title) })
+            row.addView(iconButton(R.drawable.ic_copy, "Copy link", p) { copyAddress(outside) })
+            row.addView(iconButton(R.drawable.ic_edit, "Edit", p) { editAddress() })
+            column.addView(row)
+        }
+        if (pasteable) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14f), dp(10f), dp(14f), dp(10f))
+                background = pressable(p.touched, 0f)
+                contentDescription = "Paste and go"
+                setOnClickListener { pasteAndGo() }
+            }
+            row.addView(ImageView(this).apply {
+                setImageResource(R.drawable.ic_paste)
+                imageTintList = ColorStateList.valueOf(p.dim)
+            }, LinearLayout.LayoutParams(dp(20f), dp(20f)).apply { rightMargin = dp(12f) })
+            row.addView(label("Paste and go", fonts, p.ink, 14f))
+            column.addView(row)
+        }
+        // Во всю ширину панели, а не поля: в поле шириной в полэкрана рядом
+        // с тремя кнопками от заголовка и адреса оставалось по слову.
+        card = PopupWindow(column, bar.width - 2 * dropMargin, LinearLayout.LayoutParams.WRAP_CONTENT, false).apply {
+            // Не фокусируемая: набор идёт в строку, а не в карточку.
+            inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
+            elevation = dp(4f).toFloat()
+            showAsDropDown(bar, dropMargin, 0)
+        }
+    }
+
+    /** Отступ карточки и подсказок от краёв панели. */
+    private val dropMargin get() = dp(6f)
+
+    private fun hideCard() {
+        card?.dismiss()
+        card = null
+    }
+
+    /** Уйти из строки: карточка и клавиатура закрываются, фокус — статье. */
+    private fun leaveAddress() {
+        hideCard()
+        hints.dismiss()
+        currentTab()?.view?.requestFocus()
+        address.clearFocus()
+        hideKeyboard()
+    }
+
+    private fun shareAddress(target: String, title: String) {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, target)
+        if (title.isNotEmpty()) send.putExtra(Intent.EXTRA_TITLE, title)
+        val chooser = Intent.createChooser(send, null)
+        // Себя из списка — вон: Brevier принимает `SEND`, и «поделиться»
+        // открытой страницей с самим собой — пустой круг.
+        if (Build.VERSION.SDK_INT >= 24) {
+            chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(this, MainActivity::class.java)))
+        }
+        leaveAddress()
+        try {
+            startActivity(chooser)
+        } catch (failure: ActivityNotFoundException) {
+            notice("Nothing to share with")
+        }
+    }
+
+    private fun copyAddress(target: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(null, target))
+        leaveAddress()
+        notice("Link copied")
+    }
+
+    /**
+     * Править адрес, а не набирать заново: адрес страницы в строку (его могли
+     * стереть крестиком), выделение снять, курсор в конец.
+     */
+    private fun editAddress() {
+        hideCard()
+        val page = currentTab()?.current() ?: ""
+        if (address.text.toString() != page) {
+            quiet = true
+            address.setText(page)
+            quiet = false
+        }
+        address.setSelection(address.text.length)
+        padAddress()
+        showKeyboard(address)
+    }
+
+    /** Открыть то, что в буфере: ссылку — как ссылку, слова — поиском. */
+    private fun pasteAndGo() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(this)?.toString()
+        val target = text?.let(::firstLink)
+        if (target == null) {
+            hideCard()
+            notice("Nothing to paste")
+            return
+        }
+        go(target)
+    }
+
     // ── подсказки ───────────────────────────────────────────────────────────
 
     private fun offerHints(typed: String) {
@@ -956,7 +1165,8 @@ class MainActivity : Activity(), ArticleHost {
             setStroke(dp(1f), palette.rule)
             cornerRadius = dp(8f).toFloat()
         })
-        hints.width = field.width
+        hints.width = bar.width - 2 * dropMargin
+        hints.horizontalOffset = dropMargin
         // Высота — по строкам, а не до клавиатуры: пустой хвост списка
         // закрывал страницу и ничего не предлагал.
         hints.height = hintRows.size * dp(if (hintRows.any { it.second.isNotEmpty() }) 60f else 40f) + dp(8f)
@@ -1002,6 +1212,12 @@ class MainActivity : Activity(), ArticleHost {
         menu.item("Open in your browser") {
             val target = tab?.shown?.external?.ifEmpty { null }
             if (target == null) notice("Nothing to open outside") else openOutside(target)
+        }
+        // Тот же адрес, что и в карточке под строкой (#29): внешний.
+        menu.item("Share") {
+            val target = tab?.shown?.external?.ifEmpty { null }
+            if (target == null || shown?.internal == true) notice("Nothing to share")
+            else shareAddress(target, tab?.title ?: "")
         }
         menu.item("Reload") { reload() }
         // Отчёт — новой вкладкой: его читают рядом со страницей, а не вместо неё.
