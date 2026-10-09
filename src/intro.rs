@@ -11,7 +11,7 @@
 //! сверху недавнее, а рассказ о программе под ним (#27).
 //!
 //! Рассказ — о том, что можно сделать отсюда, а не о замысле: что набрать
-//! в адресной строке (примеры кликаются) и пять вещей, которых не видно,
+//! в адресной строке (примеры кликаются) и полдюжины вещей, которых не видно,
 //! пока не наткнёшься. Язык простой, короткими фразами: читают это
 //! и те, для кого английский не родной (переписано 9 октября 2026).
 
@@ -59,6 +59,8 @@ and the site's own design, so every site looks the same.
 - **Back** returns you to the place where you stopped reading.
 - Pages you read this week open from a copy on this computer. **Ctrl+R** loads
   a fresh one.
+- Every article you read is kept in your [archive](brevier:archive), even after
+  the site changes. **Ctrl+Shift+F** searches it.
 
 **Ctrl+L**\u{a0}address · **Ctrl+T**\u{a0}new\u{a0}tab · **Ctrl+F**\u{a0}find
 · **Ctrl+D**\u{a0}bookmark · **Ctrl+H**\u{a0}history · **Ctrl+S**\u{a0}save
@@ -93,6 +95,8 @@ Links shared from other apps open here too.
 - Press and hold a link to open it in a new tab.
 - Pages you read this week open from a copy on your phone. **Reload** in the
   menu loads a fresh one.
+- Every article you read is kept in your [archive](brevier:archive), even after
+  the site changes. **Search your archive** is in the menu.
 
 Find on page, bookmarks, history and settings are in the menu. Pinch the page
 to make it bigger or smaller.

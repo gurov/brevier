@@ -57,6 +57,8 @@ class MainActivity : Activity(), ArticleHost {
 
     private var dark = false
     private var images = true
+    /** Класть ли копию каждой прочитанной страницы в архив (#8). */
+    private var archive = true
     private var zoom = 0
 
     private val tabs = mutableListOf<Tab>()
@@ -104,6 +106,7 @@ class MainActivity : Activity(), ArticleHost {
         val stored = Core.settings()
         dark = stored.optBoolean("dark")
         images = stored.optBoolean("images", true)
+        archive = stored.optBoolean("archive", true)
         zoom = type.zoomNormal
 
         build()
@@ -242,6 +245,7 @@ class MainActivity : Activity(), ArticleHost {
         root.addView(tabList, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         settings = SettingsPage(this, fonts,
             changed = { dark, images -> changeSettings(dark, images) },
+            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive) },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
         )
@@ -1070,6 +1074,22 @@ class MainActivity : Activity(), ArticleHost {
         }
     }
 
+    /**
+     * Поиск по архиву (#8) — адресом `brevier:archive?q=`: форм у Brevier нет,
+     * а строка адреса уже умеет набор и Enter. Начало адреса ставим сами,
+     * курсор за ним — остаётся набрать слова. Карточка страницы тут ни к чему.
+     */
+    private fun searchArchive() {
+        quiet = true
+        address.setText(ARCHIVE_SEARCH)
+        quiet = false
+        address.requestFocus()
+        hideCard()
+        address.setSelection(address.text.length)
+        padAddress()
+        showKeyboard(address)
+    }
+
     /** Отступ карточки и подсказок от краёв панели. */
     private val dropMargin get() = dp(6f)
 
@@ -1227,11 +1247,13 @@ class MainActivity : Activity(), ArticleHost {
         }
         menu.item("History") { newTab("brevier:history") }
         menu.item("Bookmarks") { newTab("brevier:bookmarks") }
+        menu.item("Archive") { newTab("brevier:archive") }
+        menu.item("Search your archive") { searchArchive() }
         menu.item("Settings") { showSettings() }
         menu.show(more)
     }
 
-    private fun showSettings() = settings.show(palette, dark, images, isBrowser())
+    private fun showSettings() = settings.show(palette, dark, images, archive, isBrowser())
 
     /**
      * Brevier ли браузер по умолчанию. С Android 10 это роль, у которой
@@ -1286,7 +1308,7 @@ class MainActivity : Activity(), ArticleHost {
         val imagesOn = images && !this.images
         this.dark = dark
         this.images = images
-        Core.saveSettings(dark, images)
+        Core.saveSettings(dark, images, archive)
         if (themeChanged) {
             applyTheme()
             showSettings()
@@ -1584,5 +1606,7 @@ class MainActivity : Activity(), ArticleHost {
         const val MAX_FILE = 8L * 1024 * 1024
         const val SERVED_MARKDOWN = "Served as Markdown by the site — the author's exact text."
         const val INSECURE = "Not secure: this page came over plain http, so anyone on the way can read and change it."
+        /** Начало адреса поиска по архиву (#8). */
+        const val ARCHIVE_SEARCH = "brevier:archive?q="
     }
 }

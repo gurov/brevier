@@ -106,6 +106,9 @@ brevier --stdin <url> < page.html       # HTML you already have; the url is
                                         # where it came from, for its links
 brevier --save <url>                    # save to a file instead of stdout
 brevier brevier:history                 # what you have read, by day
+brevier brevier:archive                 # a copy of every article you read
+brevier "brevier:archive?q=latency"     # …searched for words
+brevier brevier:archive/<host>/<file>   # one copy, printed as `lz4 -d` would
 brevier "borrow checker"                # not an address: a search
 brevier "?danluu.com"                   # a leading ? searches for anything
 ```
@@ -163,6 +166,7 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Ctrl+Tab`, `Ctrl+PageUp` / `PageDown` | switch tabs |
 | `Ctrl+F` | find on page |
 | `Ctrl+H` | history |
+| `Ctrl+Shift+F` | search your archive |
 | `Ctrl+D` | bookmark the page, or remove the bookmark |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0`, `Ctrl`+wheel | zoom in / out / reset |
 | `Ctrl+S` | save the article |
@@ -198,6 +202,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **A new tab shows the five pages you read last.**
 - **Tabs come back** after you close the window; only the visible one loads at start.
 - **History and bookmarks**, and the address bar suggests pages you have read.
+- **The archive keeps every article you read**, as a compressed Markdown file, so you can
+  read and search it after the site has changed or gone: `brevier:archive`, and
+  `Ctrl+Shift+F` (Search your archive, in the menu on the phone).
 
 **Any kind of page**
 
@@ -292,7 +299,13 @@ History, open tabs and bookmarks are plain text, one line per entry:
 ~/.local/share/brevier/history.tsv     # what you have read
 ~/.local/share/brevier/session.tsv     # the tabs you left open
 ~/.local/share/brevier/bookmarks.tsv   # the pages you kept
+~/.local/share/brevier/archive/        # a copy of every article you read
 ```
+
+The archive holds one file per page, `<host>/<date>-<title>.md.lz4`: Markdown with a short
+header (title, address, when you read it), compressed in the standard LZ4 format, so
+`lz4 -d` opens it without Brevier. A copy stays as long as its line in the history, and a
+bookmarked page keeps its latest copy for good. A switch in Settings stops new copies.
 
 Settings are in `~/.config/brevier/settings.tsv`. The cache — the fonts, and week-old
 copies of pages (up to 64 MB of text and 256 MB of images) — is in `~/.cache/brevier`.
@@ -300,7 +313,7 @@ The usual `XDG_*` variables move these folders, and `BREVIER_DATA_DIR` moves the
 On Android they live in the app's own storage.
 
 There is no database: delete a line to forget a page. **Forget everything** in Settings
-clears the history and the saved copies, and keeps your bookmarks and tabs. Only the
+clears the history, the saved copies and the archive, and keeps your bookmarks and tabs. Only the
 window writes these files; `brevier <url>` on the command line keeps no history.
 
 ## On the network

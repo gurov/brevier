@@ -1713,12 +1713,27 @@ pub fn front_matter_title(md: &str) -> Option<String> {
     let (head, _) = front_matter(md)?;
     head.lines().find_map(|line| {
         let value = line.strip_prefix("title:")?.trim();
-        let value = value
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-            .unwrap_or(value)
-            .trim();
+        // В двойных кавычках YAML экранирует обратной косой: так пишет
+        // заголовок архив (#8), и «\"» должно стать кавычкой.
+        let value = match value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+            Some(inner) => {
+                let mut out = String::with_capacity(inner.len());
+                let mut chars = inner.chars();
+                while let Some(ch) = chars.next() {
+                    match ch {
+                        '\\' => out.extend(chars.next()),
+                        ch => out.push(ch),
+                    }
+                }
+                out
+            }
+            None => value
+                .strip_prefix('\'')
+                .and_then(|v| v.strip_suffix('\''))
+                .unwrap_or(value)
+                .to_owned(),
+        };
+        let value = value.trim();
         (!value.is_empty()).then(|| value.to_owned())
     })
 }

@@ -46,6 +46,10 @@ encoding_rs = "0.8"
 # кнопками, которое ещё и доступность потеряет.
 gtk = { version = "0.11.4", package = "gtk4", features = ["v4_10"], optional = true }
 htmd = "0.5.5"
+# Архив прочитанного (#8): LZ4 стандартным кадром, чтобы копию открывал
+# обычный `lz4 -d`. Чистый Rust и без `unsafe` (`safe-*`) — по той же
+# причине, по которой нет SQLite.
+lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "frame", "checked-decode"] }
 hyphenation = { version = "0.8", optional = true, default-features = false, features = ["embed_en-us"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
 resvg = { version = "0.48.1", optional = true }

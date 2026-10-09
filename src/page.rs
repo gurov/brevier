@@ -243,6 +243,11 @@ impl Page {
             inset: None,
             typeset: typesetter.as_ref(),
         };
+        if let Some(archived) = &document.archived {
+            writer.archived(archived);
+        }
+        // Где начинается сам текст: строка над копией из архива — не его часть.
+        let start = writer.chars;
         for node in root.children() {
             writer.block(node, &[]);
         }
@@ -260,7 +265,7 @@ impl Page {
             .filter(|placed| matches!(placed.block, Block::Image { .. }))
             .count();
         let space = writer.chars + images * IMAGE_CHARS;
-        page.contents = contents_of(writer.marks, space);
+        page.contents = contents_of(writer.marks, space, start);
         page
     }
 
@@ -396,14 +401,16 @@ impl Page {
 /// прыжок попадает в заголовок, а не примерно туда. Если заголовков мало,
 /// вехами служат начала абзацев, расставленные по документу примерно
 /// поровну. Короткая страница не получает оглавления вовсе.
-pub fn contents_of(marks: Vec<Mark>, total: usize) -> Vec<Mark> {
+pub fn contents_of(marks: Vec<Mark>, total: usize, start: usize) -> Vec<Mark> {
     if total < MIN_DOC_CHARS {
         return Vec::new();
     }
 
     let mut headings: Vec<Mark> = marks.iter().filter(|mark| mark.heading).cloned().collect();
-    // Название статьи — не раздел: оно и так наверху.
-    if matches!(headings.first(), Some(first) if first.level == 1 && first.offset == 0) {
+    // Название статьи — не раздел: оно и так наверху. Наверху — значит
+    // в начале текста, а не страницы: над копией из архива стоит строка
+    // о ней (`start`).
+    if matches!(headings.first(), Some(first) if first.level == 1 && first.offset == start) {
         headings.remove(0);
     }
     if headings.len() >= MIN_HEADINGS {
@@ -592,6 +599,27 @@ impl Writer<'_> {
             target: next.address.clone(),
         });
         self.put("\n", &[Style::Body]);
+    }
+
+    /// Строка над копией из архива (#8): чья это копия и откуда. Блёклая,
+    /// как «Next:», — это не слова автора; адрес — ссылкой на страницу
+    /// в сети, какой она стала.
+    fn archived(&mut self, archived: &crate::Archived) {
+        self.put(
+            &format!("Your copy from {} · ", archived.read),
+            &[Style::Body, Style::Dim],
+        );
+        let start = self.chars;
+        self.put(
+            &crate::store::source_of(&archived.source),
+            &[Style::Body, Style::Link],
+        );
+        self.page.links.push(Link {
+            start,
+            end: self.chars,
+            target: archived.source.clone(),
+        });
+        self.put("\n\n", &[Style::Body]);
     }
 
     /// Где сейчас конец текста: в символах и в байтах.
@@ -1227,7 +1255,56 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            archived: None,
         }
+    }
+
+    /// Над копией из архива — блёклая строка: когда прочитана и откуда,
+    /// откуда — ссылкой на страницу в сети.
+    #[test]
+    fn an_archived_copy_says_whose_copy_it_is() {
+        let mut document = doc("---\ntitle: \"Latency\"\n---\n\n# Latency\n\nText.\n");
+        document.archived = Some(crate::Archived {
+            source: "https://danluu.com/keyboard-latency/".to_owned(),
+            read: "9 October 2026".to_owned(),
+        });
+        let page = Page::of(&document);
+        assert!(
+            page.text
+                .starts_with("Your copy from 9 October 2026 · danluu.com\n\nLatency\n"),
+            "{:?}",
+            page.text
+        );
+        let link = &page.links[0];
+        assert_eq!(link.target, "https://danluu.com/keyboard-latency/");
+        // Название и над копией остаётся названием, а не разделом оглавления:
+        // полка копии — та же, что у самой страницы.
+        let long = format!(
+            "# Latency\n\n{}",
+            (1..=6)
+                .map(|n| format!("## Part {n}\n\n{}\n\n", "Words of the article. ".repeat(40)))
+                .collect::<String>()
+        );
+        let titles = |document: &Document| -> Vec<String> {
+            Page::of(document)
+                .contents
+                .iter()
+                .map(|mark| mark.title.clone())
+                .collect()
+        };
+        let live = doc(&long);
+        let mut copy = doc(&long);
+        copy.archived = document.archived.clone();
+        assert_eq!(titles(&copy), titles(&live));
+        assert_eq!(titles(&copy)[0], "Part 1");
+        assert_eq!(
+            &page.text[..]
+                .chars()
+                .skip(link.start)
+                .take(link.end - link.start)
+                .collect::<String>(),
+            "danluu.com"
+        );
     }
 
     #[test]

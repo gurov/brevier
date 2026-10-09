@@ -28,7 +28,7 @@ use gtk::pango;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow};
 
-use brevier::address::{self, Address, Internal, Repo};
+use brevier::address::{self, Address, ArchivePage, Internal, Repo};
 use brevier::failure::describe;
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
@@ -46,6 +46,8 @@ use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "io.github.gurov.brevier";
+/// Начало адреса поиска по архиву (#8): его ставит `Ctrl+Shift+F`.
+const ARCHIVE_SEARCH: &str = "brevier:archive?q=";
 const BODY_FAMILY: &str = "Noto Sans";
 const MONO_FAMILY: &str = "Noto Sans Mono";
 /// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
@@ -157,7 +159,18 @@ fn main() -> glib::ExitCode {
     // недельного кэша страниц: второй экземпляр сюда не доходит.
     app.connect_startup(|_| {
         use_bundled_icon();
-        std::thread::spawn(|| brevier::cache::Cache::open().prune());
+        std::thread::spawn(|| {
+            brevier::cache::Cache::open().prune();
+            // Архив (#8): копия живёт, пока на неё указывает журнал, а у
+            // закладки — последняя копия навсегда.
+            let kept = brevier::store::Store::open().copies();
+            let marked = brevier::store::Marks::open()
+                .marks()
+                .iter()
+                .map(|mark| mark.address.clone())
+                .collect();
+            brevier::archive::Archive::open().prune(&kept, &marked);
+        });
     });
 
     app.connect_command_line(|app, command_line| {
@@ -323,6 +336,9 @@ struct Tab {
     /// из сохранённой сессии. Живёт во вкладке, а не в аргументах `open`,
     /// потому что нужно ровно один раз и ровно после загрузки.
     resume: Option<i32>,
+    /// Копия только что загруженной страницы в архиве (#8): путь для строки
+    /// журнала. Живёт до показа страницы — ровно как `resume`.
+    copy: Option<String>,
     /// Вкладка есть, страницы ещё нет: так возвращается из сессии всё,
     /// кроме той вкладки, что была впереди. Грузится она в тот миг,
     /// когда на неё переключились, — десять восстановленных вкладок
@@ -397,6 +413,8 @@ struct State {
     /// после отказа от JS декодер картинок — единственная серьёзная
     /// поверхность атаки, и закрыть её должно быть чем.
     images: bool,
+    /// Класть ли копию каждой прочитанной страницы в архив (#8).
+    archive: bool,
     /// Ступень масштаба — одна на окно, общая для всех страниц. Читатель
     /// выставляет её раз и ждёт её везде: разная по хостам ступень
     /// оборачивалась тем, что соседняя страница открывалась «странно».
@@ -697,6 +715,7 @@ fn build(app: &Application, start: Vec<String>) {
         next_id: 0,
         dark: settings.dark,
         images: settings.images,
+        archive: settings.archive,
         zoom: ZOOM_NORMAL,
         store: Store::open(),
         marks: Marks::open(),
@@ -1130,6 +1149,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             generation: 0,
             loading: false,
             resume: None,
+            copy: None,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
             density_seen: 1,
@@ -1181,10 +1201,22 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
 /// У каждой настройки есть причина, которую надо объяснить строкой, — в кнопку
 /// с иконкой такое не помещается, потому это страница, а не значок в панели.
 fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
-    let (dark_on, images_on) = {
+    let (dark_on, images_on, archive_on) = {
         let borrowed = state.borrow();
-        (borrowed.dark, borrowed.images)
+        (borrowed.dark, borrowed.images, borrowed.archive)
     };
+    let keep_copies = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(archive_on)
+        .build();
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        keep_copies.connect_active_notify(move |switch| {
+            state.borrow_mut().archive = switch.is_active();
+            remember_settings(&ui, &state);
+        });
+    }
     let dark_mode = gtk::Switch::builder()
         .valign(gtk::Align::Center)
         .active(dark_on)
@@ -1257,11 +1289,18 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         .selection_mode(gtk::SelectionMode::None)
         .build();
     history_rows.add_css_class("rich-list");
+    history_rows.append(&setting_row(
+        "Keep a copy of every page",
+        "Each article you read is kept as a compressed Markdown file in \
+         brevier:archive, so you can read and search it even when the site is \
+         gone. Off: new pages are not kept; what is there stays.",
+        &keep_copies,
+    ));
     history_rows.append(&action_row(
         "Forget everything you have read",
         "The list at brevier:history goes away, the address bar stops \
-         suggesting those pages, and the saved copies of pages are deleted. \
-         Bookmarks and open tabs stay.",
+         suggesting those pages, and the saved copies of pages and the \
+         archive are deleted. Bookmarks and open tabs stay.",
         &forget,
     ));
     page.append(&history_rows);
@@ -1383,6 +1422,35 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("bookmarks", &[], bookmarks);
 
+    // Архив (#8) — сосед истории: тот же журнал, только с текстом страниц.
+    let archive = gio::SimpleAction::new("archive", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        archive.connect_activate(move |_, _| {
+            new_tab(
+                &ui,
+                &state,
+                Some(Address::Internal(Internal::Archive(ArchivePage::List))),
+            );
+        });
+    }
+    add("archive", &[], archive);
+
+    // Поиск по архиву — адресом `brevier:archive?q=`: форм у Brevier нет,
+    // а строка адреса уже умеет и набор, и подсказки, и Enter. Клавиша
+    // ставит туда начало адреса и курсор за ним — остаётся набрать слова.
+    let search_archive = gio::SimpleAction::new("search-archive", None);
+    {
+        let ui = ui.clone();
+        search_archive.connect_activate(move |_, _| {
+            ui.entry.set_text(ARCHIVE_SEARCH);
+            ui.entry.grab_focus_without_selecting();
+            ui.entry.set_position(-1);
+        });
+    }
+    add("search-archive", &["<Control><Shift>f"], search_archive);
+
     let settings = gio::SimpleAction::new("settings", None);
     {
         let ui = ui.clone();
@@ -1437,6 +1505,7 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     places.append(Some("Settings"), Some("app.settings"));
     places.append(Some("History"), Some("app.history"));
     places.append(Some("Bookmarks"), Some("app.bookmarks"));
+    places.append(Some("Archive"), Some("app.archive"));
     let menu = gio::Menu::new();
     menu.append_section(None, &page);
     menu.append_section(None, &places);
@@ -1602,6 +1671,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             generation: 0,
             loading: false,
             resume: None,
+            copy: None,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
             density_seen: 1,
@@ -2044,7 +2114,8 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         .message("Forget everything you have read?")
         .detail(
             "The list of pages goes away, the address bar stops suggesting them, \
-             and the saved copies of pages are deleted. Bookmarks and open tabs stay.",
+             and the saved copies of pages and the archive are deleted. Bookmarks \
+             and open tabs stay.",
         )
         .buttons(["Cancel", "Forget"])
         .cancel_button(0)
@@ -2063,6 +2134,8 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         // Копии страниц — такой же след прочитанного, как журнал. Память
         // вкладок не трогаем: открытые вкладки остаются, как и обещано.
         brevier::cache::Cache::open().forget();
+        // Архив — тоже след прочитанного (#8): «забыть всё» значит всё.
+        brevier::archive::Archive::open().forget();
         // А вот недавнее на начальных страницах — тот же журнал, и оставить
         // его на экране значило бы не забыть.
         let starts: Vec<(u64, gtk::TextView)> = state
@@ -2090,6 +2163,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         images: borrowed.images,
         shelf: ui.show_contents.is_active(),
         shelf_width: Some(ui.shelf_width.get()),
+        archive: borrowed.archive,
     }
     .save();
 }
@@ -2566,13 +2640,22 @@ fn open_with(
     // Чем открыть это в чужом браузере — считаем до того, как адрес уедет
     // в поток загрузки: на отказе он понадобится, а его уже не будет.
     let external = address.external();
+    let archive_on = state.borrow().archive;
+    let offset = local_offset();
     glib::spawn_future_local(async move {
         let loaded = gio::spawn_blocking(move || {
             let document = brevier::open(&address, UserAgent::Honest)?;
             // На диск — здесь же, в потоке: кэш сам решает, годится ли
             // документ (статья из сети — да, лента и свои страницы — нет).
             brevier::cache::Cache::open().keep(&address, &document);
-            Ok::<_, brevier::Error>(document)
+            // И в архив (#8), по тому же правилу: что кладётся — решает он.
+            let copy = archive_on
+                .then(|| {
+                    brevier::archive::Archive::open()
+                        .keep(&document, &brevier::store::Stamp::now(offset))
+                })
+                .flatten();
+            Ok::<_, brevier::Error>((document, copy))
         })
         .await;
 
@@ -2585,7 +2668,10 @@ fn open_with(
         };
 
         match loaded {
-            Ok(Ok(document)) => {
+            Ok(Ok((document, copy))) => {
+                if let Some(tab) = state.borrow_mut().find(id) {
+                    tab.copy = copy;
+                }
                 show_document(&ui, &state, id, &document, anchor.as_deref());
                 // Кладём в кэш вкладки: теперь «назад» покажет её без сети.
                 if cacheable && let Some(tab) = state.borrow_mut().find(id) {
@@ -2660,9 +2746,13 @@ fn show_document(
     }
     let mut borrowed = state.borrow_mut();
     // В историю идёт то, что открылось, и адрес итоговый — после редиректов.
-    borrowed
-        .store
-        .record(&document.address, &document.title, local_offset());
+    let copy = borrowed.find(id).and_then(|tab| tab.copy.take());
+    borrowed.store.record_with(
+        &document.address,
+        &document.title,
+        local_offset(),
+        copy.as_deref(),
+    );
     let seen = current_zoom(&borrowed);
     if let Some(tab) = borrowed.find(id) {
         tab.loading = false;
@@ -3620,6 +3710,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         feeds: Vec::new(),
         lang: None,
         next: None,
+        archived: None,
     };
     dress(state, view);
     let page = render(view, &document, None);

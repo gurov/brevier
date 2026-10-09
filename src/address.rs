@@ -36,6 +36,19 @@ pub enum Internal {
     /// (`brevier:check/https://…`), иначе отчёт не положить ни в историю
     /// вкладки, ни в сессию. Без него — страница о том, как проверять.
     Check(Option<String>),
+    /// Архив прочитанного (#8): весь список, поиск по нему или одна копия.
+    Archive(ArchivePage),
+}
+
+/// Что из архива открыто.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArchivePage {
+    /// `brevier:archive` — все копии по дням.
+    List,
+    /// `brevier:archive?q=слова` — страницы, где есть все слова.
+    Search(String),
+    /// `brevier:archive/<хост>/<файл>.md.lz4` — сама копия.
+    Copy(String),
 }
 
 impl Internal {
@@ -45,6 +58,7 @@ impl Internal {
             Internal::History => "history",
             Internal::Bookmarks => "bookmarks",
             Internal::Check(_) => "check",
+            Internal::Archive(_) => "archive",
         }
     }
 
@@ -54,7 +68,24 @@ impl Internal {
             "history" => return Some(Internal::History),
             "bookmarks" => return Some(Internal::Bookmarks),
             "check" => return Some(Internal::Check(None)),
+            "archive" => return Some(Internal::Archive(ArchivePage::List)),
             _ => {}
+        }
+        // Поиск по архиву печатают руками, со словами через пробел; из ссылки
+        // он приходит с процентными кодами. Плюс не трогаем: «c++» — запрос.
+        if let Some(query) = name.strip_prefix("archive?q=") {
+            let query = percent_decoded(query);
+            let query = query.trim();
+            return Some(Internal::Archive(if query.is_empty() {
+                ArchivePage::List
+            } else {
+                ArchivePage::Search(query.to_owned())
+            }));
+        }
+        if let Some(path) = name.strip_prefix("archive/") {
+            let path = percent_decoded(path);
+            return (path.ends_with(crate::archive::EXTENSION) && !path.contains(".."))
+                .then_some(Internal::Archive(ArchivePage::Copy(path)));
         }
         // Проверяют веб-страницу: у репозитория и файла сайта нет, а своя
         // страница проверки не требует. Голый домен разбирается как везде.
@@ -202,6 +233,28 @@ impl Repo {
     }
 }
 
+/// Процентные коды в UTF-8: `%D0%BA` → «к». Битый код остаётся как был.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Some(byte) = std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+        {
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg(test)]
 impl Repo {
     /// Короткая форма этого адреса — то, что увидит читатель в строке.
@@ -294,6 +347,12 @@ impl Address {
             }
             Address::File(path) => path.display().to_string(),
             Address::Internal(Internal::Check(Some(url))) => format!("brevier:check/{url}"),
+            Address::Internal(Internal::Archive(ArchivePage::Search(query))) => {
+                format!("brevier:archive?q={query}")
+            }
+            Address::Internal(Internal::Archive(ArchivePage::Copy(path))) => {
+                format!("brevier:archive/{path}")
+            }
             Address::Internal(page) => format!("brevier:{}", page.name()),
         }
     }
@@ -589,6 +648,43 @@ mod tests {
             Address::Internal(Internal::Bookmarks)
         );
         assert!(matches!(parse("brevier:nowhere"), Err(Error::BadUrl(_))));
+    }
+
+    /// Архив (#8): список, поиск со словами через пробел или процентными
+    /// кодами, копия по пути. Путь наверх адресом не является.
+    #[test]
+    fn the_archive_has_addresses_for_its_list_its_search_and_its_copies() {
+        let list = Address::Internal(Internal::Archive(ArchivePage::List));
+        assert_eq!(parse("brevier:archive").unwrap(), list);
+        assert_eq!(list.display(), "brevier:archive");
+        // Пустой запрос — тот же список.
+        assert_eq!(parse("brevier:archive?q= ").unwrap(), list);
+
+        let search = parse("brevier:archive?q=borrow checker").unwrap();
+        assert_eq!(
+            search,
+            Address::Internal(Internal::Archive(ArchivePage::Search(
+                "borrow checker".to_owned()
+            )))
+        );
+        assert_eq!(parse(&search.display()).unwrap(), search);
+        // Из ссылки — процентными кодами; плюс остаётся плюсом.
+        assert_eq!(
+            parse("brevier:archive?q=%D0%BA%D0%BE%D1%82%20c++").unwrap(),
+            Address::Internal(Internal::Archive(ArchivePage::Search("кот c++".to_owned())))
+        );
+
+        let copy = parse("brevier:archive/danluu.com/2026-10-09-keyboard-latency.md.lz4").unwrap();
+        assert_eq!(
+            copy,
+            Address::Internal(Internal::Archive(ArchivePage::Copy(
+                "danluu.com/2026-10-09-keyboard-latency.md.lz4".to_owned()
+            )))
+        );
+        assert_eq!(parse(&copy.display()).unwrap(), copy);
+        assert!(copy.external().is_empty());
+        assert!(parse("brevier:archive/../history.tsv").is_err());
+        assert!(parse("brevier:archive/../../x.md.lz4").is_err());
     }
 
     #[test]

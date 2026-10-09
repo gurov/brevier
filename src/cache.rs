@@ -338,6 +338,7 @@ fn read_page(text: &str, expected: &str) -> Option<Saved> {
             feeds,
             lang,
             next,
+            archived: None,
         },
         saved: UNIX_EPOCH + Duration::from_secs(saved?),
     })
@@ -346,7 +347,7 @@ fn read_page(text: &str, expected: &str) -> Option<Saved> {
 /// Записать целиком или никак: сначала во временный файл, потом переименовать.
 /// Окон бывает несколько, и копию одной страницы могут писать двое сразу —
 /// поэтому у временного файла имя своё у каждого писателя.
-fn write_atomically(path: &Path, bytes: &[u8]) {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) {
     static WRITER: AtomicU64 = AtomicU64::new(0);
     let Some(dir) = path.parent() else { return };
     if fs::create_dir_all(dir).is_err() {
@@ -428,6 +429,7 @@ mod tests {
                 title: "Part two".to_owned(),
                 address: "https://e.com/a/2".to_owned(),
             }),
+            archived: None,
         }
     }
 

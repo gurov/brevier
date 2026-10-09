@@ -10,6 +10,7 @@ pub mod address;
 /// Только под Android — платформа сидит на краю, как и тулкит.
 #[cfg(target_os = "android")]
 pub mod android;
+pub mod archive;
 /// Прочитанное на неделю: страница открывается с диска, а не из сети.
 /// Пишет и читает интерфейс; cli и корпус кэша не видят.
 pub mod cache;
@@ -70,7 +71,7 @@ pub use fetch::UserAgent;
 pub use history::History;
 pub use markdown::Kind;
 
-use address::{Internal, Repo};
+use address::{ArchivePage, Internal, Repo};
 use fetch::ContentKind;
 
 /// Прочитанный документ в том виде, в каком его показывает окно.
@@ -105,6 +106,18 @@ pub struct Document {
     /// Под текстом — строкой «Next: …»; в сохранённый markdown не идёт:
     /// это не слова автора.
     pub next: Option<Link>,
+    /// Документ — копия из архива (#8): откуда она и когда прочитана.
+    /// Над текстом — строкой «Your copy, read …»; в сам файл не идёт.
+    pub archived: Option<Archived>,
+}
+
+/// Откуда копия из архива и когда её прочитали.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Archived {
+    /// Адрес страницы, как его показывает строка: по нему копию и узнают.
+    pub source: String,
+    /// Когда прочитана: «9 October 2026».
+    pub read: String,
 }
 
 /// Установить провайдер шифров. `rustls` собран без встроенного, выбираем явно;
@@ -128,6 +141,7 @@ pub fn open(address: &Address, ua: UserAgent) -> Result<Document, Error> {
 /// и тогда, когда программа открыта дважды. Проверка ходит в сеть, как
 /// `--check`, — за той страницей, которую проверяет.
 fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
+    let mut archived = None;
     let (title, markdown) = match page {
         Internal::History => ("History".to_owned(), store::Store::open().page()),
         Internal::Bookmarks => ("Bookmarks".to_owned(), store::Marks::open().page()),
@@ -140,6 +154,36 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
                 .unwrap_or_else(|| url.clone());
             (format!("Check · {host}"), report.to_markdown())
         }
+        Internal::Archive(ArchivePage::List) => {
+            ("Archive".to_owned(), archive::Archive::open().page())
+        }
+        Internal::Archive(ArchivePage::Search(query)) => (
+            format!("Archive: {query}"),
+            archive::Archive::open().search_page(query),
+        ),
+        // Копия — файл как есть, шапка YAML с ним: её прячет рендерер,
+        // а cli печатает ровно то, что дал бы `lz4 -d`. Откуда копия и когда
+        // прочитана — отдельным полем: это строка над текстом, не текст.
+        Internal::Archive(ArchivePage::Copy(path)) => match archive::Archive::open().read(path) {
+            Some(copy) => {
+                archived = Some(Archived {
+                    source: copy.source.clone(),
+                    read: archive::long_date(&copy.read),
+                });
+                let title = if copy.title.is_empty() {
+                    copy.source.clone()
+                } else {
+                    copy.title.clone()
+                };
+                (title, copy.markdown)
+            }
+            None => (
+                "Not in the archive".to_owned(),
+                "# Not in the archive\n\nThis copy is no longer in your archive. \
+                 [The archive](brevier:archive) lists what it keeps.\n"
+                    .to_owned(),
+            ),
+        },
     };
     Ok(Document {
         address: Address::Internal(page.clone()),
@@ -153,6 +197,7 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
         feeds: Vec::new(),
         lang: None,
         next: None,
+        archived,
     })
 }
 
@@ -175,6 +220,7 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             // Родной текст без HTML — языка мы не знаем.
             lang: None,
             next: None,
+            archived: None,
             address,
         }),
         ContentKind::Html => from_html(&page.body, &page.url),
@@ -208,6 +254,7 @@ pub fn from_feed(xml: &str, url: &str) -> Result<Document, Error> {
         feeds: Vec::new(),
         lang: None,
         next: None,
+        archived: None,
     })
 }
 
@@ -232,6 +279,7 @@ pub fn from_search(html: &str, url: &str) -> Result<Document, Error> {
         feeds: Vec::new(),
         lang: None,
         next: None,
+        archived: None,
     })
 }
 
@@ -266,6 +314,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
             title
         },
         address: Address::Web(url.to_owned()),
+        archived: None,
     })
 }
 
@@ -307,6 +356,7 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
         // README — родной markdown, `<html lang>` в нём нет.
         lang: None,
         next: None,
+        archived: None,
         address,
     })
 }
@@ -354,6 +404,7 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         feeds: Vec::new(),
         lang: None,
         next: None,
+        archived: None,
     })
 }
 

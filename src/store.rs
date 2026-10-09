@@ -68,6 +68,9 @@ pub struct Visit {
     /// обратно (`address::parse`), поэтому хранить разобранный вид незачем.
     pub address: String,
     pub title: String,
+    /// Копия страницы в архиве (#8): путь внутри него, `хост/файл.md.lz4`.
+    /// Пусто — копии нет (архив выключен, лента, давняя строка журнала).
+    pub copy: String,
 }
 
 /// Подсказка адресной строки: что показать и что подставить.
@@ -143,6 +146,13 @@ impl Store {
     /// смещение потом и показывает время — даже если читатель переехал
     /// или сменилось летнее время.
     pub fn record(&mut self, address: &Address, title: &str, offset: i32) {
+        self.record_with(address, title, offset, None);
+    }
+
+    /// Записать визит вместе с копией из архива (#8). Копии нет — строка
+    /// указывает на прежнюю копию той же страницы, если она была: страница
+    /// из недельного кэша прочитана по той же копии, что и неделю назад.
+    pub fn record_with(&mut self, address: &Address, title: &str, offset: i32, copy: Option<&str>) {
         // Внутренние страницы в историю не идут: список истории, стоящий
         // в списке истории, — мусор. Браузеры поступают так же со своими
         // `chrome://`.
@@ -150,9 +160,18 @@ impl Store {
             return;
         }
         let address = address.display();
+        let copy = match copy {
+            Some(copy) => copy.to_owned(),
+            None => self.copy_of(&address).unwrap_or_default().to_owned(),
+        };
         // Перезагрузка страницы записью не считается — ровно то же правило,
-        // что и у истории вперёд-назад (`history.rs`).
-        if self.visits.last().map(|last| last.address.as_str()) == Some(address.as_str()) {
+        // что и у истории вперёд-назад (`history.rs`). Кроме новой копии:
+        // перечитанная на другой день страница легла в архив рядом,
+        // и без своей строки уборка её бы выбросила.
+        if let Some(last) = self.visits.last()
+            && last.address == address
+            && last.copy == copy
+        {
             return;
         }
         let visit = Visit {
@@ -162,9 +181,28 @@ impl Store {
             // он обязан быть одной строкой.
             title: title.split_whitespace().collect::<Vec<_>>().join(" "),
             address,
+            copy,
         };
         self.append(&visit);
         self.visits.push(visit);
+    }
+
+    /// Последняя копия этой страницы в архиве, если журнал её помнит.
+    pub fn copy_of(&self, address: &str) -> Option<&str> {
+        self.visits
+            .iter()
+            .rev()
+            .find(|visit| visit.address == address && !visit.copy.is_empty())
+            .map(|visit| visit.copy.as_str())
+    }
+
+    /// Копии, на которые указывает журнал, — их уборка архива не трогает.
+    pub fn copies(&self) -> HashSet<String> {
+        self.visits
+            .iter()
+            .filter(|visit| !visit.copy.is_empty())
+            .map(|visit| visit.copy.clone())
+            .collect()
     }
 
     /// Под каким заголовком эту страницу читали в прошлый раз.
@@ -300,8 +338,18 @@ impl Store {
             } else {
                 format!(" — {source}")
             };
+            // Копия в архиве — ссылкой в той же строке: страница в сети
+            // меняется и пропадает, а прочитанное осталось вот здесь.
+            let copy = if visit.copy.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " · {}",
+                    link("your copy", &crate::archive::copy_address(&visit.copy))
+                )
+            };
             out.push_str(&format!(
-                "- {} {}{source}\n",
+                "- {} {}{source}{copy}\n",
                 visit.stamp.clock(),
                 link(&title, &visit.address),
             ));
@@ -374,12 +422,7 @@ impl Store {
         if !self.writable {
             return;
         }
-        let line = format!(
-            "{}\t{}\t{}\n",
-            visit.stamp.text(),
-            escape(&visit.address),
-            escape(&visit.title)
-        );
+        let line = line_of(visit);
         let written = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -394,17 +437,26 @@ impl Store {
         if !self.writable {
             return;
         }
-        let mut text = String::new();
-        for visit in &self.visits {
-            text.push_str(&format!(
-                "{}\t{}\t{}\n",
-                visit.stamp.text(),
-                escape(&visit.address),
-                escape(&visit.title)
-            ));
-        }
+        let text: String = self.visits.iter().map(line_of).collect();
         self.writable = fs::write(path, text).is_ok();
     }
+}
+
+/// Строка журнала. Копия — четвёртым полем и только когда она есть:
+/// строки без неё остаются такими, какими были до архива.
+fn line_of(visit: &Visit) -> String {
+    let mut line = format!(
+        "{}\t{}\t{}",
+        visit.stamp.text(),
+        escape(&visit.address),
+        escape(&visit.title)
+    );
+    if !visit.copy.is_empty() {
+        line.push('\t');
+        line.push_str(&escape(&visit.copy));
+    }
+    line.push('\n');
+    line
 }
 
 /// Закладки: страницы, которые читатель отметил сам.
@@ -463,6 +515,7 @@ impl Marks {
             stamp: Stamp::now(offset),
             title: title.split_whitespace().collect::<Vec<_>>().join(" "),
             address,
+            copy: String::new(),
         });
         self.write();
         true
@@ -541,6 +594,8 @@ pub struct Settings {
     /// задаёт интерфейс, и подставлять сюда число из ядра значило бы соврать
     /// про то, кто эту ширину выбрал.
     pub shelf_width: Option<i32>,
+    /// Класть ли копию каждой прочитанной страницы в архив (#8).
+    pub archive: bool,
 }
 
 impl Default for Settings {
@@ -554,6 +609,8 @@ impl Default for Settings {
             images: true,
             shelf: true,
             shelf_width: None,
+            // Включён по умолчанию: решено в ROADMAP. Выключить есть чем.
+            archive: true,
         }
     }
 }
@@ -589,6 +646,7 @@ impl Settings {
                 "images" => settings.images = value == "on",
                 "shelf" => settings.shelf = value == "on",
                 "shelf-width" => settings.shelf_width = value.parse().ok(),
+                "archive" => settings.archive = value == "on",
                 _ => {}
             }
         }
@@ -605,10 +663,11 @@ impl Settings {
         let switch = |on: bool| if on { "on" } else { "off" };
         let mut text = String::from("# Brevier settings\n");
         text.push_str(&format!(
-            "theme\t{}\nimages\t{}\nshelf\t{}\n",
+            "theme\t{}\nimages\t{}\nshelf\t{}\narchive\t{}\n",
             if self.dark { "dark" } else { "light" },
             switch(self.images),
             switch(self.shelf),
+            switch(self.archive),
         ));
         if let Some(width) = self.shelf_width {
             text.push_str(&format!("shelf-width\t{width}\n"));
@@ -803,7 +862,7 @@ fn place(variable: &str, under_home: &str, apple: &str) -> Option<PathBuf> {
 
 /// Путь в том виде, в каком его показывают читателю: домашняя папка
 /// сокращается тильдой, как принято в любой консоли.
-fn where_it_is(path: &Path) -> String {
+pub(crate) fn where_it_is(path: &Path) -> String {
     let shown = match std::env::var_os("HOME").map(PathBuf::from) {
         Some(home) => match path.strip_prefix(&home) {
             Ok(rest) => format!("~/{}", rest.display()),
@@ -816,7 +875,7 @@ fn where_it_is(path: &Path) -> String {
 
 /// Откуда страница. У браузеров в этом месте стоит домен: адрес спрятан
 /// под заголовком, и без домена два одинаковых заголовка не различить.
-fn source_of(address: &str) -> String {
+pub(crate) fn source_of(address: &str) -> String {
     if let Some(start) = host_start(address) {
         let host = &address[start..];
         let host = host.split(['/', '?', '#']).next().unwrap_or(host);
@@ -841,7 +900,7 @@ fn host_start(address: &str) -> Option<usize> {
 
 /// Ссылка markdown-ом. Заголовок страницы пишет не наш код, поэтому
 /// квадратные скобки в нём — обычное дело, и экранировать их обязаны мы.
-fn link(text: &str, target: &str) -> String {
+pub(crate) fn link(text: &str, target: &str) -> String {
     let text = text
         .replace('\\', r"\\")
         .replace('[', r"\[")
@@ -856,7 +915,7 @@ fn link(text: &str, target: &str) -> String {
 /// Как называется день. Сегодня и вчера — словами, дальше датой:
 /// ровно так устроена страница истории в браузерах, и по делу — «вторник,
 /// 9 сентября» ищется глазами быстрее, чем «три дня назад».
-fn name_of_day(days: i64, today: i64) -> String {
+pub(crate) fn name_of_day(days: i64, today: i64) -> String {
     match today - days {
         0 => "Today".to_owned(),
         1 => "Yesterday".to_owned(),
@@ -960,7 +1019,7 @@ impl Stamp {
         format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{zone}")
     }
 
-    fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         let (date, rest) = text.split_once('T')?;
         let mut parts = date.split('-');
         let year: i64 = parts.next()?.parse().ok()?;
@@ -1014,7 +1073,7 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let days = days + 719_468;
     let era = days.div_euclid(146_097);
     let day_of_era = days - era * 146_097;
@@ -1039,6 +1098,7 @@ fn parse_line(line: &str) -> Option<Visit> {
         stamp,
         address,
         title: unescape(parts.next().unwrap_or_default()),
+        copy: unescape(parts.next().unwrap_or_default()),
     })
 }
 
@@ -1181,6 +1241,56 @@ mod tests {
         assert_eq!(store.visits().len(), 3);
     }
 
+    /// Строка журнала указывает на копию в архиве (#8); без копии —
+    /// на прежнюю копию той же страницы. Перечитанная в другой день страница
+    /// с новой копией — новая строка, даже подряд.
+    #[test]
+    fn a_visit_points_to_its_copy_in_the_archive() {
+        let path = temporary("copies");
+        let mut store = Store::at(&path);
+        let page = web("https://danluu.com/keyboard-latency/");
+        store.record_with(
+            &page,
+            "Latency",
+            0,
+            Some("danluu.com/2026-10-08-latency.md.lz4"),
+        );
+        store.record(&web("https://sive.rs/"), "sivers", 0);
+        // Из недельного кэша, без новой копии: та же копия, что и вчера.
+        store.record_with(&page, "Latency", 0, None);
+        assert_eq!(
+            store.visits()[2].copy,
+            "danluu.com/2026-10-08-latency.md.lz4"
+        );
+        // Подряд и с той же копией — перезагрузка; с новой — новая строка.
+        store.record_with(&page, "Latency", 0, None);
+        assert_eq!(store.visits().len(), 3);
+        store.record_with(
+            &page,
+            "Latency",
+            0,
+            Some("danluu.com/2026-10-09-latency.md.lz4"),
+        );
+        assert_eq!(store.visits().len(), 4);
+
+        let copies = store.copies();
+        assert_eq!(copies.len(), 2);
+        assert!(copies.contains("danluu.com/2026-10-09-latency.md.lz4"));
+
+        // Переживает перечитывание файла, а строка без копии — как была.
+        let again = Store::at(&path);
+        assert_eq!(again.visits(), store.visits());
+        let text = fs::read_to_string(&path).unwrap();
+        let sivers = text.lines().find(|line| line.contains("sive.rs")).unwrap();
+        assert_eq!(sivers.split('\t').count(), 3);
+        // На странице истории копия — ссылкой рядом со страницей.
+        assert!(
+            store
+                .page()
+                .contains("[your copy](brevier:archive/danluu.com/2026-10-09-latency.md.lz4)")
+        );
+    }
+
     #[test]
     fn internal_pages_stay_out_of_the_history() {
         let path = temporary("internal");
@@ -1304,6 +1414,7 @@ mod tests {
                 },
                 address: "gh:BurntSushi/ripgrep".to_owned(),
                 title: "ripgrep".to_owned(),
+                copy: String::new(),
             },
         );
 
@@ -1475,6 +1586,7 @@ mod tests {
             images: false,
             shelf: false,
             shelf_width: Some(320),
+            archive: false,
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);

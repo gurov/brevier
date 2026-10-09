@@ -48,8 +48,9 @@ object Core {
         obj("bookmark", utcOffset(), address, title).optBoolean("kept")
 
     fun settings(): JSONObject = obj("settings")
-    fun saveSettings(dark: Boolean, images: Boolean) {
-        call("settings.save", listOf(if (dark) "1" else "0", if (images) "1" else "0").joinToString(FIELD.toString()))
+    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean) {
+        val flags = listOf(dark, images, archive).map { if (it) "1" else "0" }
+        call("settings.save", flags.joinToString(FIELD.toString()))
     }
 
     fun session(): JSONArray = list("session", "")

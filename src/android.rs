@@ -38,6 +38,7 @@ use jni::errors::{Error as JniError, ThrowRuntimeExAndDefault};
 use jni::objects::{JByteArray, JClass, JIntArray, JObject, JString};
 
 use crate::address::{self, Address};
+use crate::archive::Archive;
 use crate::cache::{self, Cache};
 use crate::failure::describe;
 use crate::fetch::UserAgent;
@@ -47,7 +48,7 @@ use crate::page::{self, Page, json_string};
 use crate::palette;
 use crate::repo;
 use crate::save;
-use crate::store::{self, HINTS, Marks, Settings, Store};
+use crate::store::{self, HINTS, Marks, Settings, Stamp, Store};
 use crate::{Document, Kind};
 
 /// Разделитель полей аргумента `call`.
@@ -132,8 +133,19 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_init<'caller>(
         store::set_home(PathBuf::from(home));
         rustls_platform_verifier::android::init_with_env(env, context)?;
         crate::init_crypto();
-        // Уборка недельного кэша страниц — раз на запуск и в фоне.
-        std::thread::spawn(|| Cache::open().prune());
+        // Уборка недельного кэша страниц и архива — раз на запуск и в фоне.
+        // Копия архива живёт, пока на неё указывает журнал, а у закладки —
+        // последняя копия навсегда (#8).
+        std::thread::spawn(|| {
+            Cache::open().prune();
+            let kept = Store::open().copies();
+            let marked = Marks::open()
+                .marks()
+                .iter()
+                .map(|mark| mark.address.clone())
+                .collect();
+            Archive::open().prune(&kept, &marked);
+        });
         Ok(())
     });
     outcome.resolve::<ThrowRuntimeExAndDefault>()
@@ -228,6 +240,10 @@ fn call(method: &str, arg: &str) -> String {
             let mut settings = Settings::load();
             settings.dark = field(0) == "1";
             settings.images = field(1) == "1";
+            // Третьего поля нет — переключатель не трогали, и он остаётся каким был.
+            if !field(2).is_empty() {
+                settings.archive = field(2) == "1";
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -238,8 +254,9 @@ fn call(method: &str, arg: &str) -> String {
         }
         "forget" => {
             core().store.forget();
-            // Копии страниц — такой же след прочитанного, как журнал.
+            // Копии страниц и архив — такой же след прочитанного, как журнал.
             Cache::open().forget();
+            Archive::open().forget();
             "{}".to_owned()
         }
         "docs" => docs(arg),
@@ -354,6 +371,7 @@ fn intro() -> String {
         feeds: Vec::new(),
         lang: None,
         next: None,
+        archived: None,
     };
     let mut out = String::from("{\"title\":");
     json_string(&mut out, &document.title);
@@ -434,11 +452,17 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
     let disk = Cache::open();
     let copy = (!fresh).then(|| disk.page(&address)).flatten();
     let saved = copy.as_ref().map(|copy| copy.saved);
+    // Копия в архиве (#8) — только у свежей загрузки: страница из недельного
+    // кэша уже лежит в архиве, и строка журнала укажет на ту же копию.
+    let mut archived = None;
     let document = match copy {
         Some(copy) => copy.document,
         None => match crate::open(&address, UserAgent::Honest) {
             Ok(document) => {
                 disk.keep(&address, &document);
+                if Settings::load().archive {
+                    archived = Archive::open().keep(&document, &Stamp::now(offset));
+                }
                 document
             }
             Err(error) => return failure_json(&describe(&error), Some(external)),
@@ -450,8 +474,12 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
         let mut core = core();
         // В историю идёт то, что открылось, и адрес итоговый — после
         // редиректов.
-        core.store
-            .record(&document.address, &document.title, offset);
+        core.store.record_with(
+            &document.address,
+            &document.title,
+            offset,
+            archived.as_deref(),
+        );
         let key = document.address.display();
         core.documents.retain(|(known, _)| *known != key);
         core.documents.push_back((key.clone(), document.clone()));
@@ -585,8 +613,8 @@ fn bookmark(offset: i32, typed: &str, title: &str) -> String {
 fn settings() -> String {
     let settings = Settings::load();
     format!(
-        "{{\"dark\":{},\"images\":{}}}",
-        settings.dark, settings.images
+        "{{\"dark\":{},\"images\":{},\"archive\":{}}}",
+        settings.dark, settings.images, settings.archive
     )
 }
 

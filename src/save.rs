@@ -260,6 +260,7 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            archived: None,
         };
         assert_eq!(suggested_name(&document), "Как-это-работает.zip");
 
@@ -299,6 +300,7 @@ mod tests {
             feeds: Vec::new(),
             lang: None,
             next: None,
+            archived: None,
         };
         assert_eq!(suggested_name(&document), "Plain.md");
 
