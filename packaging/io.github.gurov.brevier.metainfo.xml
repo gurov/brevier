@@ -90,6 +90,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.8.1" date="2026-10-10" type="development">
+      <description>
+        <p>Security fixes: an SVG image on a web page can no longer read files
+          from your computer, and a deeply nested page no longer crashes
+          Brevier. The TLS library is updated.</p>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-10-10" type="development">
       <description>
         <p>Brevier now also runs on Windows. In a narrow window the text keeps

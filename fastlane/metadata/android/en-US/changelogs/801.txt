@@ -1,0 +1,2 @@
+• Security fixes: an image on a web page can no longer read the phone's files, and a page nested thousands of levels deep no longer crashes the app.
+• The TLS library is updated.
