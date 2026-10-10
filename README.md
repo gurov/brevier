@@ -20,9 +20,10 @@ the reading window.
 Why it is built this way is in the [manifesto](MANIFESTO.md); what comes next is in the
 [roadmap](ROADMAP.md).
 
-**Status: early.** Brevier runs on Linux, as a GTK window, and on Android, as a native app
-over the same core. Builds are in [Releases](https://github.com/gurov/brevier/releases/latest);
-nothing is in a store yet. Screen readers are known to work on Linux only (see
+**Status: early.** Brevier runs on Linux and Windows, as a GTK window, and on Android, as a
+native app over the same core. Builds are in
+[Releases](https://github.com/gurov/brevier/releases/latest); nothing is in a store yet.
+Screen readers are known to work on Linux only (see
 [What it does not do](#what-it-does-not-do)).
 
 ![An article in Brevier: an essay on keyboard latency set on ivory paper in the reader's
@@ -35,7 +36,7 @@ them](assets/screenshot-article.png)
 **Linux, Flatpak.** One file. The runtime brings GTK, so any distribution will do:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.7.0/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.8.0/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -49,14 +50,23 @@ local files (a `.md`, a saved feed) can't be opened.
 Ubuntu) and no wish for a sandbox:
 
 ```sh
-tar xf brevier-0.7.0-x86_64-linux.tar.gz
-cd brevier-0.7.0-x86_64-linux && ./install.sh
+tar xf brevier-0.8.0-x86_64-linux.tar.gz
+cd brevier-0.8.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` installs into `~/.local`, needs no root, and `--uninstall` removes it again.
 
+**Windows** 10 or 11, 64-bit. Download
+[`brevier-0.8.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.8.0/brevier-0.8.0-windows-x86_64-setup.exe)
+and run it. It installs for you alone, with no administrator rights, and puts Brevier in the
+Start menu; remove it under Installed apps. The installer is not signed yet, so Windows
+shows "Windows protected your PC" first: choose **More info**, then **Run anyway**. To run
+Brevier without installing it, unpack
+[`brevier-0.8.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.8.0/brevier-0.8.0-windows-x86_64.zip)
+anywhere and start `bin\brevier-ui.exe`; `bin\brevier.exe` is the command line.
+
 **Android** 7.0 or later, 64-bit ARM. Download
-[`brevier-0.7.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.7.0/brevier-0.7.0-arm64.apk)
+[`brevier-0.8.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.8.0/brevier-0.8.0-arm64.apk)
 on the phone and open it; Android asks once to allow installs from the app you opened it
 with. Updates install over it as long as they are signed with the same release key:
 
@@ -76,6 +86,9 @@ default; if you want that:
 ```sh
 xdg-settings set default-web-browser io.github.gurov.brevier.desktop
 ```
+
+On Windows the installer offers Brevier the same way; choose it under Settings → Apps →
+Default apps.
 
 `Ctrl+O` still hands any page to your other browser. On Android, Settings has
 **Make default**. If the menu shows Brevier without its icon, log out and back in — the
@@ -141,7 +154,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action:
 
 ```yaml
-- uses: gurov/brevier@v0.7.0   # a release tag, or @main
+- uses: gurov/brevier@v0.8.0   # a release tag, or @main
   with:
     urls: |
       https://example.com/
@@ -292,9 +305,9 @@ Extraction breaks as sites change their markup. Keeping up with that never ends.
 - **Video, audio, extensions** — no.
 - **An AI model inside** — no. It would add hundreds of megabytes and seconds per page,
   make the output unpredictable, and risk showing you words the author never wrote.
-- **Screen readers outside Linux** — GTK's accessibility works only on Linux, which is one
-  reason there are no Windows or macOS builds yet. The Android app uses native text, which
-  TalkBack should read, but that hasn't been tested.
+- **Screen readers outside Linux** — GTK's accessibility works only on Linux: on Windows a
+  screen reader doesn't see the window, and that is one reason there is no macOS build yet.
+  The Android app uses native text, which TalkBack should read, but that hasn't been tested.
 - **Privacy** — not promised. Sites can track you as they always could.
 - **Tables in find and copy** — a table is drawn as a grid of widgets, so find-on-page and
   "copy all" don't see it. The saved Markdown has it in full.
@@ -319,7 +332,7 @@ bookmarked page keeps its latest copy for good. A switch in Settings stops new c
 Settings are in `~/.config/brevier/settings.tsv`. The cache — the fonts, and week-old
 copies of pages (up to 64 MB of text and 256 MB of images) — is in `~/.cache/brevier`.
 The usual `XDG_*` variables move these folders, and `BREVIER_DATA_DIR` moves them all.
-On Android they live in the app's own storage.
+On Windows all of it is in `%LOCALAPPDATA%\Brevier`; on Android, in the app's own storage.
 
 There is no database: delete a line to forget a page. **Forget everything** in Settings
 clears the history, the saved copies and the archive, and keeps your bookmarks and tabs. Only the

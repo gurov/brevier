@@ -1,0 +1,2 @@
+• An image on a web page can no longer be read from the phone's own files.
+• The rest of this release is the desktop: a Windows version, and a margin in a narrow window.

@@ -90,6 +90,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.8.0" date="2026-10-10" type="development">
+      <description>
+        <p>Brevier now also runs on Windows. In a narrow window the text keeps
+          a margin from the frame. A link on a web page no longer opens a file
+          on your computer.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-10-09" type="development">
       <description>
         <p>Every article you read is kept in an archive of compressed Markdown
