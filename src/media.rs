@@ -496,12 +496,29 @@ mod tests {
             resolve(&web("https://e.com/a"), "file:////attacker/share/x.png"),
             None
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_local_document_names_files_by_url() {
         assert_eq!(
             resolve(
                 &Address::File(PathBuf::from("/docs/readme.md")),
                 "file:///docs/My%20Chart.png"
             ),
             Some(Source::File(PathBuf::from("/docs/My Chart.png")))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_local_document_names_files_by_url() {
+        assert_eq!(
+            resolve(
+                &Address::File(PathBuf::from(r"C:\docs\readme.md")),
+                "file:///C:/docs/My%20Chart.png"
+            ),
+            Some(Source::File(PathBuf::from(r"C:\docs\My Chart.png")))
         );
     }
 
