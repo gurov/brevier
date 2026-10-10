@@ -468,8 +468,10 @@ fn checked(path: &str) -> Option<PathBuf> {
     if parts.next().is_some() {
         return None;
     }
+    // Двоеточие — тоже выход: на Windows `C:` — диск, а `имя:поток` —
+    // скрытый поток файла. В имени хоста и в слаге его не бывает.
     let fine = |part: &str| {
-        !part.is_empty() && part != "." && part != ".." && !part.contains(['\\', '\0'])
+        !part.is_empty() && part != "." && part != ".." && !part.contains(['\\', '\0', ':'])
     };
     (fine(host) && fine(name) && name.ends_with(EXTENSION)).then(|| Path::new(host).join(name))
 }
@@ -854,6 +856,8 @@ mod tests {
             "host/name.txt",
             "a/b/c.md.lz4",
             "..",
+            "C:/notes.md.lz4",
+            "example.org/x.md.lz4:hidden.md.lz4",
         ] {
             assert!(checked(path).is_none(), "{path}");
             assert!(archive.read(path).is_none(), "{path}");
