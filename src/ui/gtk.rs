@@ -1695,7 +1695,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     view.set_top_margin(28);
     view.set_bottom_margin(80);
     tags(&view.buffer(), state.borrow().dark, ZOOM_STEPS[ZOOM_NORMAL]);
-    view.set_width_request(measure_px());
+    fit_column(&view);
 
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -3117,7 +3117,7 @@ fn fit_shelf(ui: &Ui) {
     // а не мельчает до переносов по слогам. Мера — обещание продукта,
     // полка — удобство; уступает удобство. Вернётся само, как только
     // масштаб или окно позволят.
-    let free = width - measure_px();
+    let free = width - column_px();
     if free < TOC_MIN {
         ui.shelf.set_visible(false);
         return;
@@ -3342,7 +3342,7 @@ fn dress(state: &Rc<RefCell<State>>, view: &gtk::TextView) {
     };
     set_zoom(scale);
     tags(&view.buffer(), dark, scale);
-    view.set_width_request(measure_px());
+    fit_column(view);
 }
 
 /// Сменить общую ступень масштаба: `step` — насколько сдвинуться по лестнице,
@@ -3381,8 +3381,8 @@ fn fits_on_screen(ui: &Ui, scale: f32) -> bool {
         // Про экран ничего не известно — не мешаем читателю.
         return true;
     };
-    let column = (f64::from(MEASURE) * f64::from(scale) * dpi() / 72.0).round() as i32;
-    column <= monitor.geometry().width()
+    let column = (f64::from(MEASURE + 2.0 * TEXT_SIZE) * f64::from(scale) * dpi() / 72.0).round();
+    column as i32 <= monitor.geometry().width()
 }
 
 /// Перерисовать открытую страницу на новой ступени.
@@ -3514,7 +3514,24 @@ fn measure_px() -> i32 {
     (f64::from(MEASURE) * zoom() * dpi() / 72.0).round() as i32
 }
 
-/// Кегль текста в пикселях. Нужен не окну, а разбору svg: MathJax печатает
+/// Колонка статьи: текст в меру и поле по бокам в кегль текста, как на
+/// телефоне. В широком окне поля не видно — колонка стоит посередине;
+/// нужно оно узкому: без него текст упирался в рамку окна. Поле — отступ
+/// самого виджета, а не текста в нём: внутри колонки, где картинки, таблицы
+/// и линейки цитат меряются мерой, ничего не сдвигается.
+fn fit_column(view: &gtk::TextView) {
+    let gutter = text_px().round() as i32;
+    view.set_width_request(measure_px());
+    view.set_margin_start(gutter);
+    view.set_margin_end(gutter);
+}
+
+/// Сколько окна занимает колонка вместе с полями.
+fn column_px() -> i32 {
+    measure_px() + 2 * text_px().round() as i32
+}
+
+/// Кегль текста в пикселях: поле колонки и разбор svg — MathJax печатает
 /// формулы в `ex`, и они обязаны быть ростом с текст — на любой ступени.
 fn text_px() -> f32 {
     (f64::from(TEXT_SIZE) * zoom() * dpi() / 72.0) as f32
@@ -3537,9 +3554,9 @@ fn dpi() -> f64 {
     }
 }
 
-/// Отдать адрес системному браузеру. Без внешних крейтов: это три команды,
-/// а каждая зависимость в проекте про безопасность стоит дороже трёх строк.
-/// Отдать адрес чужому браузеру. Отвечает, нашлось ли кому.
+/// Отдать адрес чужому браузеру. Отвечает, нашлось ли кому. Без внешних
+/// крейтов: это GIO и две команды, а каждая зависимость в проекте про
+/// безопасность стоит дороже трёх строк.
 ///
 /// Не `xdg-open` первым делом, и это поймано на живой системе: когда
 /// Brevier назначен браузером по умолчанию, `xdg-open` показывает на нас,
