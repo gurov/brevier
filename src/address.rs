@@ -6,7 +6,7 @@
 //! сейчас, а режим репозитория приезжает на M2 — до тех пор такой адрес
 //! честно открывается как обычная веб-страница.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 
@@ -309,7 +309,7 @@ impl Address {
         match self {
             Address::Web(url) => url.clone(),
             Address::Repo(repo) => repo.web_url(),
-            Address::File(path) => format!("file://{}", path.display()),
+            Address::File(path) => file_url(path),
             // Проверка — о странице, и снаружи ей соответствует сама страница.
             Address::Internal(Internal::Check(Some(url))) => url.clone(),
             // Браузеру — календарь Wayback: в нём видны все снимки страницы.
@@ -390,6 +390,13 @@ pub fn parse(input: &str) -> Result<Address, Error> {
         return Ok(search(query));
     }
 
+    // Путь Windows: `C:\notes.md`, `C:/notes.md`, `\\nas\docs\notes.md`.
+    // Буква диска иначе прочиталась бы схемой `c:`, а однобуквенных схем
+    // не бывает. Так файл приходит из Проводника — «Открыть с помощью».
+    if windows_path(text) {
+        return Ok(Address::File(PathBuf::from(text)));
+    }
+
     let spaced = text.contains(char::is_whitespace);
     if !spaced {
         if let Some(rest) = text.strip_prefix("gh:") {
@@ -426,9 +433,7 @@ pub fn parse(input: &str) -> Result<Address, Error> {
                     Err(Error::BadUrl(text.to_owned()))
                 }
             }
-            "file" => Ok(Address::File(PathBuf::from(
-                rest.trim_start_matches("//").to_owned(),
-            ))),
+            "file" => Ok(Address::File(file_path(text, rest))),
             // Своя схема — для своих страниц. Имя после двоеточия одно
             // на всю программу, поэтому неизвестное это опечатка, а не
             // адрес, который стоило бы попробовать загрузить.
@@ -613,10 +618,48 @@ fn split_scheme(text: &str) -> Option<(&str, &str)> {
     valid.then_some((scheme, rest))
 }
 
+/// `file://…` — путь, записанный URL-ом, как его отдают файловые менеджеры:
+/// пробел там `%20`, а на Windows впереди буква диска (`file:///C:/…`).
+/// Перевод в путь знает крейт `url`; без `//` (`file:notes.md`) — путь как есть.
+fn file_path(text: &str, rest: &str) -> PathBuf {
+    if rest.starts_with("//")
+        && let Some(path) = url::Url::parse(text)
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+    {
+        return path;
+    }
+    PathBuf::from(rest.trim_start_matches("//"))
+}
+
+/// Обратно: путь — URL-ом, для чужого браузера. На Windows путь пишется
+/// с буквой диска и обратными косыми, и склейка `file://` с ним URL-а
+/// не даёт.
+fn file_url(path: &Path) -> String {
+    if cfg!(windows)
+        && let Ok(url) = url::Url::from_file_path(path)
+    {
+        return url.to_string();
+    }
+    format!("file://{}", path.display())
+}
+
+/// Абсолютный путь Windows: буква диска с косой или сетевой `\\хост\…`.
+fn windows_path(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    drive || text.starts_with(r"\\")
+}
+
 fn looks_like_path(text: &str) -> bool {
     text.starts_with('/')
         || text.starts_with("./")
         || text.starts_with("../")
+        || text.starts_with(".\\")
+        || text.starts_with("..\\")
         || text.starts_with('~')
         || (FILE_KINDS.iter().any(|kind| text.ends_with(kind))
             && !text.contains(' ')
@@ -907,6 +950,46 @@ mod tests {
             parse("/home/reader/notes.md").unwrap(),
             Address::File(PathBuf::from("/home/reader/notes.md"))
         );
+    }
+
+    /// Буква диска — не схема: так файл приходит из Проводника.
+    #[test]
+    fn windows_paths_are_files() {
+        for path in [
+            r"C:\Users\reader\My Notes.md",
+            "c:/notes.md",
+            r"\\nas\docs\notes.md",
+            r".\notes.md",
+        ] {
+            assert_eq!(parse(path).unwrap(), Address::File(PathBuf::from(path)));
+        }
+        // Хост с портом остаётся хостом.
+        assert!(matches!(parse("c:8080").unwrap(), Address::Web(_)));
+    }
+
+    /// `file://` от файлового менеджера: пробел приходит `%20`.
+    #[cfg(unix)]
+    #[test]
+    fn file_urls_are_decoded() {
+        assert_eq!(
+            parse("file:///home/reader/My%20Notes.md").unwrap(),
+            Address::File(PathBuf::from("/home/reader/My Notes.md"))
+        );
+        assert_eq!(
+            parse("file:notes.md").unwrap(),
+            Address::File(PathBuf::from("notes.md"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn file_urls_carry_the_drive() {
+        let file = Address::File(PathBuf::from(r"C:\Users\reader\My Notes.md"));
+        assert_eq!(
+            parse("file:///C:/Users/reader/My%20Notes.md").unwrap(),
+            file
+        );
+        assert_eq!(file.external(), "file:///C:/Users/reader/My%20Notes.md");
     }
 
     #[test]

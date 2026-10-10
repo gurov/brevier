@@ -154,3 +154,21 @@ jobs:
       - name: The app builds
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug -Pabis=arm64-v8a
+
+  windows:
+    name: Windows — the core and the cli
+    # Окно под Windows собирает выпуск (release.yml, в MSYS2); здесь, на
+    # каждом пуше, — ядро и cli: путь с буквой диска, `file:///C:/…`, имена
+    # файлов. На Linux такого не видно, а сломать это легко.
+    runs-on: windows-latest
+    steps:
+      # Тексты и эталоны сверяются побайтно: переводом строк на CRLF git
+      # сломал бы их все разом.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - run: cargo clippy --all-targets --features save,typeset -- -D warnings
+      - run: cargo test --features save,typeset

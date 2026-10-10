@@ -38,7 +38,7 @@ mostly in Russian; write yours in whatever language you are most exact in.
   markup, that test fails instead of the reader.
 - **`corpus/`** — the regression corpus, its expected outputs and the scripts that measure.
 - **`packaging/`** — the Flatpak manifest, the offline crate list, the tarball, the desktop
-  entry, the metainfo and the release notes.
+  entry, the metainfo, the Windows build (`packaging/windows/`) and the release notes.
 
 Each module opens with a comment on why it is the way it is. Much of what looks
 superfluous has been decided, with its cost; read that comment before simplifying.
@@ -74,6 +74,27 @@ update-desktop-database ~/.local/share/applications
 The icon ships inside the binary, so on X11 the window wears it with nothing installed; a
 launcher menu and a Wayland compositor take it from the desktop entry and the app id
 instead.
+
+### Windows
+
+The window is built in [MSYS2](https://www.msys2.org/), in its UCRT64 environment, which
+provides GTK 4, Rust and NSIS:
+
+```sh
+pacman -S zip mingw-w64-ucrt-x86_64-{gtk4,gtk-update-icon-cache,rust,gcc,pkgconf,nsis}
+packaging/windows/build.sh            # the installer and the zip, in packaging/dist
+```
+
+GTK on Windows is a folder of DLLs next to the executables, so a release ships a folder
+rather than one `.exe`: an installer that puts it in `%LOCALAPPDATA%\Programs\Brevier`
+for the current user, with no administrator rights, and the same folder as a zip that
+runs from anywhere. The script copies every DLL the executables import, and the data GTK
+looks for beside them: its settings schemas, the Adwaita icons and the licenses of what it
+ships. The same script cross-compiles from Linux when told where GTK for Windows is (see
+its header); Wine runs the result, but draws text badly, so the type is judged on Windows.
+
+The cli alone builds anywhere Rust does: `cargo build --release` on Windows needs nothing
+else.
 
 ### The Android app
 
@@ -159,7 +180,8 @@ checksum in `packaging/cargo-sources.json`.
 
 The mark is `assets/brevier.svg`, and every raster icon is drawn from it: after changing
 the mark, run `packaging/icons.py` (Inkscape and Pillow), which redraws the Android
-launcher icons at every density and the store icon in `fastlane/`. It also refuses a mark
+launcher icons at every density, the store icon in `fastlane/` and the Windows icon
+`packaging/windows/brevier.ico`. It also refuses a mark
 that is not an outline, not square, or whose gradient is not flat — what saving from
 Inkscape tends to bring back; CI runs the same check with `--check`.
 
@@ -169,8 +191,10 @@ notes in `packaging/notes/vX.Y.Z.md`, a store changelog in
 `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` (`X·10000 + Y·100 + Z`), the
 same number as `versionCode` in `android/app/build.gradle.kts` (F-Droid reads it there; the
 build checks it against the version), and the version in the README's download links; CI
-checks the tag against `Cargo.toml`, builds the tarball, the Flatpak and the signed APK, and
-publishes them with `SHA256SUMS`. A published tag is never moved: something newer is a new
+checks the tag against `Cargo.toml`, builds the tarball, the Flatpak, the signed APK and the
+Windows installer and zip, and publishes them with `SHA256SUMS`. Before the files are
+published, the Windows job installs the installer on a clean Windows, starts the window and
+uninstalls it again; a manual run of the workflow keeps a screenshot of that window. A published tag is never moved: something newer is a new
 version.
 
 ## License

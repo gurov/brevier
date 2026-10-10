@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Растровые иконки из знака: Android (все плотности) и витрина F-Droid.
+"""Растровые иконки из знака: Android (все плотности), витрина F-Droid и .ico для Windows.
 
     packaging/icons.py                 # проверить assets/brevier.svg и перерисовать всё
     packaging/icons.py --check         # только проверить знак, ничего не писать
@@ -21,7 +21,10 @@
   радиус 8.4 dp, холст знака 32.5 dp по центру (дробный пиксель
   отбрасывается — так были сделаны прежние, проверено на всех плотностях);
 - витрина (`fastlane/…/icon.png`, 512 px): бумага во весь квадрат, холст
-  в той же доле видимой части, что на рабочем столе, — 56 dp из 72.
+  в той же доле видимой части, что на рабочем столе, — 56 dp из 72;
+- Windows (`packaging/windows/brevier.ico`): сам знак, как на Linux, где
+  иконка — это SVG; каждый размер отрисован отдельно, а не ужат из 256,
+  иначе 16 px в заголовке окна выходят мылом.
 """
 import os
 import re
@@ -33,6 +36,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SVG = os.path.join(ROOT, 'assets', 'brevier.svg')
 RES = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'res')
 STORE = os.path.join(ROOT, 'fastlane', 'metadata', 'android', 'en-US', 'images', 'icon.png')
+ICO = os.path.join(ROOT, 'packaging', 'windows', 'brevier.ico')
+ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 PAPER = (0xfa, 0xf5, 0xea, 255)
 DENSITIES = {'mdpi': 1.0, 'hdpi': 1.5, 'xhdpi': 2.0, 'xxhdpi': 3.0, 'xxxhdpi': 4.0}
 
@@ -95,6 +100,11 @@ def store(tmp):
     return centered(Image.new('RGBA', (512, 512), PAPER), render(round(512 * 56 / 72), tmp))
 
 
+def windows(tmp):
+    images = [render(px, tmp) for px in ICO_SIZES]
+    images[-1].save(ICO, sizes=[image.size for image in images], append_images=images[:-1])
+
+
 def main():
     problems = check(open(SVG, encoding='utf-8').read())
     if problems:
@@ -109,7 +119,9 @@ def main():
             foreground(scale, tmp).save(os.path.join(folder, 'ic_launcher_foreground.png'), optimize=True)
             legacy(scale, tmp).save(os.path.join(folder, 'ic_launcher.png'), optimize=True)
         store(tmp).convert('RGB').save(STORE, optimize=True)
-    print('android/app/src/main/res/mipmap-*/ic_launcher{,_foreground}.png, fastlane …/icon.png')
+        windows(tmp)
+    print('android/app/src/main/res/mipmap-*/ic_launcher{,_foreground}.png, fastlane …/icon.png,'
+          ' packaging/windows/brevier.ico')
 
 
 if __name__ == '__main__':

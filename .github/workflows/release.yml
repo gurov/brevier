@@ -1,7 +1,8 @@
 name: Release
 
 # Выпуск: по тегу vX.Y.Z собрать то, что люди скачивают и ставят, — архив
-# для Linux, пакет Flatpak и APK для Android — и выложить релизом на GitHub.
+# для Linux, пакет Flatpak, APK для Android, установщик и zip для Windows —
+# и выложить релизом на GitHub.
 # Ручной запуск (Run workflow) собирает всё то же без выкладки: так проверяют,
 # что выпуск соберётся, до того как поставлен тег. Старый тег не трогаем:
 # свежее — это новая версия, а не перезапись выпущенного.
@@ -125,6 +126,78 @@ jobs:
           path: android/app/build/outputs/apk/release/brevier-*.apk
           if-no-files-found: error
 
+  # Windows: GTK из MSYS2 (UCRT64) — тот, на котором выходят под Windows
+  # GIMP и Inkscape; рядом с ним Rust и NSIS из того же репозитория. Что
+  # собирается и почему — в шапке packaging/windows/build.sh.
+  windows:
+    name: Windows — installer and zip
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      # Тексты, вшитые в бинарник, — с LF, как в репозитории.
+      - run: git config --global core.autocrlf false
+        shell: pwsh
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            zip
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-gtk-update-icon-cache
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-nsis
+      - run: packaging/windows/build.sh "$PWD/dist"
+      # Проверка на живой Windows: поставить установщиком, как поставит
+      # читатель, спросить cli, поднять окно с файлом по пути с буквой
+      # диска и убедиться, что оно живо; потом удалить. Снимок экрана —
+      # единственный способ увидеть шрифты на настоящей Windows: Wine
+      # рисует текст по-своему.
+      - name: Install it, start the window, uninstall it
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\*-setup.exe).FullName
+          Start-Process -Wait -FilePath $setup -ArgumentList '/S'
+          $bin = "$env:LOCALAPPDATA\Programs\Brevier\bin"
+          & "$bin\brevier.exe" --version
+          if ($LASTEXITCODE) { exit 1 }
+          & "$bin\brevier.exe" "$PWD\README.md" | Select-Object -First 5
+          if ($LASTEXITCODE) { exit 1 }
+          $ui = Start-Process -PassThru -FilePath "$bin\brevier-ui.exe" -ArgumentList "`"$PWD\README.md`""
+          Start-Sleep -Seconds 20
+          if ($ui.HasExited) { Write-Error "brevier-ui exited: $($ui.ExitCode)"; exit 1 }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          New-Item -ItemType Directory -Force screenshot | Out-Null
+          $shot.Save("$PWD\screenshot\windows.png")
+          Stop-Process -Id $ui.Id
+          Start-Process -Wait -FilePath "$env:LOCALAPPDATA\Programs\Brevier\uninstall.exe" -ArgumentList '/S'
+          Start-Sleep -Seconds 5
+          if (Test-Path "$bin\brevier-ui.exe") { Write-Error 'the uninstaller left the program'; exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*-setup.exe
+            dist/*.zip
+          if-no-files-found: error
+      # Снимок — только при ручном запуске: по тегу все артефакты уходят
+      # в релиз, а снимку там не место.
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type != 'tag' && always()
+        with:
+          name: windows-screenshot
+          path: screenshot/
+          if-no-files-found: ignore
+
   # F-Droid собирает APK сам и публикует наш, подписанный, только если его
   # сборка совпала с нашей побайтно; не совпала — версия в F-Droid не выйдет.
   # Здесь та же проверка: другой каталог, другой дом cargo, сборка без подписи
@@ -173,7 +246,7 @@ jobs:
 
   publish:
     name: publish the release
-    needs: [version, tarball, flatpak, android]
+    needs: [version, tarball, flatpak, android, windows]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:

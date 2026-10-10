@@ -91,6 +91,7 @@ dependencies = [
  "image",
  "jni",
  "lz4_flex",
+ "pango",
  "resvg",
  "roxmltree 0.21.1",
  "rustls",

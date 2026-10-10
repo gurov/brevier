@@ -8,6 +8,11 @@
 //! Тулкит живёт только здесь. Разбор адреса, история, оглавление и тексты
 //! ошибок лежат в ядре и про GTK не знают ничего.
 
+// На Windows окно — оконная программа, а не консольная: иначе запуск из меню
+// «Пуск» поднимал бы рядом пустую консоль. `--help` и `--version` при этом
+// видны, только если вывод перенаправлен; в консоли отвечает `brevier.exe`.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -154,6 +159,9 @@ fn main() -> glib::ExitCode {
     }
 
     brevier::init_crypto();
+    // fontconfig читает свой конфиг при первой отрисовке, поэтому до GTK;
+    // на Windows шрифты отдаются Pango, а её карта шрифтов есть только после.
+    #[cfg(not(windows))]
     use_bundled_fonts();
 
     let app = Application::builder()
@@ -167,6 +175,8 @@ fn main() -> glib::ExitCode {
     // недельного кэша страниц: второй экземпляр сюда не доходит.
     app.connect_startup(|_| {
         use_bundled_icon();
+        #[cfg(windows)]
+        use_bundled_fonts();
         std::thread::spawn(|| {
             brevier::cache::Cache::open().prune();
             // Архив (#8): копия живёт, пока на неё указывает журнал, а у
@@ -3538,9 +3548,13 @@ fn dpi() -> f64 {
 /// список обработчиков `https` и берём первый, который не мы; порядок
 /// задаёт сама система, и первым в нём идёт её выбор по умолчанию.
 ///
-/// `xdg-open` остаётся запасным путём — и единственным на macOS и Windows,
-/// где списка приложений GIO не ведёт. Там то же кольцо возможно, и это
-/// известный предел, а не недосмотр.
+/// `xdg-open` остаётся запасным путём. На macOS списка приложений GIO
+/// не ведёт, и `open` там единственный путь; то же кольцо там возможно,
+/// и это известный предел, а не недосмотр.
+///
+/// На Windows запасной путь — оболочка (`ShellExecuteW`), а не `cmd /C
+/// start`: `cmd` читает `&` в адресе как конец команды, и ссылка со страницы
+/// стала бы командой.
 fn open_in_system_browser(target: &str) -> bool {
     // В песочнице наружу ведёт только портал, и спрашивать там некого:
     // список приложений — это список приложений самой песочницы, а его
@@ -3559,18 +3573,85 @@ fn open_in_system_browser(target: &str) -> bool {
         return true;
     }
 
-    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
-        ("open", &[])
-    } else if cfg!(target_os = "windows") {
-        ("cmd", &["/C", "start", ""])
-    } else {
-        ("xdg-open", &[])
+    #[cfg(windows)]
+    {
+        shell_open(target)
+    }
+    #[cfg(not(windows))]
+    {
+        let program = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        std::process::Command::new(program)
+            .arg(target)
+            .spawn()
+            .is_ok()
+    }
+}
+
+/// Отдать адрес оболочке Windows — так, как это делает там любая программа:
+/// откроется браузер по умолчанию. GLib на этом месте
+/// (`launch_default_for_uri`) на живой Windows отвечала отказом.
+///
+/// Оболочка не только открывает, но и запускает: `.exe`, `.bat`, `.lnk`
+/// или чужой протокол из ссылки стали бы программой. Поэтому ей уходят
+/// только адреса сайтов и файлы тех видов, что Brevier читает и показывает
+/// сам.
+#[cfg(windows)]
+fn shell_open(target: &str) -> bool {
+    use std::ffi::c_void;
+
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn ShellExecuteW(
+            window: *mut c_void,
+            verb: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> isize;
+    }
+
+    const KINDS: &[&str] = &[
+        ".md",
+        ".markdown",
+        ".rss",
+        ".atom",
+        ".xml",
+        ".json",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".avif",
+    ];
+    let lower = target.to_ascii_lowercase();
+    let web = lower.starts_with("http://") || lower.starts_with("https://");
+    if !web && !KINDS.iter().any(|kind| lower.ends_with(kind)) {
+        return false;
+    }
+
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let (verb, file) = (wide("open"), wide(target));
+    // Безопасно: обе строки живут до конца вызова и кончаются нулём, прочие
+    // указатели пустые, как разрешает документация. 1 — SW_SHOWNORMAL;
+    // успех — ответ больше 32, так у ShellExecute заведено.
+    let code = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
     };
-    std::process::Command::new(program)
-        .args(args)
-        .arg(target)
-        .spawn()
-        .is_ok()
+    code > 32
 }
 
 /// Живём ли мы в песочнице flatpak.
@@ -3582,12 +3663,21 @@ fn sandboxed() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
-/// Первый зарегистрированный обработчик ссылок, который не мы.
+/// Первый зарегистрированный обработчик ссылок, который не мы. Себя узнаём
+/// и по ярлыку, и по бинарнику: на Windows ярлыков нет, там приложение —
+/// это его exe.
 fn other_browser() -> Option<gio::AppInfo> {
     let ours = format!("{APP_ID}.desktop");
+    let us = |app: &gio::AppInfo| {
+        app.id().is_some_and(|id| id.as_str() == ours)
+            || app
+                .executable()
+                .file_stem()
+                .is_some_and(|stem| stem.eq_ignore_ascii_case("brevier-ui"))
+    };
     gio::AppInfo::all_for_type("x-scheme-handler/https")
         .into_iter()
-        .find(|app| app.supports_uris() && app.id().is_some_and(|id| id.as_str() != ours))
+        .find(|app| app.supports_uris() && !us(app))
 }
 
 /// Куда окно выкладывает то, что везёт в себе: гарнитуры и иконку.
@@ -3641,54 +3731,14 @@ fn use_bundled_icon() {
 /// который включает системный и добавляет нашу папку. Всё остаётся
 /// внутри кэша приложения.
 ///
-/// На Windows и macOS механизм другой (`AddFontResourceEx`,
-/// `CTFontManagerRegisterFontsForURL`) — это отдельная работа при упаковке.
+/// На macOS механизм другой (`CTFontManagerRegisterFontsForURL`) — это
+/// отдельная работа при упаковке.
+#[cfg(not(windows))]
 fn use_bundled_fonts() {
-    const FONTS: [(&str, &[u8]); 7] = [
-        (
-            "NotoSans-Light.ttf",
-            include_bytes!("../../assets/fonts/NotoSans-Light.ttf"),
-        ),
-        (
-            "NotoSans-Regular.ttf",
-            include_bytes!("../../assets/fonts/NotoSans-Regular.ttf"),
-        ),
-        (
-            "NotoSans-Italic.ttf",
-            include_bytes!("../../assets/fonts/NotoSans-Italic.ttf"),
-        ),
-        (
-            "NotoSans-Medium.ttf",
-            include_bytes!("../../assets/fonts/NotoSans-Medium.ttf"),
-        ),
-        (
-            "NotoSans-Bold.ttf",
-            include_bytes!("../../assets/fonts/NotoSans-Bold.ttf"),
-        ),
-        (
-            "NotoSans-BoldItalic.ttf",
-            include_bytes!("../../assets/fonts/NotoSans-BoldItalic.ttf"),
-        ),
-        (
-            "NotoSansMono-Regular.ttf",
-            include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf"),
-        ),
-    ];
-
-    let home = unpacked();
-    let fonts = home.join("fonts");
-    if std::fs::create_dir_all(&fonts).is_err() {
+    let Some(fonts) = unpack_fonts() else {
         return;
-    }
-    for (name, bytes) in FONTS {
-        let path = fonts.join(name);
-        let stale = std::fs::metadata(&path).map(|meta| meta.len() as usize != bytes.len());
-        if stale.unwrap_or(true) && std::fs::write(&path, bytes).is_err() {
-            return;
-        }
-    }
-
-    let config = home.join("fonts.conf");
+    };
+    let config = unpacked().join("fonts.conf");
     let text = format!(
         "<?xml version=\"1.0\"?>\n\
          <!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n\
@@ -3708,6 +3758,73 @@ fn use_bundled_fonts() {
         std::env::set_var("FONTCONFIG_FILE", &config);
     }
 }
+
+/// То же на Windows. GTK там рисует текст через DirectWrite, и fontconfig
+/// в этом не участвует; файлы отдаём самой карте шрифтов Pango — той,
+/// что достаётся каждому виджету. Поэтому и зовётся после подъёма GTK.
+#[cfg(windows)]
+fn use_bundled_fonts() {
+    use pango::prelude::FontMapExt;
+
+    let Some(fonts) = unpack_fonts() else {
+        return;
+    };
+    let Some(map) = gtk::Label::new(None).pango_context().font_map() else {
+        return;
+    };
+    for (name, _) in FONTS {
+        if let Err(error) = map.add_font_file(fonts.join(name)) {
+            eprintln!("brevier-ui: the bundled font {name}: {error}");
+        }
+    }
+}
+
+/// Выложить гарнитуры в кэш: шрифт подключается файлом, а не байтами.
+/// Отвечает папкой, когда все файлы на месте.
+fn unpack_fonts() -> Option<std::path::PathBuf> {
+    let fonts = unpacked().join("fonts");
+    std::fs::create_dir_all(&fonts).ok()?;
+    for (name, bytes) in FONTS {
+        let path = fonts.join(name);
+        let stale = std::fs::metadata(&path).map(|meta| meta.len() as usize != bytes.len());
+        if stale.unwrap_or(true) {
+            std::fs::write(&path, bytes).ok()?;
+        }
+    }
+    Some(fonts)
+}
+
+/// Гарнитуры, которые окно везёт в себе: Noto Sans и Noto Sans Mono (OFL).
+const FONTS: [(&str, &[u8]); 7] = [
+    (
+        "NotoSans-Light.ttf",
+        include_bytes!("../../assets/fonts/NotoSans-Light.ttf"),
+    ),
+    (
+        "NotoSans-Regular.ttf",
+        include_bytes!("../../assets/fonts/NotoSans-Regular.ttf"),
+    ),
+    (
+        "NotoSans-Italic.ttf",
+        include_bytes!("../../assets/fonts/NotoSans-Italic.ttf"),
+    ),
+    (
+        "NotoSans-Medium.ttf",
+        include_bytes!("../../assets/fonts/NotoSans-Medium.ttf"),
+    ),
+    (
+        "NotoSans-Bold.ttf",
+        include_bytes!("../../assets/fonts/NotoSans-Bold.ttf"),
+    ),
+    (
+        "NotoSans-BoldItalic.ttf",
+        include_bytes!("../../assets/fonts/NotoSans-BoldItalic.ttf"),
+    ),
+    (
+        "NotoSansMono-Regular.ttf",
+        include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf"),
+    ),
+];
 
 /// Ссылка под точкой окна, если она там есть.
 /// Перейти по ссылке статьи — по клику или с клавиатуры. Ссылка внутрь

@@ -23,7 +23,7 @@ path = "src/ui/gtk.rs"
 required-features = ["ui"]
 
 [features]
-ui = ["dep:gtk", "typeset", "images", "save"]
+ui = ["dep:gtk", "dep:pango", "typeset", "images", "save"]
 # Типографика окна: переносы по языку. Отдельной фичей — cli и корпус
 # в ней не нуждаются, а паттерны переносов лишний вес в их бинарнике.
 typeset = ["dep:hyphenation"]
@@ -67,3 +67,11 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2"], 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 rustls-platform-verifier = "0.7"
+
+# Windows: гарнитуры из комплекта окно отдаёт самой Pango
+# (`pango_font_map_add_font_file`, 1.56) — fontconfig, через который это
+# делается на Linux, там шрифтов не раздаёт. Тот же крейт, что внутри `gtk`,
+# только с фичей 1.56. Не для всех целей: на Linux она требовала бы Pango
+# 1.56 при сборке, а окно обещает GTK 4.10.
+[target.'cfg(windows)'.dependencies]
+pango = { version = "0.22", features = ["v1_56"], optional = true }

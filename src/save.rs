@@ -210,8 +210,25 @@ fn slug(title: &str) -> String {
 
     if out.is_empty() {
         "article".to_owned()
+    } else if device(&out) {
+        format!("{out}-article")
     } else {
         out
+    }
+}
+
+/// Имя устройства Windows: `CON.md`, `aux.zip` там не файл, а консоль
+/// и порт — в любом регистре и с любым расширением. Статья с заголовком
+/// «Con» на Linux сохранилась бы, но с флешки на Windows уже не открылась бы.
+fn device(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    match upper.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" => true,
+        _ => {
+            (upper.starts_with("COM") || upper.starts_with("LPT"))
+                && upper.len() == 4
+                && upper.ends_with(|c: char| ('1'..='9').contains(&c))
+        }
     }
 }
 
@@ -227,6 +244,15 @@ mod tests {
         );
         assert_eq!(slug("Подводные камни: часть 2"), "Подводные-камни-часть-2");
         assert_eq!(slug("***"), "article");
+    }
+
+    #[test]
+    fn a_windows_device_name_is_not_a_file_name() {
+        assert_eq!(slug("Con"), "Con-article");
+        assert_eq!(slug("nul"), "nul-article");
+        assert_eq!(slug("COM1"), "COM1-article");
+        assert_eq!(slug("Aux: a review"), "Aux-a-review");
+        assert_eq!(slug("COM10"), "COM10");
     }
 
     #[test]
