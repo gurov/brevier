@@ -3838,19 +3838,26 @@ fn follow_link(
     target: &str,
     aside: bool,
 ) {
-    if !aside {
+    let from = {
         let mut borrowed = state.borrow_mut();
         let Some(tab) = borrowed.find(id) else { return };
-        let here = tab.history.current().map(Address::display);
-        if let Some(fragment) = page::fragment_of(target, here.as_deref())
+        let from = tab.history.current().cloned();
+        let here = from.as_ref().map(Address::display);
+        if !aside
+            && let Some(fragment) = page::fragment_of(target, here.as_deref())
             && jump(view, &tab.anchors, &fragment)
         {
             return;
         }
-    }
+        from
+    };
     let Ok(address) = address::parse(target) else {
         return;
     };
+    if !address::may_follow(from.as_ref(), &address) {
+        notice(ui, "A page from the web can't open files on your computer");
+        return;
+    }
     if aside {
         new_tab(ui, state, Some(address));
     } else {

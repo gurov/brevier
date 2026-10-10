@@ -618,10 +618,20 @@ fn split_scheme(text: &str) -> Option<(&str, &str)> {
     valid.then_some((scheme, rest))
 }
 
+/// Можно ли со страницы `from` перейти по ссылке на `to`. Страница из сети
+/// файлов компьютера не открывает — как и в браузерах: ссылка на файл
+/// в чужой странице — это чужой выбор того, что читать с диска, а на
+/// Windows `file:////хост/…` и `\\хост\…` ведут на чужой сетевой диск,
+/// которому Windows сама отдаёт хеш пароля.
+pub fn may_follow(from: Option<&Address>, to: &Address) -> bool {
+    !(matches!(from, Some(Address::Web(_) | Address::Repo(_))) && matches!(to, Address::File(_)))
+}
+
 /// `file://…` — путь, записанный URL-ом, как его отдают файловые менеджеры:
 /// пробел там `%20`, а на Windows впереди буква диска (`file:///C:/…`).
 /// Перевод в путь знает крейт `url`; без `//` (`file:notes.md`) — путь как есть.
-fn file_path(text: &str, rest: &str) -> PathBuf {
+/// `rest` — всё после `file:`.
+pub(crate) fn file_path(text: &str, rest: &str) -> PathBuf {
     if rest.starts_with("//")
         && let Some(path) = url::Url::parse(text)
             .ok()
@@ -979,6 +989,22 @@ mod tests {
             parse("file:notes.md").unwrap(),
             Address::File(PathBuf::from("notes.md"))
         );
+    }
+
+    #[test]
+    fn a_web_page_does_not_open_files() {
+        let web = parse("https://example.com/a").unwrap();
+        let repo = parse("gh:rust-lang/book").unwrap();
+        let file = parse("/home/reader/notes.md").unwrap();
+        let unc = parse(r"\\attacker\share\notes.md").unwrap();
+        let history = parse("brevier:history").unwrap();
+        assert!(!may_follow(Some(&web), &file));
+        assert!(!may_follow(Some(&web), &unc));
+        assert!(!may_follow(Some(&repo), &file));
+        assert!(may_follow(Some(&web), &repo));
+        assert!(may_follow(Some(&file), &file));
+        assert!(may_follow(Some(&history), &file));
+        assert!(may_follow(None, &file));
     }
 
     #[cfg(windows)]

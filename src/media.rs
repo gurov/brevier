@@ -112,8 +112,17 @@ pub fn resolve(base: &Address, src: &str) -> Option<Source> {
     if src.is_empty() {
         return None;
     }
-    if let Some(rest) = src.strip_prefix("file://") {
-        return Some(Source::File(PathBuf::from(rest)));
+    // Файл компьютера — только из документа с диска. Страница из сети
+    // на диск не ходит: на Windows `file:////хост/…` — это чужой сетевой
+    // диск, и одного показа страницы хватило бы, чтобы Windows отдала ему
+    // хеш пароля.
+    if let Some(rest) = src.strip_prefix("file:")
+        && rest.starts_with("//")
+    {
+        return match base {
+            Address::File(_) => Some(Source::File(crate::address::file_path(src, rest))),
+            _ => None,
+        };
     }
     if src.starts_with("http://") || src.starts_with("https://") {
         return Some(Source::Web(src.to_owned()));
@@ -476,6 +485,23 @@ mod tests {
         assert_eq!(
             resolve(&web("https://e.com/posts/one/"), "/img/a.png"),
             Some(Source::Web("https://e.com/img/a.png".to_owned()))
+        );
+    }
+
+    /// Страница из сети не читает картинками диск и чужие сетевые шары.
+    #[test]
+    fn only_a_local_document_reaches_files() {
+        assert_eq!(resolve(&web("https://e.com/a"), "file:///etc/passwd"), None);
+        assert_eq!(
+            resolve(&web("https://e.com/a"), "file:////attacker/share/x.png"),
+            None
+        );
+        assert_eq!(
+            resolve(
+                &Address::File(PathBuf::from("/docs/readme.md")),
+                "file:///docs/My%20Chart.png"
+            ),
+            Some(Source::File(PathBuf::from("/docs/My Chart.png")))
         );
     }
 
