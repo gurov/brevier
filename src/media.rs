@@ -265,6 +265,15 @@ fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
         // Кегль страницы: от него считаются `em` и `ex`, а формулы MathJax
         // размечены именно ими.
         font_size: look.font_size,
+        // `<image href>` внутри схемы — только `data:`. Обычный обработчик
+        // usvg читает любой путь с диска как есть: схема с чужой страницы
+        // вставила бы в себя файл читателя, `/dev/zero` съел бы всю память,
+        // а на Windows `\\хост\шара\…` — чужой сетевой диск, которому Windows
+        // сама отдаёт хеш пароля, стоит странице открыться.
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: usvg::ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| None),
+        },
         ..Default::default()
     };
     let tree = usvg::Tree::from_data(bytes, &options).map_err(|e| Error::Media(e.to_string()))?;
@@ -520,6 +529,29 @@ mod tests {
             ),
             Some(Source::File(PathBuf::from(r"C:\docs\My Chart.png")))
         );
+    }
+
+    /// Схема из сети не достаёт картинкой файл с диска.
+    #[test]
+    fn a_vector_does_not_read_files() {
+        let path = std::env::temp_dir().join(format!("brevier-red-{}.svg", std::process::id()));
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#ff0000"/></svg>"##,
+        )
+        .unwrap();
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="10" height="10"><image xlink:href="{}" width="10" height="10"/></svg>"#,
+            path.display()
+        );
+        let raster = decode(
+            svg.as_bytes(),
+            Some("image/svg+xml"),
+            look(10, Fit::Natural),
+        )
+        .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(raster.rgba.chunks(4).all(|pixel| pixel[0..3] == PAPER));
     }
 
     #[test]
