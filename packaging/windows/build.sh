@@ -36,6 +36,11 @@ stage="$work/Brevier"
 native() {
     if command -v cygpath > /dev/null; then cygpath -m "$1"; else printf '%s\n' "$1"; fi
 }
+# То же с обратными косыми: makensis под Windows отделяет маску файлов
+# от папки только по ним, и `D:/…/Brevier/*` у него — «нет файлов».
+backslashed() {
+    if command -v cygpath > /dev/null; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
+}
 
 mkdir -p "$out" "$work"
 out=$(CDPATH= cd -- "$out" && pwd)
@@ -179,7 +184,7 @@ EOF
 
 rm -f "$out/$name.zip" "$out/$name-setup.exe"
 (cd "$work" && zip -q -r -9 "$(native "$out/$name.zip")" Brevier)
-makensis -V2 -DVERSION="$version" -DSTAGE="$(native "$stage")" \
+makensis -V2 -DVERSION="$version" -DSTAGE="$(backslashed "$stage")" \
     -DOUTFILE="$(native "$out/$name-setup.exe")" "$(native "$root/packaging/windows/brevier.nsi")"
 
 echo "$out/$name-setup.exe"

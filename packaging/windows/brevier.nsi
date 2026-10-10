@@ -66,7 +66,7 @@ Section
     RMDir /r "$INSTDIR\licenses"
 
     SetOutPath "$INSTDIR"
-    File /r "${STAGE}/*"
+    File /r "${STAGE}\*"
     WriteUninstaller "$INSTDIR\uninstall.exe"
     CreateShortcut "$SMPROGRAMS\Brevier.lnk" "${EXE}"
 
