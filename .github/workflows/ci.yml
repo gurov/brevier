@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Токену CI довольно читать: сборочные скрипты зависимостей работают с ним
+# же, и писать в репозиторий им незачем.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -145,6 +150,13 @@ jobs:
       # в одно целое под чужую платформу.
       - name: The core links into a shared library for arm64
         run: sh android/core.sh "$RUNNER_TEMP/core" arm64-v8a
+      # Обёртка Gradle — исполняемый jar в репозитории: сверяем его с тем,
+      # что выкладывает Gradle для этой версии, прежде чем запускать.
+      - name: The Gradle wrapper is Gradle's own
+        run: |
+          version=$(sed -n 's|.*/gradle-\(.*\)-bin\.zip|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
+          sum=$(curl -sfL "https://services.gradle.org/distributions/gradle-$version-wrapper.jar.sha256")
+          echo "$sum  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c
       # Потом само приложение (`android/`): Kotlin поверх того же ядра.
       # Одна ABI — телефонная; эмуляторную x86_64 CI не гоняет.
       - uses: actions/setup-java@v4
