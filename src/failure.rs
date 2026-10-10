@@ -121,6 +121,11 @@ pub fn describe(error: &Error) -> Failure {
             format!("The body did not fit the {limit} byte limit."),
             true,
         ),
+        Error::TooDeep(limit) => failure(
+            "The page is nested too deeply",
+            format!("Its markup goes more than {limit} levels deep. Real pages never do, so Brevier stops here rather than hang or crash."),
+            true,
+        ),
         Error::EmptyExtraction => failure(
             "There is no article on this page",
             "That is how sites assembled by JavaScript look, and pages with nothing to read but a form. Brevier shows an article or a list of links, or says plainly that there is neither."

@@ -119,6 +119,12 @@ const RULES: &[Rule] = &[
         advice: "The response is larger than a document should be; a reader stops at a size limit.",
     },
     Rule {
+        id: "access-too-deep",
+        stage: Stage::Access,
+        cost: Cost::Cap(0),
+        advice: "Flatten the wrappers: no document needs hundreds of nested elements, and a reader stops at a depth limit.",
+    },
+    Rule {
         id: "access-redirects",
         stage: Stage::Access,
         cost: Cost::Deduct(3),
@@ -358,6 +364,10 @@ fn access_finding(error: &Error) -> Option<Finding> {
             "access-too-large",
             format!("the response is over the {limit} byte limit"),
         ),
+        Error::TooDeep(limit) => (
+            "access-too-deep",
+            format!("the markup nests more than {limit} levels deep"),
+        ),
         Error::Network(inner) => {
             let text = inner.to_string();
             if text.to_ascii_lowercase().contains("certificate") {
@@ -406,6 +416,15 @@ fn served(url: &str, body: &str, kind: &'static str, moved: Option<Finding>) -> 
 }
 
 fn from_html(html: &str, url: &str, access: Access) -> Report {
+    // `--check --stdin` идёт сюда мимо сети, где глубину меряет `fetch`.
+    if crate::nesting::html_too_deep(html) {
+        let limit = crate::nesting::MAX_DEPTH;
+        let finding = note(
+            "access-too-deep",
+            format!("the markup nests more than {limit} levels deep"),
+        );
+        return from_findings(url.to_owned(), vec![finding], false, None);
+    }
     let doc = Document::from(html);
     let access_measured = matches!(access, Access::Measured(_));
     let mut findings = Vec::new();

@@ -14,7 +14,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use comrak::nodes::NodeValue;
+use comrak::nodes::{AstNode, NodeValue};
 use comrak::{Arena, Options};
 use htmd::element_handler::{HandlerResult, Handlers};
 use htmd::options::{
@@ -326,6 +326,11 @@ fn with_thumbs(md: &str, thumbs: &HashMap<String, String>) -> String {
 /// Страница целиком, без Readability (`--raw`). Нужен, чтобы отличать
 /// «извлечение промахнулось» от «конвертация промахнулась».
 pub fn from_html(html: &str) -> Result<String, Error> {
+    // Сюда приходит и чужой HTML мимо извлечения: запись ленты, вставка
+    // HTML в README. htmd обходит дерево рекурсивно.
+    if crate::nesting::html_too_deep(html) {
+        return Err(Error::TooDeep(crate::nesting::MAX_DEPTH));
+    }
     Ok(tidy(&to_markdown(html)?))
 }
 
@@ -1389,7 +1394,7 @@ fn is_separator(cell: &str) -> bool {
 /// идеально, а все ссылки с неё вести в SPA, пейволлы и PDF.
 pub fn links(md: &str) -> Vec<String> {
     let arena = Arena::new();
-    let root = comrak::parse_document(&arena, md, &options());
+    let root = parse(&arena, md);
 
     let mut seen = Vec::new();
     for node in root.descendants() {
@@ -1410,7 +1415,7 @@ pub fn links(md: &str) -> Vec<String> {
 /// замена ссылки при сохранении, и «поправленный» адрес там не совпадёт.
 pub fn images(md: &str) -> Vec<String> {
     let arena = Arena::new();
-    let root = comrak::parse_document(&arena, md, &options());
+    let root = parse(&arena, md);
 
     let mut seen: Vec<String> = Vec::new();
     for node in root.descendants() {
@@ -1738,6 +1743,57 @@ pub fn front_matter_title(md: &str) -> Option<String> {
     })
 }
 
+/// Разобрать markdown — всякий раз через это место, а не `parse_document`
+/// напрямую. Цитату глубже [`MAX_QUOTES`] уровней в строке срезаем до него
+/// до разбора: comrak с нашими расширениями на вложенных цитатах работает
+/// за квадрат (сто тысяч `>`, сто килобайт, — девять секунд, мегабайт —
+/// больше минуты), а глубже окно всё равно не рисует (`page::MAX_NESTING`).
+pub fn parse<'a>(arena: &'a Arena<'a>, md: &str) -> &'a AstNode<'a> {
+    comrak::parse_document(arena, &shallow(md), &options())
+}
+
+/// Сколько уровней цитаты в строке оставляем.
+const MAX_QUOTES: usize = 64;
+
+fn shallow(md: &str) -> Cow<'_, str> {
+    if !md.lines().any(|line| quote_markers(line).0 > MAX_QUOTES) {
+        return Cow::Borrowed(md);
+    }
+    let mut out = String::with_capacity(md.len());
+    for line in md.split_inclusive('\n') {
+        let (count, rest) = quote_markers(line);
+        if count > MAX_QUOTES {
+            out.push_str(&"> ".repeat(MAX_QUOTES));
+            out.push_str(&line[rest..]);
+        } else {
+            out.push_str(line);
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// Маркеры цитаты в начале строки: `>`, перед каждым до трёх пробелов,
+/// после — один необязательный. Сколько их и где кончаются.
+fn quote_markers(line: &str) -> (usize, usize) {
+    let bytes = line.as_bytes();
+    let (mut count, mut at) = (0, 0);
+    loop {
+        let mut index = at;
+        while index < bytes.len() && index - at < 3 && bytes[index] == b' ' {
+            index += 1;
+        }
+        if bytes.get(index) != Some(&b'>') {
+            return (count, at);
+        }
+        index += 1;
+        if bytes.get(index) == Some(&b' ') {
+            index += 1;
+        }
+        count += 1;
+        at = index;
+    }
+}
+
 pub fn options() -> Options<'static> {
     let mut options = Options::default();
     options.extension.table = true;
@@ -1761,6 +1817,24 @@ pub fn options() -> Options<'static> {
     // так диффы корпуса показывают правку, а не переливание переносов.
     options.render.width = 0;
     options
+}
+
+#[cfg(test)]
+mod shallow_tests {
+    use super::*;
+
+    #[test]
+    fn a_quote_deeper_than_the_limit_is_cut_to_it() {
+        let deep = format!("{}text\n", ">".repeat(100_000));
+        let cut = shallow(&deep);
+        assert_eq!(quote_markers(&cut).0, MAX_QUOTES);
+        assert!(cut.ends_with("text\n"));
+        // Обычные цитаты не трогаем вовсе.
+        let usual = "> a\n>> b\n   > > c\n";
+        assert!(matches!(shallow(usual), Cow::Borrowed(_)));
+        assert_eq!(quote_markers("   > > c").0, 2);
+        assert_eq!(quote_markers("    > code").0, 0);
+    }
 }
 
 #[cfg(test)]

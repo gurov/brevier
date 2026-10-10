@@ -2754,7 +2754,7 @@ fn open_with(
     let archive_on = state.borrow().archive;
     let offset = local_offset();
     glib::spawn_future_local(async move {
-        let loaded = gio::spawn_blocking(move || {
+        let loaded = off_main(move || {
             // Отказ объясняем здесь же, в потоке: объяснение заглядывает
             // в архив за копией страницы (#9).
             let document = brevier::open(&address, UserAgent::Honest).map_err(|error| {
@@ -3502,6 +3502,29 @@ fn zoom() -> f64 {
 
 fn set_zoom(scale: f32) {
     ZOOM.with(|cell| cell.set(scale));
+}
+
+/// Стек потока, в котором работает ядро.
+const CORE_STACK: usize = 8 * 1024 * 1024;
+
+/// Работа ядра — вне главного потока и в потоке со своим стеком.
+///
+/// Пул GLib даёт потоку стек системы: на Linux восемь мегабайт, на Windows
+/// меньше. Разбор страницы рекурсивен, и даже на пределе вложенности
+/// (`nesting::MAX_DEPTH`) мегабайта хватает лишь вдвое, — поэтому стек
+/// задаём сами, одинаковый везде. Поток пула ждёт свой, паника доходит
+/// до ожидающего, как и у `spawn_blocking`.
+fn off_main<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> gio::JoinHandle<T> {
+    gio::spawn_blocking(move || {
+        let worker = std::thread::Builder::new()
+            .stack_size(CORE_STACK)
+            .spawn(work)
+            .expect("a thread for the core");
+        match worker.join() {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    })
 }
 
 /// Мера в пикселях. В GTK кегль задаётся пунктами, а ширина виджета
@@ -4969,8 +4992,7 @@ fn seek_entries(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, address: &Address)
     glib::spawn_future_local(async move {
         let repo = asked.clone();
         let Ok(found) =
-            gio::spawn_blocking(move || brevier::repo::documentation(&repo, UserAgent::Honest))
-                .await
+            off_main(move || brevier::repo::documentation(&repo, UserAgent::Honest)).await
         else {
             return;
         };
@@ -5174,7 +5196,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         // Из кэша — только декодируем; из сети — сначала берём байты, чтобы
         // положить их в кэш, а потом декодируем. Второе значение — сырые байты
         // к сохранению (только у сетевой картинки), иначе `None`.
-        let loaded = gio::spawn_blocking(move || match cached {
+        let loaded = off_main(move || match cached {
             Some(bytes) => {
                 let raster = media::decode(&bytes, None, look)?;
                 Ok((raster, None::<Vec<u8>>))
@@ -5393,8 +5415,7 @@ fn save_to(ui: &Ui, path: std::path::PathBuf, document: Document) {
     let ui = ui.clone();
 
     glib::spawn_future_local(async move {
-        let done =
-            gio::spawn_blocking(move || save::write(&path, &document, UserAgent::Honest)).await;
+        let done = off_main(move || save::write(&path, &document, UserAgent::Honest)).await;
 
         match done {
             Ok(Ok(saved)) => {

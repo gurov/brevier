@@ -38,6 +38,9 @@ pub mod markdown;
 /// код в бинарнике про безопасность — лишняя поверхность.
 #[cfg(feature = "images")]
 pub mod media;
+/// Глубина вложенности разметки — до разбора: глубже порога чужие
+/// рекурсивные парсеры роняют процесс.
+pub mod nesting;
 pub mod outline;
 /// Страница, разложенная для показа: текст, стили, ссылки, якоря, места
 /// картинок и таблиц. Её рисует интерфейс — любой. Нужны и картинки
@@ -298,6 +301,9 @@ pub fn from_search(html: &str, url: &str) -> Result<Document, Error> {
 /// или из файла. Адрес обязателен и здесь — по нему разворачиваются
 /// относительные ссылки и решается, что это за документ.
 pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
+    if nesting::html_too_deep(html) {
+        return Err(Error::TooDeep(nesting::MAX_DEPTH));
+    }
     if hosts::search_query(url).is_some() {
         return from_search(html, url);
     }

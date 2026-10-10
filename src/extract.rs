@@ -177,6 +177,9 @@ fn empty(html: &str) -> Error {
 }
 
 pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
+    if crate::nesting::html_too_deep(html) {
+        return Err(Error::TooDeep(crate::nesting::MAX_DEPTH));
+    }
     let cfg = Config::default();
 
     // Тулбар снимка Wayback (#9) — не страница: у короткой страницы

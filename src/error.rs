@@ -20,6 +20,9 @@ pub enum Error {
     UnsupportedContentType(String),
     /// Тело больше лимита.
     TooLarge(u64),
+    /// Разметка вложена глубже предела ([`crate::nesting`]): разбирать её
+    /// значило бы уронить процесс или повиснуть.
+    TooDeep(usize),
     /// Readability не нашёл на странице статьи.
     EmptyExtraction,
     /// Хостинг отказал по лимиту: у github без токена шестьдесят запросов
@@ -56,7 +59,7 @@ impl Error {
             Error::BadUrl(_) | Error::UnsupportedScheme(_) => 1,
             Error::Network(_) => 2,
             Error::HttpStatus(_) => 3,
-            Error::UnsupportedContentType(_) | Error::TooLarge(_) => 4,
+            Error::UnsupportedContentType(_) | Error::TooLarge(_) | Error::TooDeep(_) => 4,
             Error::EmptyExtraction => 5,
             // Тот же код, что у http-статуса: для прогонов это отказ
             // сервера, а не наша поломка.
@@ -81,6 +84,7 @@ impl fmt::Display for Error {
             Error::HttpStatus(c) => write!(f, "server answered {c}"),
             Error::UnsupportedContentType(t) => write!(f, "unsupported content type `{t}`"),
             Error::TooLarge(n) => write!(f, "response body over the {n} byte limit"),
+            Error::TooDeep(n) => write!(f, "markup nested more than {n} levels deep"),
             Error::EmptyExtraction => write!(f, "no article found on the page"),
             Error::HostingLimit => write!(f, "the hosting API is rate limited"),
             Error::Convert(e) => write!(f, "html to markdown: {e}"),

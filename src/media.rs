@@ -260,6 +260,10 @@ fn limits() -> image::Limits {
 /// Тёмную тему схемы не увидят: `@media (prefers-color-scheme: dark)` внутри
 /// svg resvg не разбирает. Поэтому вектор кладём на белое, как и всё остальное.
 fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
+    // usvg строит дерево рекурсивно: на вложенных `<g>` кончился бы стек.
+    if crate::nesting::xml_too_deep(&String::from_utf8_lossy(bytes)) {
+        return Err(Error::Media("the image is nested too deeply".to_owned()));
+    }
     let options = usvg::Options {
         fontdb: fonts(),
         // Кегль страницы: от него считаются `em` и `ex`, а формулы MathJax

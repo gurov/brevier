@@ -631,7 +631,7 @@ pub fn expand(markdown: &str, repo: &Repo, path: &str) -> String {
     let markdown = markdown.as_str();
 
     let arena = Arena::new();
-    let root = comrak::parse_document(&arena, markdown, &crate::markdown::options());
+    let root = crate::markdown::parse(&arena, markdown);
 
     let mut targets: Vec<(String, bool)> = Vec::new();
     for node in root.descendants() {
@@ -674,7 +674,7 @@ pub fn expand(markdown: &str, repo: &Repo, path: &str) -> String {
 /// htmd на них отдаёт пустую строку, и это правильный ответ.
 fn flatten_html(markdown: &str) -> String {
     let arena = Arena::new();
-    let root = comrak::parse_document(&arena, markdown, &crate::markdown::options());
+    let root = crate::markdown::parse(&arena, markdown);
     let lines = line_starts(markdown);
 
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
@@ -716,7 +716,7 @@ fn flatten_html(markdown: &str) -> String {
 /// а причина, по которой замена идёт через разбор, а не поиском по строке.
 fn mentions(markdown: &str, repo: &Repo) -> String {
     let arena = Arena::new();
-    let root = comrak::parse_document(&arena, markdown, &crate::markdown::options());
+    let root = crate::markdown::parse(&arena, markdown);
     let lines = line_starts(markdown);
 
     let mut edits: Vec<(usize, usize, String)> = Vec::new();

@@ -169,6 +169,9 @@ pub fn parse(body: &str, url: &str) -> Result<Feed, Error> {
         .filter(|url| matches!(url.scheme(), "http" | "https"));
     let feed = if is_json(body) {
         json_feed(body, base)?
+    } else if crate::nesting::xml_too_deep(body) {
+        // roxmltree разбирает рекурсивно; лента бывает и с диска, мимо сети.
+        return Err(Error::TooDeep(crate::nesting::MAX_DEPTH));
     } else {
         xml_feed(body, base)?
     };

@@ -20,8 +20,8 @@
 //! заголовков и совпадений поиска от этого не едут, а интерфейс знает,
 //! куда положить виджет.
 
+use comrak::Arena;
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
-use comrak::{Arena, parse_document};
 
 use crate::Document;
 use crate::address::Address;
@@ -35,6 +35,11 @@ use crate::typeset::{self, Typesetter};
 pub const LIST_LEVELS: u8 = 3;
 /// То же для цитат.
 pub const QUOTE_LEVELS: u8 = 3;
+/// Глубже этого блоки не обходятся, а ложатся плоским текстом: обход
+/// рекурсивен, и сотня килобайт `>` — цитата в цитате на сто тысяч уровней —
+/// иначе кончила бы стек (аудит 10 октября 2026). В настоящих текстах
+/// вложенность — единицы.
+const MAX_NESTING: usize = 64;
 /// Короче этого оглавление не нужно: страница вся под рукой.
 pub const MIN_DOC_CHARS: usize = 4000;
 /// Сколько знаков считать картинке, решая, длинна ли страница: в тексте
@@ -231,7 +236,7 @@ impl Page {
     /// Разложить документ.
     pub fn of(document: &Document) -> Page {
         let arena = Arena::new();
-        let root = parse_document(&arena, &document.markdown, &crate::markdown::options());
+        let root = crate::markdown::parse(&arena, &document.markdown);
         // Словарь переносов грузим один раз на страницу, не на слово. `None` —
         // язык неизвестен или ему нечего делать: тогда текст идёт как есть.
         let typesetter = document.lang.as_deref().and_then(Typesetter::for_language);
@@ -243,6 +248,7 @@ impl Page {
             base: &document.address,
             depth: 0,
             quotes: 0,
+            nesting: 0,
             inset: None,
             typeset: typesetter.as_ref(),
         };
@@ -567,6 +573,8 @@ struct Writer<'a> {
     depth: u8,
     /// Глубина вложенности цитаты: от неё отступ и место линейки.
     quotes: u8,
+    /// Сколько блоков открыто вокруг текущего: потолок — [`MAX_NESTING`].
+    nesting: usize,
     /// Поле, под которым стоит текст ближайшей цитаты или пункта, —
     /// его берёт блок кода внутри них (#13). `None` — у края колонки.
     inset: Option<Style>,
@@ -708,7 +716,42 @@ impl Writer<'_> {
         self.object(Block::Table(Table { alignments, rows }));
     }
 
+    /// Блок со всем, что в нём. Глубже [`MAX_NESTING`] — плоским абзацем.
     fn block<'n>(&mut self, node: &'n AstNode<'n>, outer: &[Style]) {
+        if self.nesting >= MAX_NESTING {
+            self.flat(node, outer);
+            return;
+        }
+        self.nesting += 1;
+        self.nested(node, outer);
+        self.nesting -= 1;
+    }
+
+    /// Текст поддерева одной строкой — без разметки и без рекурсии:
+    /// `descendants` у comrak идёт по дереву циклом.
+    fn flat<'n>(&mut self, node: &'n AstNode<'n>, outer: &[Style]) {
+        let mut text = String::new();
+        for descendant in node.descendants() {
+            match &descendant.data.borrow().value {
+                NodeValue::Text(part) => text.push_str(part),
+                NodeValue::Code(code) => text.push_str(&code.literal),
+                NodeValue::SoftBreak | NodeValue::LineBreak | NodeValue::Paragraph => {
+                    text.push(' ')
+                }
+                _ => {}
+            }
+        }
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() {
+            return;
+        }
+        let mut styles = outer.to_vec();
+        styles.push(Style::Body);
+        self.put(&text, &styles);
+        self.put("\n", &styles);
+    }
+
+    fn nested<'n>(&mut self, node: &'n AstNode<'n>, outer: &[Style]) {
         match &node.data.borrow().value {
             NodeValue::Heading(heading) => {
                 let level = heading.level.clamp(1, 6);
@@ -1292,6 +1335,19 @@ mod tests {
 
     /// Над копией из архива — блёклая строка: когда прочитана и откуда,
     /// откуда — ссылкой на страницу в сети.
+    /// Цитата в цитате на сто тысяч уровней — плоский текст, а не конец стека.
+    #[test]
+    fn deep_nesting_ends_in_flat_text() {
+        let quotes = format!("{}deep words\n", ">".repeat(100_000));
+        assert!(Page::of(&doc(&quotes)).text.contains("deep words"));
+        let mut lists = String::new();
+        for level in 0..300 {
+            lists.push_str(&"  ".repeat(level));
+            lists.push_str("- item\n");
+        }
+        assert!(Page::of(&doc(&lists)).text.contains("item"));
+    }
+
     #[test]
     fn an_archived_copy_says_whose_copy_it_is() {
         let mut document = doc("---\ntitle: \"Latency\"\n---\n\n# Latency\n\nText.\n");

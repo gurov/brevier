@@ -290,6 +290,9 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
     let bytes = res.body_mut().with_config().limit(MAX_BODY).read_to_vec()?;
     let (kind, body) = if kind == ContentKind::Feed {
         let body = feed::decode(&bytes, charset.as_deref());
+        if crate::nesting::xml_too_deep(&body) {
+            return Err(Error::TooDeep(crate::nesting::MAX_DEPTH));
+        }
         // `application/xml` оказался не лентой — это не текст для чтения.
         if !feed::is_feed(&body) {
             return Err(Error::UnsupportedContentType(mime));
@@ -304,6 +307,15 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         } else {
             kind
         };
+        // До первого разбора: его делает уже `meta_refresh` ниже по тракту.
+        let deep = match kind {
+            ContentKind::Html => crate::nesting::html_too_deep(&body),
+            ContentKind::Feed => crate::nesting::xml_too_deep(&body),
+            _ => false,
+        };
+        if deep {
+            return Err(Error::TooDeep(crate::nesting::MAX_DEPTH));
+        }
         (kind, body)
     };
 

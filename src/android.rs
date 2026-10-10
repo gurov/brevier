@@ -180,7 +180,8 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_call<'caller>(
     let outcome = unowned.with_env(|env| -> Result<JString<'caller>, JniError> {
         let method = method.try_to_string(env)?;
         let arg = arg.try_to_string(env)?;
-        JString::from_str(env, call(&method, &arg))
+        let reply = deep(move || call(&method, &arg));
+        JString::from_str(env, reply)
     });
     outcome.resolve::<ThrowRuntimeExAndDefault>()
 }
@@ -210,7 +211,8 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
             // Телефон считает в пикселях экрана сразу.
             density: 1.0,
         };
-        env.byte_array_from_slice(&image(&source, look))
+        let bytes = deep(move || image(&source, look));
+        env.byte_array_from_slice(&bytes)
     });
     outcome.resolve::<ThrowRuntimeExAndDefault>()
 }
@@ -236,6 +238,25 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_find<'caller>(
         Ok(array)
     });
     outcome.resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// Стек потока, в котором работает ядро.
+const CORE_STACK: usize = 8 * 1024 * 1024;
+
+/// Работа ядра — в потоке со своим стеком. Kotlin зовёт нас из потоков
+/// своего пула, а у них стек около мегабайта: разбор страницы рекурсивен,
+/// и даже на пределе вложенности (`nesting::MAX_DEPTH`) запаса там лишь
+/// вдвое. Восемь мегабайт — как у окна. Паника доходит до вызова, как
+/// и без потока: её превращает в исключение Java `with_env`.
+fn deep<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    let worker = std::thread::Builder::new()
+        .stack_size(CORE_STACK)
+        .spawn(work)
+        .expect("a thread for the core");
+    match worker.join() {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
 }
 
 /// Разобрать вызов. Незнакомое действие — ошибка в JSON, а не паника:

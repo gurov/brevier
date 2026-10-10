@@ -47,6 +47,7 @@ Every check and what it costs. Argue with a number here, not with a hidden formu
 | access-unreachable | Access | caps at 0 |
 | access-content-type | Access | caps at 0 |
 | access-too-large | Access | caps at 0 |
+| access-too-deep | Access | caps at 0 |
 | access-redirects | Access | −3 |
 | text-empty | Text | caps at 10 |
 | text-script-only | Text | caps at 10 |
