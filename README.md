@@ -18,7 +18,8 @@ they look. Inside, every page becomes Markdown, made with existing libraries
 the reading window.
 
 Why it is built this way is in the [manifesto](MANIFESTO.md); what comes next is in the
-[roadmap](ROADMAP.md).
+[roadmap](ROADMAP.md). A short tour with pictures is at
+[brevier.bizibah.com](https://brevier.bizibah.com/).
 
 **Status: early.** Brevier runs on Linux and Windows, as a GTK window, and on Android, as a
 native app over the same core. Builds are in
