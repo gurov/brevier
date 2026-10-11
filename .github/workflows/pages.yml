@@ -1,0 +1,44 @@
+# Сайт на GitHub Pages: `site/` как есть плюс `index.md`, собранный самим
+# Brevier из той же страницы. Ниже 100 в `--check` страница не выходит.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo build --release --bin brevier
+      - name: Assemble
+        run: |
+          cp -r site _site
+          target/release/brevier --stdin https://brevier.bizibah.com/ < site/index.html > _site/index.md
+          target/release/brevier --check --min 100 --stdin https://brevier.bizibah.com/ < site/index.html
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,14 @@
+# Brevier
+
+> Brevier is a browser for reading, without JavaScript. It fetches a page, turns it into Markdown on the reader's own computer and sets it in the reader's typography, not the site's. It also reads Markdown documentation straight from git repositories. The core is Rust; there is a command line tool, a GTK4 window for Linux and Windows, and an Android app. MIT or Apache-2.0.
+
+## This site
+
+- [Brevier — a browser for reading](https://brevier.bizibah.com/index.md): the whole page as Markdown
+
+## Project
+
+- [Source and README](https://github.com/gurov/brevier): what it does, how to install it
+- [Releases](https://github.com/gurov/brevier/releases): Linux (Flatpak, tar.gz), Windows (installer, zip), Android (APK)
+- [Manifesto](https://github.com/gurov/brevier/blob/main/MANIFESTO.md): what Brevier promises
+- [Roadmap](https://github.com/gurov/brevier/blob/main/ROADMAP.md): where it is going next
