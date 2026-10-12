@@ -79,25 +79,28 @@ Work items:
 ### 3. Typesetting by language (#6)
 
 Typesetting, not editing: everything here happens in the window, and the saved
-Markdown stays byte-identical.
+Markdown stays byte-identical. Done, but for one thing.
 
 - Hyphenation, with patterns bundled for a handful of languages and chosen by
-  `<html lang>` (and per-element `lang` where present). Without `lang`, no
-  hyphenation — and the check says so.
+  `<html lang>` — or, when `<html>` has none, by the `lang` of the container that
+  holds the article. Without `lang`, no hyphenation — and the check says so. Still
+  to come: a paragraph's own `lang`, which Markdown does not carry.
 - The rules that keep a line from ending on a one-letter preposition or
   conjunction, which Czech and Russian typography both require and no reader mode
   does.
-- Justified text as a setting, once hyphenation exists to make it bearable.
+- Justified text as a setting, for paragraphs; headings, lists, code and verse keep
+  a ragged edge.
 
-Known cost: Pango breaks lines only where the text allows, so hyphenation means soft
-hyphens and non-breaking spaces inserted into the buffer — and the buffer is what
-copy, find-on-page and the session's reading offsets see. Copy must strip them, find
-must skip them, offsets must not move.
+The known cost was paid: Pango breaks lines only where the text allows, so
+hyphenation means soft hyphens and non-breaking spaces inserted into the buffer —
+and the buffer is what copy, find-on-page and the session's reading offsets see.
+Copy strips them, find skips them, and offsets stay put, because the text in the
+buffer is the same on every redraw.
 
 ### 4. The type is the reader's (#4)
 
-The first line of the manifesto, and today only half true: measure, leading, size
-and face are Brevier's constants, and the reader's knobs are zoom and the theme.
+The first line of the manifesto, and now true: measure, leading, size and face are
+the reader's, next to zoom and the theme.
 
 A page in Settings for size, measure (kept in ems, so the line holds its length in
 characters when the size changes), leading, and face — saved in `settings.tsv` next
@@ -107,7 +110,8 @@ whole window, for the run only — an adjustment on top of the type, not part of
 The face is the expensive part. Brevier ships Noto Sans so that the promise holds on
 a machine with no fonts; a chosen face comes from the system through fontconfig, and
 the shelf, the heading scale and the code panel must hold together under a face they
-were not tuned for. Presets first, an arbitrary family after.
+were not tuned for. Presets came first — the system's serif and sans; an arbitrary
+family is still to come.
 
 ### 5. Feeds (#7)
 
@@ -375,10 +379,10 @@ Recorded so that nobody rediscovers them in six months.
   site" for the open web; threads and documentation hosts get named rules, each row
   with pages in the corpus, and no plugin system around them. This supersedes the
   earlier flat refusal of per-site rules.
-- **Type is a setting; zoom is shared.** Face, size, measure and leading will
-  persist in `settings.tsv`; the zoom step is one for the window, applied to every
-  page, for the run only — not per host, and not saved. (Per-host zoom was tried
-  and dropped: it only made the next page open at a surprising size.)
+- **Type is a setting; zoom is shared.** Face, size, measure, leading and justified
+  text persist in `settings.tsv`; the zoom step is one for the window, applied to
+  every page, for the run only — not per host, and not saved. (Per-host zoom was
+  tried and dropped: it only made the next page open at a surprising size.)
 - **A page read in the last week opens from a copy on disk**, images included —
   no fetch, no extraction. The week runs from the download. A list of links is
   always fetched, since its point is what is new; the status line says a page
