@@ -1430,7 +1430,12 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
     let faces: Vec<&str> = Face::ALL.iter().map(|face| face.label()).collect();
     let face = gtk::DropDown::from_strings(&faces);
     face.set_valign(gtk::Align::Center);
-    face.set_selected(Face::ALL.iter().position(|f| *f == chosen.face).unwrap_or(0) as u32);
+    face.set_selected(
+        Face::ALL
+            .iter()
+            .position(|f| *f == chosen.face)
+            .unwrap_or(0) as u32,
+    );
     let sizes = outline::choices(&outline::SIZES, chosen.size);
     let size = number_choice(&sizes, chosen.size, outline::size_label);
     let measures = outline::choices(&outline::MEASURES, chosen.measure);
@@ -1463,10 +1468,15 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
             state.borrow_mut().typography = next;
             remember_settings(&ui, &state);
             let borrowed = state.borrow();
-            tags(&sample.buffer(), borrowed.dark, page_scale(&borrowed), &next);
+            tags(
+                &sample.buffer(),
+                borrowed.dark,
+                page_scale(&borrowed),
+                &next,
+            );
             sample.set_width_request(
-                (f64::from(TEXT_SIZE * next.measure * page_scale(&borrowed)) * dpi() / 72.0)
-                    .round() as i32,
+                (f64::from(TEXT_SIZE * next.measure * page_scale(&borrowed)) * dpi() / 72.0).round()
+                    as i32,
             );
             true
         })
@@ -1482,7 +1492,11 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
     }
     // Не поместилось — выбор возвращается к прежнему значению.
     let numbers = [
-        (&size, sizes, (|next: &mut Type, value| next.size = value) as fn(&mut Type, f32)),
+        (
+            &size,
+            sizes,
+            (|next: &mut Type, value| next.size = value) as fn(&mut Type, f32),
+        ),
         (&measure, measures, |next, value| next.measure = value),
         (&leading, leadings, |next, value| next.leading = value),
     ];
@@ -1554,7 +1568,11 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         "Kept in ems, so a line holds the same number of letters at any size.",
         &measure,
     ));
-    rows.append(&setting_row("Line spacing", "In parts of the size.", &leading));
+    rows.append(&setting_row(
+        "Line spacing",
+        "In parts of the size.",
+        &leading,
+    ));
     rows.append(&setting_row(
         "Justified text",
         "Even right edges. Bearable only with hyphenation, which Brevier \
