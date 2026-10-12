@@ -195,15 +195,18 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 
 **Reading**
 
-- **Your typography, the same on every site.** For now that means Brevier's defaults —
-  16.5 pt, about 65 characters per line, airy leading, headings lighter than the text —
-  plus zoom and a dark theme. Settings for face, size and measure are on the roadmap.
+- **Your typography, the same on every site.** Out of the box: 16.5 pt Noto Sans, about
+  65 characters per line, airy leading, headings lighter than the text. Settings change
+  the face (the built-in Noto Sans, or your system's serif or sans), the size, the line
+  length and the line spacing, once for every site; zoom stays on top, for the run.
 - **Hyphenation by the page's language** (English and Russian are built in); in Russian
   and Czech no line ends on a one-letter word. Copy and find-on-page see the plain text.
+- **Justified text** as a setting: paragraphs get a straight right edge; headings, lists
+  and code stay ragged.
 - **Ivory paper** instead of glaring white, and a warm dark theme.
 - **Zoom (67–200%) scales the whole layout**, so a line still holds about 65 characters.
 - **Fonts are built in** — Noto Sans and Noto Sans Mono — so a page looks the same on every
-  system.
+  system, unless you pick your system's serif or sans.
 - **Poems keep their lines and stanzas.**
 
 **Finding your way**

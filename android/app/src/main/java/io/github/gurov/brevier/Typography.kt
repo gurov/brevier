@@ -76,6 +76,28 @@ class Palette(json: JSONObject) {
 }
 
 /**
+ * Набор читателя (#4): гарнитура, кегль, мера в кеглях, интерлиньяж и выключка.
+ * Числа и их подписи — из ядра (`outline::Type`), здесь только носим.
+ */
+data class ReaderType(
+    val face: String,
+    val size: Float,
+    val measure: Float,
+    val leading: Float,
+    val justify: Boolean,
+) {
+    companion object {
+        fun of(json: JSONObject) = ReaderType(
+            face = json.optString("face", "noto"),
+            size = json.getDouble("size").toFloat(),
+            measure = json.getDouble("measure").toFloat(),
+            leading = json.getDouble("leading").toFloat(),
+            justify = json.optBoolean("justify"),
+        )
+    }
+}
+
+/**
  * Модель в пикселях этого экрана на этой ступени масштаба.
  *
  * Кегль берём в `sp`: 16.5 sp на телефоне читаются так же, как 16.5 пункта
@@ -84,16 +106,21 @@ class Palette(json: JSONObject) {
  * десктопа, умножается на отношение нашего кегля к десктопному: пропорции
  * страницы одни на обеих платформах.
  */
-class Metrics(context: Context, val type: Typography, val zoom: Float) {
+class Metrics(context: Context, val type: Typography, val zoom: Float, val reader: ReaderType) {
+    /** Кегль читателя на ступени масштаба: он множит всю модель, как и ступень. */
     val text: Float = TypedValue.applyDimension(
-        TypedValue.COMPLEX_UNIT_SP, type.textSize * zoom, context.resources.displayMetrics,
+        TypedValue.COMPLEX_UNIT_SP, reader.size * zoom, context.resources.displayMetrics,
     )
     /** Сколько наших пикселей в пикселе десктопа. */
     val unit: Float = text / type.textPx
     /** Воздух между строками и абзацами — та же величина, что `extra` в окне. */
-    val extra: Float = (type.lineHeight - 1f) * type.textSize * unit
+    val extra: Float = (reader.leading - 1f) * type.textSize * unit
     /** Мера: колонка не шире этого. На телефоне она обычно — весь экран. */
-    val measure: Float = type.measureInEms * text
+    val measure: Float = reader.measure * text
+    /** Гарнитура текста: `noto`, `serif` или `sans`. */
+    val face: String get() = reader.face
+    /** Выключка по ширине (#6). */
+    val justify: Boolean get() = reader.justify
 
     fun px(desktop: Float): Float = desktop * unit
 }
@@ -120,8 +147,9 @@ class Fonts(context: Context) {
      * и среднему курсиву достаётся прямое начертание с наклоном — ровно
      * то, что делает Pango, когда нужного файла в комплекте нет.
      */
-    fun pick(mono: Boolean, weight: Int, italic: Boolean): Face {
+    fun pick(mono: Boolean, weight: Int, italic: Boolean, face: String = "noto"): Face {
         if (mono) return Face(this.mono, skew = italic, fakeBold = weight >= 600)
+        if (face != "noto") return system(face, weight, italic)
         return when {
             weight >= 600 -> if (italic) Face(boldItalic) else Face(bold)
             weight >= 500 -> Face(medium, skew = italic)
@@ -129,6 +157,32 @@ class Fonts(context: Context) {
             else -> Face(light, skew = italic)
         }
     }
+
+    /**
+     * Гарнитура системы (#4): антиква или гротеск, которые Android называет
+     * `serif` и `sans-serif`. С Android 9 вес любой; раньше — только обычный
+     * и жирный, а лёгкий заголовок встаёт обычным.
+     */
+    private fun system(face: String, weight: Int, italic: Boolean): Face {
+        val family = if (face == "serif") Typeface.SERIF else Typeface.SANS_SERIF
+        val key = Triple(family, weight, italic)
+        val typeface = systemFaces.getOrPut(key) {
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                Typeface.create(family, weight, italic)
+            } else {
+                val style = when {
+                    weight >= 600 && italic -> Typeface.BOLD_ITALIC
+                    weight >= 600 -> Typeface.BOLD
+                    italic -> Typeface.ITALIC
+                    else -> Typeface.NORMAL
+                }
+                Typeface.create(family, style)
+            }
+        }
+        return Face(typeface)
+    }
+
+    private val systemFaces = HashMap<Triple<Typeface, Int, Boolean>, Typeface>()
 
     class Face(val typeface: Typeface, val skew: Boolean = false, val fakeBold: Boolean = false)
 

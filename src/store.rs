@@ -40,6 +40,7 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::address::Address;
+use crate::outline::{Face, Type};
 
 /// Сколько визитов держим. Chrome хранит 90 дней, Firefox — около 180;
 /// мера у них времени, у нас — числа строк, потому что за размер файла
@@ -584,7 +585,7 @@ impl Marks {
 /// Неизвестная строка молча пропускается, пропущенная — остаётся своим
 /// умолчанием: файл настроек переживает и обновление программы, и правку
 /// не той строки.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub dark: bool,
     pub images: bool,
@@ -596,6 +597,10 @@ pub struct Settings {
     pub shelf_width: Option<i32>,
     /// Класть ли копию каждой прочитанной страницы в архив (#8).
     pub archive: bool,
+    /// Набор читателя (#4). В файл пишется только то, что отличается
+    /// от умолчания, — по той же причине, что у `shelf_width`: иначе наше
+    /// нынешнее умолчание застыло бы в файле как выбор читателя.
+    pub typography: Type,
 }
 
 impl Default for Settings {
@@ -611,6 +616,7 @@ impl Default for Settings {
             shelf_width: None,
             // Включён по умолчанию: решено в ROADMAP. Выключить есть чем.
             archive: true,
+            typography: Type::default(),
         }
     }
 }
@@ -647,6 +653,27 @@ impl Settings {
                 "shelf" => settings.shelf = value == "on",
                 "shelf-width" => settings.shelf_width = value.parse().ok(),
                 "archive" => settings.archive = value == "on",
+                "face" => {
+                    if let Some(face) = Face::from_name(value) {
+                        settings.typography.face = face;
+                    }
+                }
+                "size" => {
+                    if let Some(size) = Type::size_from(value) {
+                        settings.typography.size = size;
+                    }
+                }
+                "measure" => {
+                    if let Some(measure) = Type::measure_from(value) {
+                        settings.typography.measure = measure;
+                    }
+                }
+                "leading" => {
+                    if let Some(leading) = Type::leading_from(value) {
+                        settings.typography.leading = leading;
+                    }
+                }
+                "justify" => settings.typography.justify = value == "on",
                 _ => {}
             }
         }
@@ -671,6 +698,22 @@ impl Settings {
         ));
         if let Some(width) = self.shelf_width {
             text.push_str(&format!("shelf-width\t{width}\n"));
+        }
+        let (chosen, usual) = (self.typography, Type::default());
+        if chosen.face != usual.face {
+            text.push_str(&format!("face\t{}\n", chosen.face.name()));
+        }
+        if chosen.size != usual.size {
+            text.push_str(&format!("size\t{}\n", chosen.size));
+        }
+        if chosen.measure != usual.measure {
+            text.push_str(&format!("measure\t{}\n", chosen.measure));
+        }
+        if chosen.leading != usual.leading {
+            text.push_str(&format!("leading\t{}\n", chosen.leading));
+        }
+        if chosen.justify != usual.justify {
+            text.push_str(&format!("justify\t{}\n", switch(chosen.justify)));
         }
         let _ = fs::write(path, text);
     }
@@ -1587,9 +1630,33 @@ mod tests {
             shelf: false,
             shelf_width: Some(320),
             archive: false,
+            typography: Type {
+                face: Face::Serif,
+                size: 18.0,
+                measure: 32.0,
+                leading: 1.65,
+                justify: true,
+            },
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);
+    }
+
+    /// Не тронутый набор в файл не пишется; вписанное руками вне пределов
+    /// остаётся умолчанием.
+    #[test]
+    fn the_type_is_written_only_where_the_reader_chose() {
+        let path = temporary("type").with_file_name("settings.tsv");
+        Settings::default().save_at(&path);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("size") && !text.contains("face"), "{text}");
+
+        fs::write(&path, "size 17\nmeasure 900\nface comic\nleading 1.4\n").unwrap();
+        let typography = Settings::at(&path).typography;
+        assert_eq!(typography.size, 17.0);
+        assert_eq!(typography.measure, Type::default().measure);
+        assert_eq!(typography.face, Face::Bundled);
+        assert_eq!(typography.leading, 1.4);
     }
 
     #[test]

@@ -147,7 +147,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         // Первый экран — сразу и целиком, остальное — по куску за кадр.
         // Последний кусок `append` закрывает сам (`finish`); здесь — только
         // страница без кусков вовсе, иначе кнопка отказа вставала дважды.
-        pending.addAll(pieces(page))
+        pending.addAll(pieces(page, metrics.justify))
         if (pending.isEmpty()) finish()
         while (pending.isNotEmpty() && laid < FIRST_CHARS) append()
         if (pending.isNotEmpty()) drip(generation)
@@ -644,7 +644,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         private fun caption(text: String) = TextView(context).apply {
             this.text = text
             setTextColor(palette.dim)
-            typeface = fonts.regular
+            typeface = fonts.pick(false, 400, false, metrics.face).typeface
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.text * 0.85f)
             setPadding(0, metrics.px(4f).toInt(), 0, metrics.px(6f).toInt())
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
@@ -669,7 +669,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     val view = Washed(context).apply {
                         setTextColor(palette.ink)
                         setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.text)
-                        typeface = if (row.header) fonts.medium else fonts.regular
+                        typeface = fonts.pick(false, if (row.header) 500 else 400, false, metrics.face).typeface
                         includeFontPadding = false
                         setLineSpacing(metrics.extra, 1f)
                         // Шире тридцати знаков ячейка не растёт — дальше перенос,
@@ -707,7 +707,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 val weight = if ("strong" in run.styles) 700 else if (header) 500 else 400
                 val italic = "em" in run.styles
                 val mono = "code" in run.styles
-                val face = fonts.pick(mono, weight, italic)
+                val face = fonts.pick(mono, weight, italic, metrics.face)
                 val size = if (mono) metrics.text * metrics.type.codeSize else metrics.text
                 out.setSpan(FaceSpan(face, size, 0f, 0f), run.start, run.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 if (mono) out.setSpan(Wash(palette.panel), run.start, run.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -743,16 +743,23 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             setTextIsSelectable(true)
             includeFontPadding = false
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.text)
-            typeface = fonts.regular
+            typeface = fonts.pick(false, 400, false, metrics.face).typeface
             setTextColor(palette.ink)
             highlightColor = palette.chosen
             setLineSpacing(0f, 1f)
+            // Выключка (#6) — только кускам прозы: заголовки, код и списки
+            // режутся в свои куски (`pieces`) и остаются с рваным краем.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                justificationMode = if (piece.justified) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
                 // Переносы ставит ядро мягкими дефисами — по языку страницы.
                 // Свои Android брал бы по языку системы, а он у статьи другой:
                 // поэтому язык текста — «никакой», и переносы только наши.
-                hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NORMAL
+                // Выключке переносы нужнее: с обычной частотой Android
+                // предпочитает растянуть строку дырами, чем перенести слово.
+                hyphenationFrequency = if (piece.justified) Layout.HYPHENATION_FREQUENCY_FULL else Layout.HYPHENATION_FREQUENCY_NORMAL
             }
             textLocale = Locale.ROOT
             setOnLongClickListener {

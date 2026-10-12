@@ -60,6 +60,8 @@ class MainActivity : Activity(), ArticleHost {
     /** Класть ли копию каждой прочитанной страницы в архив (#8). */
     private var archive = true
     private var zoom = 0
+    /** Набор читателя (#4): в `settings.tsv`, в отличие от ступени масштаба. */
+    private lateinit var reader: ReaderType
 
     private val tabs = mutableListOf<Tab>()
     private var current = 0
@@ -118,6 +120,7 @@ class MainActivity : Activity(), ArticleHost {
         dark = stored.optBoolean("dark")
         images = stored.optBoolean("images", true)
         archive = stored.optBoolean("archive", true)
+        reader = ReaderType.of(stored.getJSONObject("type"))
         zoom = type.zoomNormal
 
         build()
@@ -285,6 +288,8 @@ class MainActivity : Activity(), ArticleHost {
             keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive) },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
+            typeChanged = { chosen -> changeType(chosen) },
+            metricsOf = { chosen -> Metrics(this, type, type.zoomSteps[zoom], chosen) },
         )
         root.addView(settings, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
@@ -501,7 +506,7 @@ class MainActivity : Activity(), ArticleHost {
         sync()
     }
 
-    private fun metrics() = Metrics(this, type, type.zoomSteps[zoom])
+    private fun metrics() = Metrics(this, type, type.zoomSteps[zoom], reader)
 
     // ── вкладки ─────────────────────────────────────────────────────────────
 
@@ -1035,7 +1040,7 @@ class MainActivity : Activity(), ArticleHost {
         if (!shelf.open) return
         // Мерим не по верхней кромке, а по той строке, куда ставит заголовок
         // прыжок по оглавлению, плюс полстроки запаса.
-        val probe = view.scrollY + (view.height * ANCHOR_ALIGN).toInt() + (metrics().text * type.lineHeight / 2).toInt()
+        val probe = view.scrollY + (view.height * ANCHOR_ALIGN).toInt() + (metrics().text * reader.leading / 2).toInt()
         shelf.follow(view.offsetAt(probe))
     }
 
@@ -1378,7 +1383,16 @@ class MainActivity : Activity(), ArticleHost {
         menu.show(more)
     }
 
-    private fun showSettings() = settings.show(palette, dark, images, archive, isBrowser())
+    private fun showSettings() = settings.show(palette, dark, images, archive, isBrowser(), reader)
+
+    /** Новый набор: на диск, открытой вкладке — сразу; фоновые набираются при показе. */
+    private fun changeType(chosen: ReaderType) {
+        if (chosen == reader) return
+        reader = chosen
+        Core.saveType(chosen)
+        showSettings()
+        currentTab()?.let { redraw(it) }
+    }
 
     /**
      * Brevier ли браузер по умолчанию. С Android 10 это роль, у которой

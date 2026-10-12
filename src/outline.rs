@@ -82,6 +82,167 @@ pub const ZOOM_STEPS: [f32; 9] = [0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0
 /// Ступень «как задумано»: к ней возвращает Ctrl+0.
 pub const ZOOM_NORMAL: usize = 3;
 
+/// Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж и выключка —
+/// выбранные раз и для всех сайтов (`settings.tsv`). Умолчание — константы
+/// выше, и пока набор не трогали, Brevier выглядит как выглядел.
+///
+/// Кегль множит всю модель, как и масштаб: отступы списка, поля кода
+/// и шкала заголовков заданы в пикселях при [`TEXT_PX`] и без этого
+/// разъехались бы с текстом. Мера — в кеглях, поэтому строка держит свою
+/// длину в знаках на любом кегле. Масштаб — поверх набора, а не его часть:
+/// он на запуск (`ZOOM_STEPS`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Type {
+    pub face: Face,
+    /// Кегль в пунктах.
+    pub size: f32,
+    /// Мера в кеглях.
+    pub measure: f32,
+    /// Межстрочный интервал в долях кегля.
+    pub leading: f32,
+    /// Выключка по ширине. Терпима только с переносами, а переносы есть
+    /// лишь у страницы, объявившей язык (`typeset`), — решает читатель.
+    pub justify: bool,
+}
+
+impl Default for Type {
+    fn default() -> Self {
+        Self::USUAL
+    }
+}
+
+/// Кегли на выбор: шаг в полтора пункта — меньше на экране не различить.
+pub const SIZES: [f32; 7] = [13.5, 15.0, 16.5, 18.0, 19.5, 21.0, 22.5];
+/// Меры на выбор, в кеглях: от 50 до 80 знаков, книжные пределы.
+pub const MEASURES: [f32; 8] = [28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0, 44.0];
+/// Интерлиньяж на выбор.
+pub const LEADINGS: [f32; 6] = [1.35, 1.45, 1.55, 1.65, 1.75, 1.9];
+
+/// Пределы для правки руками: `settings.tsv` читатель открывает
+/// в редакторе, и число вне них — опечатка, а не выбор.
+const SIZE_LIMITS: (f32, f32) = (9.0, 36.0);
+const MEASURE_LIMITS: (f32, f32) = (16.0, 60.0);
+const LEADING_LIMITS: (f32, f32) = (1.0, 2.5);
+
+impl Type {
+    /// Набор, каким его задумал Brevier.
+    pub const USUAL: Type = Type {
+        face: Face::Bundled,
+        size: TEXT_SIZE,
+        measure: MEASURE_IN_EMS,
+        leading: LINE_HEIGHT,
+        justify: false,
+    };
+
+    /// Во сколько раз кегль читателя больше нашего: на столько множится
+    /// вся модель.
+    pub fn scale(&self) -> f32 {
+        self.size / TEXT_SIZE
+    }
+
+    /// Кегль из файла настроек: вне пределов — умолчание.
+    pub fn size_from(text: &str) -> Option<f32> {
+        within(text, SIZE_LIMITS)
+    }
+
+    pub fn measure_from(text: &str) -> Option<f32> {
+        within(text, MEASURE_LIMITS)
+    }
+
+    pub fn leading_from(text: &str) -> Option<f32> {
+        within(text, LEADING_LIMITS)
+    }
+}
+
+fn within(text: &str, (low, high): (f32, f32)) -> Option<f32> {
+    let value: f32 = text.trim().parse().ok()?;
+    (low..=high).contains(&value).then_some(value)
+}
+
+/// Гарнитура текста. Код — всегда Noto Sans Mono из комплекта.
+///
+/// Сначала готовые наборы, произвольное семейство — потом (ROADMAP):
+/// полка, шкала заголовков и панель кода подбирались под Noto Sans,
+/// и чужое семейство должно сперва показать, что их держит.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Face {
+    /// Noto Sans из комплекта: обещание держится и на машине без шрифтов.
+    Bundled,
+    /// Антиква, которую система называет `serif`.
+    Serif,
+    /// Гротеск системы, `sans-serif`.
+    Sans,
+}
+
+impl Face {
+    pub const ALL: [Face; 3] = [Face::Bundled, Face::Serif, Face::Sans];
+
+    /// Имя в `settings.tsv` и в ответе ядра телефону.
+    pub fn name(self) -> &'static str {
+        match self {
+            Face::Bundled => "noto",
+            Face::Serif => "serif",
+            Face::Sans => "sans",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Face> {
+        Face::ALL.into_iter().find(|face| face.name() == name)
+    }
+
+    /// Подпись в настройках.
+    pub fn label(self) -> &'static str {
+        match self {
+            Face::Bundled => "Noto Sans, built in",
+            Face::Serif => "Serif, from your system",
+            Face::Sans => "Sans, from your system",
+        }
+    }
+
+    /// Семейство для fontconfig и Pango: `Serif` и `Sans` — их общие
+    /// имена, система подставляет свои гарнитуры.
+    pub fn family(self) -> &'static str {
+        match self {
+            Face::Bundled => "Noto Sans",
+            Face::Serif => "Serif",
+            Face::Sans => "Sans",
+        }
+    }
+}
+
+/// Значения на выбор: готовые и, если читатель вписал своё руками, его —
+/// на своём месте по порядку. Иначе выбор показал бы не то, что стоит.
+pub fn choices(presets: &[f32], current: f32) -> Vec<f32> {
+    let mut out = presets.to_vec();
+    if !out.iter().any(|value| (value - current).abs() < 0.001) {
+        out.push(current);
+        out.sort_by(f32::total_cmp);
+    }
+    out
+}
+
+/// Подпись кегля: «16.5 pt».
+pub fn size_label(size: f32) -> String {
+    format!("{} pt", short(size))
+}
+
+/// Подпись меры — в знаках, а не в кеглях: «36 em» читателю ничего
+/// не говорит. Знаки — Noto Sans: 36 кеглей — около 65.
+pub fn measure_label(measure: f32) -> String {
+    format!("About {} characters", (measure * 65.0 / 36.0).round())
+}
+
+/// Подпись интерлиньяжа: «1.55».
+pub fn leading_label(leading: f32) -> String {
+    short(leading)
+}
+
+/// Число без лишних нулей: 16.5, 18, 1.55.
+fn short(value: f32) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
 /// Оглавление показываем, только если оно что-то даёт.
 pub const MIN_HEADINGS: usize = 3;
 
@@ -564,5 +725,38 @@ mod tests {
     fn the_zoom_ladder_stands_on_the_size_we_chose() {
         assert_eq!(ZOOM_STEPS[ZOOM_NORMAL], 1.0);
         assert!(ZOOM_STEPS.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    /// Умолчание набора — среди готовых значений и равно константам:
+    /// не тронутые настройки не меняют ничего.
+    #[test]
+    fn the_default_type_is_one_of_the_choices() {
+        let chosen = Type::default();
+        assert_eq!(chosen.scale(), 1.0);
+        assert!(SIZES.contains(&chosen.size));
+        assert!(MEASURES.contains(&chosen.measure));
+        assert!(LEADINGS.contains(&chosen.leading));
+        assert_eq!(measure_label(chosen.measure), "About 65 characters");
+        assert_eq!(size_label(16.5), "16.5 pt");
+        assert_eq!(size_label(18.0), "18 pt");
+        assert_eq!(leading_label(1.55), "1.55");
+        assert_eq!(leading_label(1.9), "1.9");
+    }
+
+    /// Своё значение, вписанное руками, встаёт среди готовых на своё место;
+    /// вне пределов — не значение.
+    #[test]
+    fn a_hand_written_value_joins_the_choices() {
+        assert_eq!(choices(&SIZES, 16.5), SIZES.to_vec());
+        let with = choices(&SIZES, 17.0);
+        assert_eq!(with.len(), SIZES.len() + 1);
+        assert_eq!(with[3], 17.0);
+        assert_eq!(Type::size_from("17"), Some(17.0));
+        assert_eq!(Type::size_from("170"), None);
+        assert_eq!(Type::leading_from("0.5"), None);
+        assert_eq!(Type::measure_from("NaN"), None);
+        for face in Face::ALL {
+            assert_eq!(Face::from_name(face.name()), Some(face));
+        }
     }
 }

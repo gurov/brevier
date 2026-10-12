@@ -286,6 +286,26 @@ fn call(method: &str, arg: &str) -> String {
             settings.save();
             "{}".to_owned()
         }
+        // Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж, выключка.
+        "type.save" => {
+            let mut settings = Settings::load();
+            let chosen = &mut settings.typography;
+            if let Some(face) = outline::Face::from_name(field(0)) {
+                chosen.face = face;
+            }
+            if let Some(size) = outline::Type::size_from(field(1)) {
+                chosen.size = size;
+            }
+            if let Some(measure) = outline::Type::measure_from(field(2)) {
+                chosen.measure = measure;
+            }
+            if let Some(leading) = outline::Type::leading_from(field(3)) {
+                chosen.leading = leading;
+            }
+            chosen.justify = field(4) == "1";
+            settings.save();
+            "{}".to_owned()
+        }
         "session" => session(),
         "session.save" => {
             remember(arg);
@@ -767,11 +787,54 @@ fn reading_leave(address: &str, top: usize, offset: i32) {
     }
 }
 
+/// Настройки и набор читателя. К набору — значения на выбор с подписями:
+/// подписи и вписанное руками значение — дело ядра, а не Kotlin.
 fn settings() -> String {
     let settings = Settings::load();
+    let chosen = settings.typography;
+    let choices = |presets: &[f32], current: f32, label: fn(f32) -> String| {
+        let items: Vec<String> = outline::choices(presets, current)
+            .into_iter()
+            .map(|value| {
+                let mut out = format!("{{\"value\":{value},\"label\":");
+                json_string(&mut out, &label(value));
+                out.push('}');
+                out
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    };
+    let faces: Vec<String> = outline::Face::ALL
+        .iter()
+        .map(|face| {
+            let mut out = format!("{{\"name\":\"{}\",\"label\":", face.name());
+            json_string(&mut out, face.label());
+            out.push('}');
+            out
+        })
+        .collect();
     format!(
-        "{{\"dark\":{},\"images\":{},\"archive\":{}}}",
-        settings.dark, settings.images, settings.archive
+        "{{\"dark\":{},\"images\":{},\"archive\":{},\
+         \"type\":{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{}}},\
+         \"usual\":{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{}}},\
+         \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
+        settings.dark,
+        settings.images,
+        settings.archive,
+        chosen.face.name(),
+        chosen.size,
+        chosen.measure,
+        chosen.leading,
+        chosen.justify,
+        outline::Type::USUAL.face.name(),
+        outline::Type::USUAL.size,
+        outline::Type::USUAL.measure,
+        outline::Type::USUAL.leading,
+        outline::Type::USUAL.justify,
+        faces.join(","),
+        choices(&outline::SIZES, chosen.size, outline::size_label),
+        choices(&outline::MEASURES, chosen.measure, outline::measure_label),
+        choices(&outline::LEADINGS, chosen.leading, outline::leading_label),
     )
 }
 

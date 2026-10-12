@@ -344,8 +344,11 @@ class ShapeSpan(
     }
 }
 
-/** Кусок статьи между объектами: свой `TextView`. Смещения — в тексте страницы. */
-class Piece(val start: Int, val end: Int)
+/**
+ * Кусок статьи между объектами: свой `TextView`. Смещения — в тексте страницы.
+ * `justified` — кусок из абзацев прозы, которые выключаются по ширине (#6).
+ */
+class Piece(val start: Int, val end: Int, val justified: Boolean = false)
 
 /**
  * Разрезать страницу по объектам-блокам. Иллюстрация и таблица — не текст,
@@ -355,20 +358,63 @@ class Piece(val start: Int, val end: Int)
  * Перевод строки перед объектом и после него уходит: в окне на них висят
  * поля абзаца, а здесь отступы у самого объекта.
  */
-fun pieces(page: Page): List<Any> {
+fun pieces(page: Page, justify: Boolean = false): List<Any> {
     val text = page.text
     val out = mutableListOf<Any>()
     var cursor = 0
     val blocks = page.blocks.filter { it !is Block.Image || !it.inline }.sortedBy { it.at }
+    val cut = { from: Int, to: Int -> if (justify) justified(page, from, to) else prose(text, from, to) }
     for (block in blocks) {
         var end = block.at
         if (end > cursor && text[end - 1] == '\n') end -= 1
-        if (end > cursor) out.addAll(prose(text, cursor, end))
+        if (end > cursor) out.addAll(cut(cursor, end))
         out += block
         cursor = block.at + 1
         if (cursor < text.length && text[cursor] == '\n') cursor += 1
     }
-    if (cursor < text.length) out.addAll(prose(text, cursor, text.length))
+    if (cursor < text.length) out.addAll(cut(cursor, text.length))
+    return out
+}
+
+/**
+ * Выключка у `TextView` одна на весь вид, а не на абзац, поэтому с ней текст
+ * режется ещё и там, где проза сменяется заголовком, кодом, стихом или
+ * списком: выключается только абзац прозы, как в окне. Пункт списка и сноска
+ * остаются с рваным краем — в окне Pango теряет на висячем отступе дефис
+ * переноса, а здесь растянулся бы пробел после маркера.
+ */
+private fun justified(page: Page, start: Int, end: Int): List<Piece> {
+    val text = page.text
+    val runs = page.runs
+    val out = mutableListOf<Piece>()
+    var from = start
+    var kind: Boolean? = null
+    var at = start
+    // Участки идут по порядку, абзацы тоже: курсор по участкам, а не поиск
+    // с начала на каждый абзац — роман это тысячи абзацев.
+    var run = 0
+    while (at < end) {
+        var stop = text.indexOf('\n', at)
+        stop = if (stop < 0 || stop >= end) end else stop + 1
+        while (run < runs.size && runs[run].end <= at) run++
+        var styles: List<String> = emptyList()
+        for (i in run until runs.size) {
+            if (runs[i].start >= stop) break
+            if (runs[i].styles.isNotEmpty()) { styles = runs[i].styles; break }
+        }
+        // Пустая строка — воздух между абзацами: своего рода у неё нет.
+        val blank = stop - at <= 1 && styles.none { it == "pad" || it == "codeblock" }
+        val isProse = "body" in styles && styles.none { it.startsWith("list") || it == "note" }
+        val was = kind
+        if (!blank && was != null && was != isProse) {
+            out.addAll(prose(text, from, at).map { Piece(it.start, it.end, was) })
+            from = at
+        }
+        if (!blank) kind = isProse
+        at = stop
+    }
+    val last = kind ?: false
+    if (end > from) out.addAll(prose(text, from, end).map { Piece(it.start, it.end, last) })
     return out
 }
 
@@ -433,7 +479,7 @@ fun typeset(
         val to = minOf(run.end, end)
         if (from >= to) continue
         val look = look(run.styles, m, palette)
-        val face = fonts.pick(look.mono, look.weight, look.italic)
+        val face = fonts.pick(look.mono, look.weight, look.italic, m.face)
         val a = from - base
         val b = to - base
         out.setSpan(FaceSpan(face, m.text * look.size, look.tracking, look.rise), a, b, flags)

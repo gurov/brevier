@@ -37,9 +37,9 @@ use brevier::address::{self, Address, ArchivePage, Internal, Repo};
 use brevier::failure::{Failure, describe, describe_page};
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
-    ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, HANG, HEADING_WEIGHTS, HEADINGS, INDENT,
-    LINE_HEIGHT, MEASURE, NOTE_HANG, NOTE_INDENT, NOTE_SIZE, NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE,
-    TEXT_SIZE, ZOOM_NORMAL, ZOOM_STEPS, clip,
+    self, ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, Face, HANG, HEADING_WEIGHTS, HEADINGS,
+    INDENT, NOTE_HANG, NOTE_INDENT, NOTE_SIZE, NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE, TEXT_SIZE,
+    Type, ZOOM_NORMAL, ZOOM_STEPS, clip,
 };
 use brevier::page::{self, Block};
 use brevier::palette::{
@@ -61,7 +61,6 @@ const PRESENT: Duration = Duration::from_secs(180);
 const OFFER_FOR: Duration = Duration::from_secs(60);
 /// Начало адреса поиска по архиву (#8): его ставит `Ctrl+Shift+F`.
 const ARCHIVE_SEARCH: &str = "brevier:archive?q=";
-const BODY_FAMILY: &str = "Noto Sans";
 const MONO_FAMILY: &str = "Noto Sans Mono";
 /// Жирность в единицах Pango: свойство тега — целое, а не перечисление.
 const BOLD: i32 = 700;
@@ -377,6 +376,9 @@ struct Tab {
     /// на окно; если читатель сменил его, пока эта вкладка была в фоне,
     /// при показе её надо перерисовать под новую ступень.
     zoom_seen: usize,
+    /// Под какой набор читателя (#4) она нарисована: сменили в настройках —
+    /// перерисовать при показе, как при смене ступени.
+    type_seen: Type,
     /// При какой плотности экрана (`scale_factor`) разобраны её картинки.
     /// Окно переехало на другой экран — перерисовать, как при смене ступени:
     /// картинки разбираются в пикселях экрана (#15).
@@ -450,6 +452,9 @@ struct State {
     /// На диск по-прежнему не едет — только на этот запуск: иначе это уже
     /// хранилище настроек со своим форматом и починкой при обновлении.
     zoom: usize,
+    /// Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж, выключка.
+    /// В отличие от ступени — на диске, в `settings.tsv`.
+    typography: Type,
     /// Куда читатель уже ходил. Журнал на диске, свод в памяти: по нему
     /// строятся подсказки адресной строки, а страница истории читает файл
     /// заново — программа может быть открыта и дважды.
@@ -784,6 +789,7 @@ fn build(app: &Application, start: Vec<String>) {
         images: settings.images,
         archive: settings.archive,
         zoom: ZOOM_NORMAL,
+        typography: settings.typography,
         store: Store::open(),
         marks: Marks::open(),
         readings: Readings::open(),
@@ -1226,6 +1232,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             fresh_visit: false,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
+            type_seen: Type::USUAL,
             density_seen: 1,
             pages: HashMap::new(),
             blobs: Blobs::default(),
@@ -1346,6 +1353,7 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         &show_images,
     ));
     page.append(&rows);
+    type_settings(ui, state, &page);
 
     let kept = gtk::Label::builder().label("History").xalign(0.0).build();
     kept.add_css_class("shelf-title");
@@ -1385,6 +1393,198 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
     }
 
     page
+}
+
+/// Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж и выключка —
+/// раз и для всех сайтов. Под выбором — образец, набранный тем, что выбрано:
+/// интерлиньяж «1.65» по названию не выберешь. Открытые статьи догоняют
+/// набор при показе (`rezoom_current`), как ступень масштаба.
+fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
+    let chosen = state.borrow().typography;
+    let title = gtk::Label::builder().label("Type").xalign(0.0).build();
+    title.add_css_class("shelf-title");
+    page.append(&title);
+
+    let sample = gtk::TextView::builder()
+        .editable(false)
+        .cursor_visible(false)
+        .can_focus(false)
+        .wrap_mode(gtk::WrapMode::WordChar)
+        .halign(gtk::Align::Start)
+        .margin_start(24)
+        .margin_bottom(6)
+        .build();
+    {
+        let buffer = sample.buffer();
+        let borrowed = state.borrow();
+        tags(&buffer, borrowed.dark, page_scale(&borrowed), &chosen);
+        let mut end = buffer.end_iter();
+        buffer.insert_with_tags_by_name(&mut end, "The type is yours\n", &["h3"]);
+        buffer.insert_with_tags_by_name(
+            &mut end,
+            &brevier::typeset::typeset(SAMPLE, "en"),
+            &["body"],
+        );
+    }
+
+    let faces: Vec<&str> = Face::ALL.iter().map(|face| face.label()).collect();
+    let face = gtk::DropDown::from_strings(&faces);
+    face.set_valign(gtk::Align::Center);
+    face.set_selected(Face::ALL.iter().position(|f| *f == chosen.face).unwrap_or(0) as u32);
+    let sizes = outline::choices(&outline::SIZES, chosen.size);
+    let size = number_choice(&sizes, chosen.size, outline::size_label);
+    let measures = outline::choices(&outline::MEASURES, chosen.measure);
+    let measure = number_choice(&measures, chosen.measure, outline::measure_label);
+    let leadings = outline::choices(&outline::LEADINGS, chosen.leading);
+    let leading = number_choice(&leadings, chosen.leading, outline::leading_label);
+    let justify = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(chosen.justify)
+        .build();
+    let reset = gtk::Button::builder()
+        .label("Reset")
+        .valign(gtk::Align::Center)
+        .build();
+
+    // Каждый выбор правит своё поле набора, проверяет, что колонка ещё
+    // помещается на экран, и перенабирает образец.
+    let change = {
+        let ui = ui.clone();
+        let state = state.clone();
+        let sample = sample.clone();
+        Rc::new(move |edit: &dyn Fn(&mut Type)| -> bool {
+            let mut next = state.borrow().typography;
+            edit(&mut next);
+            let step = ZOOM_STEPS[current_zoom(&state.borrow())];
+            if !fits_on_screen(&ui, step * next.scale(), &next) {
+                notice(&ui, "That would not fit on this screen");
+                return false;
+            }
+            state.borrow_mut().typography = next;
+            remember_settings(&ui, &state);
+            let borrowed = state.borrow();
+            tags(&sample.buffer(), borrowed.dark, page_scale(&borrowed), &next);
+            sample.set_width_request(
+                (f64::from(TEXT_SIZE * next.measure * page_scale(&borrowed)) * dpi() / 72.0)
+                    .round() as i32,
+            );
+            true
+        })
+    };
+    change(&|_| {});
+
+    {
+        let change = change.clone();
+        face.connect_selected_notify(move |face| {
+            let chosen = Face::ALL[(face.selected() as usize).min(Face::ALL.len() - 1)];
+            change(&|next| next.face = chosen);
+        });
+    }
+    // Не поместилось — выбор возвращается к прежнему значению.
+    let numbers = [
+        (&size, sizes, (|next: &mut Type, value| next.size = value) as fn(&mut Type, f32)),
+        (&measure, measures, |next, value| next.measure = value),
+        (&leading, leadings, |next, value| next.leading = value),
+    ];
+    for (control, values, set) in numbers {
+        let change = change.clone();
+        let at = Rc::new(Cell::new(control.selected()));
+        control.connect_selected_notify(move |control| {
+            let index = control.selected() as usize;
+            let Some(&value) = values.get(index) else {
+                return;
+            };
+            if change(&|next| set(next, value)) {
+                at.set(index as u32);
+            } else {
+                control.set_selected(at.get());
+            }
+        });
+    }
+    {
+        let change = change.clone();
+        justify.connect_active_notify(move |switch| {
+            let on = switch.is_active();
+            change(&|next| next.justify = on);
+        });
+    }
+    {
+        let (face, size, measure, leading, justify) = (
+            face.clone(),
+            size.clone(),
+            measure.clone(),
+            leading.clone(),
+            justify.clone(),
+        );
+        reset.connect_clicked(move |_| {
+            let usual = Type::USUAL;
+            face.set_selected(0);
+            for (control, values, value) in [
+                (&size, &outline::SIZES[..], usual.size),
+                (&measure, &outline::MEASURES[..], usual.measure),
+                (&leading, &outline::LEADINGS[..], usual.leading),
+            ] {
+                let values = outline::choices(values, value);
+                if let Some(index) = values.iter().position(|v| *v == value) {
+                    control.set_selected(index as u32);
+                }
+            }
+            justify.set_active(usual.justify);
+        });
+    }
+
+    let rows = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    rows.add_css_class("rich-list");
+    rows.append(&setting_row(
+        "Typeface",
+        "Noto Sans comes with Brevier and looks the same everywhere. The \
+         others are whatever your system calls serif and sans.",
+        &face,
+    ));
+    rows.append(&setting_row(
+        "Size",
+        "Everything grows with it: headings, indents, code. Zoom stays \
+         on top, for this run only.",
+        &size,
+    ));
+    rows.append(&setting_row(
+        "Line length",
+        "Kept in ems, so a line holds the same number of letters at any size.",
+        &measure,
+    ));
+    rows.append(&setting_row("Line spacing", "In parts of the size.", &leading));
+    rows.append(&setting_row(
+        "Justified text",
+        "Even right edges. Bearable only with hyphenation, which Brevier \
+         does when the page names its language.",
+        &justify,
+    ));
+    rows.append(&action_row(
+        "Brevier's own type",
+        "Back to Noto Sans at 16.5 points, about 65 characters a line.",
+        &reset,
+    ));
+    page.append(&sample);
+    page.append(&rows);
+}
+
+/// Образец набора в настройках: заголовок и абзац, по-английски, с переносами.
+const SAMPLE: &str = "Choose the face, the size, the length of the line and the space \
+between lines once, and every page you open is set the same way: a news site, a blog, \
+the documentation of a library. The site decides what to say; how it reads is up to you.";
+
+/// Выбор из чисел с подписями.
+fn number_choice(values: &[f32], current: f32, label: fn(f32) -> String) -> gtk::DropDown {
+    let labels: Vec<String> = values.iter().map(|value| label(*value)).collect();
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let control = gtk::DropDown::from_strings(&labels);
+    control.set_valign(gtk::Align::Center);
+    if let Some(index) = values.iter().position(|value| *value == current) {
+        control.set_selected(index as u32);
+    }
+    control
 }
 
 /// Строка настройки: что делает, почему так и сам переключатель.
@@ -1694,7 +1894,15 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     view.set_halign(gtk::Align::Center);
     view.set_top_margin(28);
     view.set_bottom_margin(80);
-    tags(&view.buffer(), state.borrow().dark, ZOOM_STEPS[ZOOM_NORMAL]);
+    {
+        let borrowed = state.borrow();
+        tags(
+            &view.buffer(),
+            borrowed.dark,
+            borrowed.typography.scale(),
+            &borrowed.typography,
+        );
+    }
     fit_column(&view);
 
     let scroller = gtk::ScrolledWindow::builder()
@@ -1750,6 +1958,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             fresh_visit: false,
             pending: false,
             zoom_seen: ZOOM_NORMAL,
+            type_seen: Type::USUAL,
             density_seen: 1,
             pages: HashMap::new(),
             blobs: Blobs::default(),
@@ -2271,6 +2480,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         shelf: ui.show_contents.is_active(),
         shelf_width: Some(ui.shelf_width.get()),
         archive: borrowed.archive,
+        typography: borrowed.typography,
     }
     .save();
 }
@@ -2886,6 +3096,7 @@ fn show_document(
         copy.as_deref(),
     );
     let seen = current_zoom(&borrowed);
+    let typography = borrowed.typography;
     // Прогресс чтения (#19) — у статьи, не у списка ссылок и не у своих
     // страниц. Записанное о ней поднимаем сразу: доли на полке видны с порога.
     let readable = document.kind == brevier::Kind::Article
@@ -2927,6 +3138,7 @@ fn show_document(
         tab.feeds = site_rows(&document.feeds);
         tab.document = Some(document.clone());
         tab.zoom_seen = seen;
+        tab.type_seen = typography;
         tab.density_seen = density(ui);
     }
     drop(borrowed);
@@ -3044,7 +3256,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         .set_label(&format!("{}%", (ZOOM_STEPS[step] * 100.0).round() as i32));
     ui.zoom_level.set_visible(step != ZOOM_NORMAL);
     // Общая ступень — в ней же считается ширина колонки ниже по этой функции.
-    set_zoom(ZOOM_STEPS[step]);
+    set_scale(&state.borrow());
     ui.window.set_title(Some(&if address.is_empty() {
         "Brevier".to_owned()
     } else {
@@ -3159,7 +3371,7 @@ fn follow(ui: &Ui, state: &Rc<RefCell<State>>) {
     // а на полке отметился предыдущий раздел — то самое «кликнул, а горит
     // не то».
     let seen = view.visible_rect();
-    let slack = (text_px() * LINE_HEIGHT / 2.0) as i32;
+    let slack = (text_px() * typeset().leading / 2.0) as i32;
     let probe = seen.y() + (f64::from(seen.height()) * ANCHOR_ALIGN) as i32 + slack;
     // Проба мимо текста — не ответ «конец документа», а «сейчас не знаю».
     // Посреди прокрутки `GtkTextView` перекладывает строки, и высота
@@ -3323,6 +3535,7 @@ fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
 
 thread_local! {
     static ZOOM: Cell<f32> = const { Cell::new(1.0) };
+    static TYPE: Cell<Type> = const { Cell::new(Type::USUAL) };
     /// Первое окно процесса — то, которое отвечает за сессию.
     static OWNS_SESSION: Cell<bool> = const { Cell::new(true) };
 }
@@ -3336,13 +3549,24 @@ fn current_zoom(state: &State) -> usize {
 /// под меру. Всё, что зависит от масштаба, ставится здесь — иначе кегли,
 /// картинки и сетка таблицы разъедутся между собой.
 fn dress(state: &Rc<RefCell<State>>, view: &gtk::TextView) {
-    let (scale, dark) = {
+    let (scale, dark, typography) = {
         let borrowed = state.borrow();
-        (ZOOM_STEPS[current_zoom(&borrowed)], borrowed.dark)
+        set_scale(&borrowed);
+        (zoom() as f32, borrowed.dark, borrowed.typography)
     };
-    set_zoom(scale);
-    tags(&view.buffer(), dark, scale);
+    tags(&view.buffer(), dark, scale, &typography);
     fit_column(view);
+}
+
+/// Множитель всей модели: ступень масштаба поверх кегля читателя (#4).
+fn page_scale(state: &State) -> f32 {
+    ZOOM_STEPS[current_zoom(state)] * state.typography.scale()
+}
+
+/// Выставить окружающие масштаб и набор (`zoom`, `typeset`) под окно.
+fn set_scale(state: &State) {
+    set_zoom(page_scale(state));
+    TYPE.with(|cell| cell.set(state.typography));
 }
 
 /// Сменить общую ступень масштаба: `step` — насколько сдвинуться по лестнице,
@@ -3364,7 +3588,8 @@ fn zoom_by(ui: &Ui, state: &Rc<RefCell<State>>, step: i32) {
     // меру жёстко, окно растёт вслед за ней, и на узком экране следующая
     // ступень уехала бы за край — вместе с текстом. Обещать меру и не дать
     // её увидеть хуже, чем не увеличить.
-    if now > was && !fits_on_screen(ui, ZOOM_STEPS[now]) {
+    let typography = state.borrow().typography;
+    if now > was && !fits_on_screen(ui, ZOOM_STEPS[now] * typography.scale(), &typography) {
         notice(ui, "That step would not fit on this screen");
         return;
     }
@@ -3373,7 +3598,7 @@ fn zoom_by(ui: &Ui, state: &Rc<RefCell<State>>, step: i32) {
 }
 
 /// Поместится ли колонка такой ступени на экран, где стоит окно.
-fn fits_on_screen(ui: &Ui, scale: f32) -> bool {
+fn fits_on_screen(ui: &Ui, scale: f32, typography: &Type) -> bool {
     let monitor = ui.window.surface().and_then(|surface| {
         gtk::gdk::Display::default().and_then(|display| display.monitor_at_surface(&surface))
     });
@@ -3381,7 +3606,9 @@ fn fits_on_screen(ui: &Ui, scale: f32) -> bool {
         // Про экран ничего не известно — не мешаем читателю.
         return true;
     };
-    let column = (f64::from(MEASURE + 2.0 * TEXT_SIZE) * f64::from(scale) * dpi() / 72.0).round();
+    let column = (f64::from(TEXT_SIZE * (typography.measure + 2.0)) * f64::from(scale) * dpi()
+        / 72.0)
+        .round();
     column as i32 <= monitor.geometry().width()
 }
 
@@ -3427,6 +3654,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
     {
         let mut borrowed = state.borrow_mut();
         let seen = current_zoom(&borrowed);
+        let typography = borrowed.typography;
         if let Some(tab) = borrowed.find(id) {
             tab.links = page.links;
             tab.focus = None;
@@ -3434,6 +3662,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.anchors = page.anchors;
             tab.shots = page.shots.clone();
             tab.zoom_seen = seen;
+            tab.type_seen = typography;
             tab.density_seen = density(ui);
         }
     }
@@ -3473,7 +3702,9 @@ fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
         borrowed.tabs.get(index).is_some_and(|tab| {
             !tab.pending
                 && tab.document.is_some()
-                && (tab.zoom_seen != current_zoom(&borrowed) || tab.density_seen != density(ui))
+                && (tab.zoom_seen != current_zoom(&borrowed)
+                    || tab.type_seen != borrowed.typography
+                    || tab.density_seen != density(ui))
         })
     };
     if stale {
@@ -3502,6 +3733,13 @@ fn zoom() -> f64 {
 
 fn set_zoom(scale: f32) {
     ZOOM.with(|cell| cell.set(scale));
+}
+
+/// Набор читателя, под который рисуем, — окружающий по той же причине,
+/// что и `zoom()`: мера и интерлиньяж нужны глубоко внутри, где вкладки
+/// уже не видно.
+fn typeset() -> Type {
+    TYPE.with(Cell::get)
 }
 
 /// Стек потока, в котором работает ядро.
@@ -3534,7 +3772,7 @@ fn off_main<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> gio
 /// Масштаб входит и сюда: мера задана в кеглях, поэтому колонка растёт
 /// вместе с кеглем и строка остаётся той же длины в знаках.
 fn measure_px() -> i32 {
-    (f64::from(MEASURE) * zoom() * dpi() / 72.0).round() as i32
+    (f64::from(TEXT_SIZE * typeset().measure) * zoom() * dpi() / 72.0).round() as i32
 }
 
 /// Колонка статьи: текст в меру и поле по бокам в кегль текста, как на
@@ -4105,12 +4343,14 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
     let page = render(view, &document, None);
     let mut borrowed = state.borrow_mut();
     let seen = current_zoom(&borrowed);
+    let typography = borrowed.typography;
     if let Some(tab) = borrowed.find(id) {
         tab.links = page.links;
         tab.focus = None;
         tab.marks = page.marks;
         tab.anchors = page.anchors;
         tab.zoom_seen = seen;
+        tab.type_seen = typography;
         tab.density_seen = density(ui);
     }
     drop(borrowed);
@@ -4140,20 +4380,33 @@ fn style(buffer: &gtk::TextBuffer, name: &str, properties: &[(&str, &dyn glib::v
 /// Масштаб умножает модель целиком — кегль, воздух между строками, шкалу
 /// заголовков, отступы списка и цитаты, поля блока кода. Умножить один
 /// кегль значило бы развалить их между собой.
-fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
+fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
     let scale = f64::from(scale);
     let px = |value: f64| (value * scale).round() as i32;
-    let extra = px(f64::from((LINE_HEIGHT - 1.0) * TEXT_SIZE));
+    let extra = px(f64::from((typography.leading - 1.0) * TEXT_SIZE));
     let body = f64::from(TEXT_SIZE) * scale;
+    let family = typography.face.family();
+    // Выключка (#6) — только абзацу прозы: у заголовка строки короткие,
+    // у кода и строки стиха пробелы значимы. Пункт списка и сноска тоже
+    // остаются с рваным краем: у строки с висячим отступом Pango растягивает
+    // текст до края, не считая дефиса переноса, и дефис уходит за меру;
+    // заодно не растягивается пробел после маркера. Последнюю строку абзаца
+    // Pango не растягивает.
+    let justification = if typography.justify {
+        gtk::Justification::Fill
+    } else {
+        gtk::Justification::Left
+    };
 
     style(
         buffer,
         "body",
         &[
-            ("family", &BODY_FAMILY),
+            ("family", &family),
             ("size-points", &body),
             ("pixels-inside-wrap", &extra),
             ("pixels-below-lines", &(extra * 2)),
+            ("justification", &justification),
         ],
     );
     // Строфа (#21): каждая строка стиха — свой абзац буфера, и воздух между
@@ -4165,7 +4418,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
         buffer,
         "verse",
         &[
-            ("family", &BODY_FAMILY),
+            ("family", &family),
             ("size-points", &body),
             ("pixels-inside-wrap", &extra),
             ("pixels-below-lines", &extra),
@@ -4179,7 +4432,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             buffer,
             &name,
             &[
-                ("family", &BODY_FAMILY),
+                ("family", &family),
                 ("size-points", &(body * f64::from(*ratio))),
                 ("weight", &HEADING_WEIGHTS[index]),
                 // Воздух сверху, а не снизу: заголовок принадлежит тому,
@@ -4276,6 +4529,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             &[
                 ("left-margin", &px(f64::from(INDENT) * f64::from(level))),
                 ("indent", &px(-f64::from(HANG))),
+                ("justification", &gtk::Justification::Left),
                 // Пункты стоят плотнее абзацев: список — одна мысль, разбитая
                 // на части, а не несколько абзацев подряд.
                 ("pixels-below-lines", &(extra / 2)),
@@ -4354,6 +4608,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32) {
             ("size-points", &(body * f64::from(NOTE_SIZE))),
             ("left-margin", &px(f64::from(NOTE_INDENT))),
             ("indent", &px(-f64::from(NOTE_HANG))),
+            ("justification", &gtk::Justification::Left),
             ("pixels-below-lines", &(extra / 2)),
         ],
     );
@@ -5046,7 +5301,8 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
                 None => return None,
             };
             layout.set_font_description(Some(&pango::FontDescription::from_string(&format!(
-                "{BODY_FAMILY} {}",
+                "{} {}",
+                typeset().face.family(),
                 TEXT_SIZE
             ))));
             Some(layout)
@@ -5144,7 +5400,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         return;
     }
     // Под общую ступень: картинка ужимается до меры, а мера зависит от неё.
-    set_zoom(ZOOM_STEPS[current_zoom(&state.borrow())]);
+    set_scale(&state.borrow());
     let (generation, cached) = {
         let mut borrowed = state.borrow_mut();
         let Some(tab) = borrowed.find(id) else {

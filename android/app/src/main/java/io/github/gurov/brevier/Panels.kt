@@ -1,10 +1,13 @@
 package io.github.gurov.brevier
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.os.Build
+import android.text.Layout
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -19,6 +22,8 @@ import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import java.util.Locale
+import org.json.JSONArray
 
 /** Пиксели из dp: подписи и поля интерфейса, а не статьи. */
 fun Context.dp(value: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics).toInt()
@@ -386,6 +391,8 @@ class SettingsPage(
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
     private val browser: () -> Unit,
+    private val typeChanged: (ReaderType) -> Unit,
+    private val metricsOf: (ReaderType) -> Metrics,
 ) : ScrollView(context) {
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private var dark = false
@@ -398,7 +405,7 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, dark: Boolean, images: Boolean, archive: Boolean, isBrowser: Boolean) {
+    fun show(palette: Palette, dark: Boolean, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType) {
         this.dark = dark
         this.images = images
         setBackgroundColor(palette.shelf)
@@ -421,6 +428,8 @@ class SettingsPage(
             "Off means no decoding at all: after JavaScript is gone, the image decoder is the one serious attack surface left.",
             switch(palette, images) { on -> this.images = on; changed(this.dark, this.images) }, palette,
         ))
+
+        typeSection(palette, reader)
 
         column.addView(section("Links", palette))
         column.addView(row(
@@ -447,6 +456,116 @@ class SettingsPage(
             button("Forget", 0xffb3261e.toInt(), palette) { forget() }, palette,
         ))
         visibility = VISIBLE
+    }
+
+    /**
+     * Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж и выключка —
+     * раз и для всех сайтов. Значения и подписи — из ядра; над выбором —
+     * образец, набранный выбранным.
+     */
+    private fun typeSection(palette: Palette, reader: ReaderType) {
+        val stored = Core.settings()
+        val usual = ReaderType.of(stored.getJSONObject("usual"))
+        column.addView(section("Type", palette))
+        column.addView(sample(palette, reader))
+
+        val faces = stored.getJSONArray("faces")
+        val faceLabels = (0 until faces.length()).map { faces.getJSONObject(it).getString("label") }
+        val faceNames = (0 until faces.length()).map { faces.getJSONObject(it).getString("name") }
+        column.addView(row(
+            "Typeface",
+            "Noto Sans comes with Brevier and looks the same everywhere. The others are whatever your system calls serif and sans.",
+            choice(palette, "Typeface", faceLabels, faceNames.indexOf(reader.face)) { at -> typeChanged(reader.copy(face = faceNames[at])) },
+            palette,
+        ))
+        column.addView(row(
+            "Size", "Everything grows with it: headings, indents, code. Zoom stays on top, for this run only.",
+            numbers(palette, "Size", stored.getJSONArray("sizes"), reader.size) { value -> typeChanged(reader.copy(size = value)) },
+            palette,
+        ))
+        column.addView(row(
+            "Line length", "Kept in ems, so a line holds the same number of letters at any size. On a phone the screen is usually narrower.",
+            numbers(palette, "Line length", stored.getJSONArray("measures"), reader.measure) { value -> typeChanged(reader.copy(measure = value)) },
+            palette,
+        ))
+        column.addView(row(
+            "Line spacing", "In parts of the size.",
+            numbers(palette, "Line spacing", stored.getJSONArray("leadings"), reader.leading) { value -> typeChanged(reader.copy(leading = value)) },
+            palette,
+        ))
+        column.addView(row(
+            "Justified text", "Even right edges. Bearable only with hyphenation, which Brevier does when the page names its language.",
+            switch(palette, reader.justify) { on -> typeChanged(reader.copy(justify = on)) }, palette,
+        ))
+        column.addView(row(
+            "Brevier's own type", "Back to Noto Sans at 16.5 points, about 65 characters a line.",
+            button("Reset", palette.ink, palette) { typeChanged(usual) }, palette,
+        ))
+    }
+
+    /** Образец: заголовок и абзац, набранные выбранным, на бумаге статьи. */
+    private fun sample(palette: Palette, reader: ReaderType): View {
+        val m = metricsOf(reader)
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = m.text.toInt()
+            setPadding(pad, pad / 2, pad, pad)
+            background = GradientDrawable().apply {
+                setColor(m.type.palette(dark).paper)
+                cornerRadius = context.dp(6f).toFloat()
+            }
+        }
+        val heading = TextView(context).apply {
+            text = "The type is yours"
+            typeface = fonts.pick(false, m.type.headingWeights[2], false, reader.face).typeface
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, m.text * m.type.headings[2])
+            setTextColor(palette.ink)
+            setPadding(0, 0, 0, m.extra.toInt())
+        }
+        val body = TextView(context).apply {
+            text = SAMPLE
+            typeface = fonts.pick(false, 400, false, reader.face).typeface
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, m.text)
+            setTextColor(palette.ink)
+            setLineSpacing(m.extra, 1f)
+            maxWidth = m.measure.toInt()
+            // Образец английский — пусть Android и переносит его по-английски.
+            textLocale = Locale.ENGLISH
+            if (Build.VERSION.SDK_INT >= 23) {
+                breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
+                hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NORMAL
+            }
+            if (Build.VERSION.SDK_INT >= 26) {
+                justificationMode = if (reader.justify) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE
+            }
+        }
+        box.addView(heading)
+        box.addView(body)
+        return box.also {
+            it.layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = context.dp(4f)
+                bottomMargin = context.dp(6f)
+            }
+        }
+    }
+
+    /** Кнопка со значением; нажатие — список на выбор. */
+    private fun choice(palette: Palette, title: String, labels: List<String>, at: Int, picked: (Int) -> Unit) =
+        button(labels.getOrElse(at) { labels.first() }, palette.ink, palette) {
+            AlertDialog.Builder(context)
+                .setTitle(title)
+                .setSingleChoiceItems(labels.toTypedArray(), at) { dialog, which ->
+                    dialog.dismiss()
+                    if (which != at) picked(which)
+                }
+                .show()
+        }
+
+    private fun numbers(palette: Palette, title: String, items: JSONArray, current: Float, picked: (Float) -> Unit): View {
+        val values = (0 until items.length()).map { items.getJSONObject(it).getDouble("value").toFloat() }
+        val labels = (0 until items.length()).map { items.getJSONObject(it).getString("label") }
+        val at = values.indexOfFirst { Math.abs(it - current) < 0.001f }.coerceAtLeast(0)
+        return choice(palette, title, labels, at) { which -> picked(values[which]) }
     }
 
     private fun button(label: String, ink: Int, palette: Palette, act: () -> Unit) = TextView(context).apply {
@@ -489,6 +608,11 @@ class SettingsPage(
         setOnCheckedChangeListener { _, checked -> flip(checked) }
     }
 }
+
+/** Образец набора в настройках — тот же, что в окне. */
+private const val SAMPLE = "Choose the face, the size, the length of the line and the space between lines once, " +
+    "and every page you open is set the same way: a news site, a blog, the documentation of a library. " +
+    "The site decides what to say; how it reads is up to you."
 
 /**
  * Меню под «⋮»: ряд значков для того, что трогают часто, и список — для

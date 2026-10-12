@@ -68,6 +68,12 @@ object Core {
         call("settings.save", flags.joinToString(FIELD.toString()))
     }
 
+    /** Набор читателя (#4) — в `settings.tsv` рядом с темой. */
+    fun saveType(type: ReaderType) {
+        val fields = listOf(type.face, type.size.toString(), type.measure.toString(), type.leading.toString(), if (type.justify) "1" else "0")
+        call("type.save", fields.joinToString(FIELD.toString()))
+    }
+
     fun session(): JSONArray = list("session", "")
 
     /** Вкладка сессии: текущая ли, где в истории, где в тексте и сам путь. */
