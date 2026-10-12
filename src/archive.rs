@@ -255,12 +255,23 @@ impl Archive {
             let Some(head) = parse_head(&text) else {
                 continue;
             };
-            let body = crate::markdown::body(&text);
-            let lower = body.to_lowercase();
+            // Сначала грубо, по исходнику: разбирать markdown каждой копии
+            // архива ради отказа дорого. Обратная косая — экранирование,
+            // в тексте статьи её нет (`foo\_bar`).
+            let lower = crate::markdown::body(&text)
+                .to_lowercase()
+                .replace('\\', "");
             if !words.iter().all(|word| lower.contains(word.as_str())) {
                 continue;
             }
-            let snippet = snippet(body, &words);
+            // Затем по тексту, который видел читатель: слово из адреса
+            // ссылки — не находка.
+            let plain = crate::markdown::plain_text(&text);
+            let lower = plain.to_lowercase();
+            if !words.iter().all(|word| lower.contains(word.as_str())) {
+                continue;
+            }
+            let snippet = snippet(&plain, &words);
             found.push((
                 Copy {
                     path,
@@ -594,16 +605,11 @@ fn shown_title(copy: &Copy) -> String {
 }
 
 /// Кусок текста вокруг первого найденного слова, одной строкой, со словами
-/// запроса жирным.
-fn snippet(body: &str, words: &[String]) -> String {
-    let flat: String = body
-        .lines()
-        .filter(|line| !line.trim_start().starts_with('#') && !line.trim_start().starts_with('!'))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
-    let chars: Vec<char> = flat.chars().collect();
-    let lower: Vec<char> = flat.chars().flat_map(char::to_lowercase).collect();
+/// запроса жирным. `plain` — текст статьи без разметки
+/// (`markdown::plain_text`).
+fn snippet(plain: &str, words: &[String]) -> String {
+    let chars: Vec<char> = plain.chars().collect();
+    let lower: Vec<char> = plain.chars().flat_map(char::to_lowercase).collect();
     // Нижний регистр бывает длиннее исходного (немецкое ß в верхнем) —
     // тогда ищем по исходному и места не сверяем.
     if lower.len() != chars.len() {
@@ -921,6 +927,36 @@ mod tests {
             "{results}"
         );
         assert!(archive.search_page("[x]").starts_with("# Archive: \\[x\\]"));
+    }
+
+    /// Кусок — из текста, который видел читатель, а не из исходника (#36):
+    /// ни хвоста `](адрес)` от ссылки, ни обратных кавычек, ни звёздочек;
+    /// слово только из адреса ссылки — не находка.
+    #[test]
+    fn a_snippet_is_the_text_the_reader_saw() {
+        let archive = Archive::at(temporary("plain"));
+        let read = stamp("2026-10-09T08:00:00Z");
+        archive.keep(
+            &article(
+                "https://danluu.com/keyboard-latency/",
+                "Keyboard latency",
+                "The only one who [publicly benchmarked keyboard latency]\
+                 (http://forums.blurbusters.com/viewtopic.php?f=10&t=1836) and \
+                 they only tested two keyboards. Call `poll()` *quickly*; \
+                 snake\\_case stays.\n\n![A keyboard](https://example.org/k.png)\n",
+            ),
+            &read,
+        );
+
+        let found = archive.search("latency");
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].1,
+            "…publicly benchmarked keyboard **latency** and they only tested two \
+             keyboards. Call poll() quickly; snake\\_case stays."
+        );
+        assert!(archive.search("blurbusters").is_empty());
+        assert_eq!(archive.search("snake_case").len(), 1);
     }
 
     /// Уборка: копия с журналом остаётся, без него — уходит, у закладки

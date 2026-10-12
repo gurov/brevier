@@ -1752,6 +1752,46 @@ pub fn parse<'a>(arena: &'a Arena<'a>, md: &str) -> &'a AstNode<'a> {
     comrak::parse_document(arena, &shallow(md), &options())
 }
 
+/// Текст, который читатель видит в статье, одной строкой: без разметки,
+/// адресов ссылок, картинок и заголовков. Для куска текста в поиске по архиву
+/// (#36): вырезанный из исходника, он показывал `](адрес)` от ссылки.
+pub fn plain_text(md: &str) -> String {
+    let arena = Arena::new();
+    let root = parse(&arena, body(md));
+    let mut out = String::new();
+    for node in root.descendants() {
+        let value = &node.data.borrow().value;
+        if node.ancestors().any(|up| hidden(&up.data.borrow().value)) {
+            continue;
+        }
+        match value {
+            NodeValue::Text(text) => out.push_str(text),
+            NodeValue::Code(code) => out.push_str(&code.literal),
+            NodeValue::CodeBlock(code) => {
+                out.push(' ');
+                out.push_str(&code.literal);
+            }
+            NodeValue::SoftBreak | NodeValue::LineBreak => out.push(' '),
+            value if value.block() => out.push(' '),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Чего в тексте статьи для поиска нет: заголовок повторяет название над
+/// куском, у картинки текста нет, сырой HTML и номер сноски — не слова.
+fn hidden(value: &NodeValue) -> bool {
+    matches!(
+        value,
+        NodeValue::Heading(_)
+            | NodeValue::Image(_)
+            | NodeValue::HtmlBlock(_)
+            | NodeValue::HtmlInline(_)
+            | NodeValue::FootnoteReference(_)
+    )
+}
+
 /// Сколько уровней цитаты в строке оставляем.
 const MAX_QUOTES: usize = 64;
 
