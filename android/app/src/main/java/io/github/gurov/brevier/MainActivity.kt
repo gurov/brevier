@@ -172,6 +172,10 @@ class MainActivity : Activity(), ArticleHost {
         val parsed = Core.parse(asked)
         if (!parsed.optBoolean("ok")) return
         val address = parsed.getString("address")
+        // Ссылку прислали посмотреть: что бы ни лежало поверх статьи, когда
+        // читатель уходил, — список вкладок, настройки, полка, — новая
+        // страница не должна оказаться под ним.
+        closePanels()
         // Пустая начальная вкладка — не чья-то страница: адрес занимает её,
         // а не заводит рядом вторую. Так или иначе вкладка — «снаружи»:
         // по Brevier читатель не ходил, и «назад» на начальную ему не нужен.
@@ -182,6 +186,15 @@ class MainActivity : Activity(), ArticleHost {
         } else {
             newTab(address, outside = true)
         }
+    }
+
+    /** Убрать всё, что лежит поверх статьи. */
+    private fun closePanels() {
+        if (hints.isShowing) hints.dismiss()
+        settings.visibility = View.GONE
+        tabList.visibility = View.GONE
+        if (shelf.open) shelf.hide()
+        if (findBar.visibility == View.VISIBLE) closeFind()
     }
 
     /**
