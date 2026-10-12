@@ -397,11 +397,40 @@ fn plain_words(text: &str) -> String {
 
 /// Язык страницы из `lang` на `<html>`. Пустое и отсутствующее — одно и то же:
 /// `None`, и тогда переносов нет.
+///
+/// Нет его на `<html>` — берём с того, что обнимает текст (#6): `<body>`,
+/// `<main>` или `<article>` (у XHTML — `xml:lang` на `<html>`). Статей
+/// с разными языками на странице бывает несколько — в ленте, — и тогда
+/// язык не наш: переносы по чужим правилам хуже, чем никаких. Язык
+/// отдельного абзаца — на будущее: markdown его не несёт.
 fn html_lang(doc: &Document) -> Option<String> {
-    doc.select("html")
-        .attr("lang")
-        .map(|lang| lang.trim().to_owned())
-        .filter(|lang| !lang.is_empty())
+    let value = |selection: dom_query::Selection, name: &str| {
+        selection
+            .attr(name)
+            .map(|lang| lang.trim().to_owned())
+            .filter(|lang| !lang.is_empty())
+    };
+    if let Some(lang) = value(doc.select("html"), "lang")
+        .or_else(|| value(doc.select("html"), "xml:lang"))
+        .or_else(|| value(doc.select("body"), "lang"))
+    {
+        return Some(lang);
+    }
+    let mut found: Option<String> = None;
+    for node in doc.select("main[lang], article[lang]").nodes() {
+        let Some(lang) = node.attr("lang").map(|lang| lang.trim().to_owned()) else {
+            continue;
+        };
+        if lang.is_empty() {
+            continue;
+        }
+        match &found {
+            Some(seen) if !seen.eq_ignore_ascii_case(&lang) => return None,
+            Some(_) => {}
+            None => found = Some(lang),
+        }
+    }
+    found
 }
 
 /// Где лежит навигация сайта.
@@ -3265,6 +3294,20 @@ mod tests {
         // Без `lang` — ничего: `None`, и тогда переносов не будет.
         let bare = page.replacen("<html lang=\"ru\">", "<html>", 1);
         let article = extract(&bare, "https://example.org/post").unwrap();
+        assert_eq!(article.lang, None);
+
+        // На `<html>` нет, на статье есть — берём со статьи.
+        let inner = bare.replacen("<article>", "<article lang=\"ru\">", 1);
+        let article = extract(&inner, "https://example.org/post").unwrap();
+        assert_eq!(article.lang.as_deref(), Some("ru"));
+
+        // Две статьи на разных языках — язык не наш.
+        let two = inner.replacen(
+            "</body>",
+            &format!("<article lang=\"en\"><p>{text}</p></article></body>"),
+            1,
+        );
+        let article = extract(&two, "https://example.org/post").unwrap();
         assert_eq!(article.lang, None);
     }
 
