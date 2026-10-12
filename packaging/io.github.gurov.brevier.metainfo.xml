@@ -47,7 +47,7 @@
 
   <launchable type="desktop-id">io.github.gurov.brevier.desktop</launchable>
 
-  <url type="homepage">https://github.com/gurov/brevier</url>
+  <url type="homepage">https://brevier.bizibah.com/</url>
   <url type="bugtracker">https://github.com/gurov/brevier/issues</url>
   <url type="vcs-browser">https://github.com/gurov/brevier</url>
 
@@ -90,6 +90,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.9.0" date="2026-10-12" type="development">
+      <description>
+        <p>The type is yours: Settings choose the face (the built-in Noto Sans,
+          or your system's serif or sans), the size, the line length and the
+          line spacing, once for every site, and can justify the text. A page
+          that names its language only on the article is hyphenated too.
+          Archive search shows the text you read, not its Markdown.</p>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-10-10" type="development">
       <description>
         <p>Security fixes: an SVG image on a web page can no longer read files

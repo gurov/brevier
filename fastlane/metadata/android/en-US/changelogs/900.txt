@@ -1,0 +1,4 @@
+• Your type: Settings choose the face (Noto Sans, or the system's serif or sans), the size, the line length and the line spacing, once for every site.
+• Justified text, as a setting.
+• More pages are hyphenated, and archive search shows the text you read, not its Markdown.
+• A link shared from another app opens on top of the tab list or settings.
