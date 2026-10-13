@@ -5,8 +5,8 @@
 //! получают именованные правила, у каждого — страницы в проверке. Системы
 //! плагинов вокруг нет и не будет: строка таблицы — функция здесь.
 //!
-//! Сейчас в таблице reddit, Hacker News (`hacker_news`), поисковик, читалка
-//! книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
+//! Сейчас в таблице reddit, Hacker News (`hacker_news`), Lobsters
+//! (`lobsters`), поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
 //! и полным текстом каждой реплики. Цена — вложенности ответов в ленте нет,
@@ -33,6 +33,21 @@ use dom_query::Document;
 use url::Url;
 
 pub mod hacker_news;
+pub mod lobsters;
+mod thread;
+
+pub use thread::Page;
+
+/// Площадка обсуждений, которую читает своё правило (#11), — по хосту.
+/// Какая это страница, решает форма, и не той формы — `None`.
+pub fn discussion(doc: &Document, url: &str) -> Option<Page> {
+    hacker_news::read(doc, url).or_else(|| lobsters::read(doc, url))
+}
+
+/// Адрес на площадке, у которой своё правило.
+pub fn is_discussion(url: &str) -> bool {
+    hacker_news::is_hacker_news(url) || lobsters::is_lobsters(url)
+}
 
 /// Хосты reddit, чьи страницы читаются через ленту.
 const REDDIT: &[&str] = &[

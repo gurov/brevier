@@ -160,6 +160,8 @@ https://oc.bizibah.com/posts/2026-09-05-week-of-august-29/
 
 
 https://news.ycombinator.com/item?id=49359425
+# Тред Lobsters — страница строки таблицы правил (#11), добавлена 13 октября 2026.
+https://lobste.rs/s/iq5xtw/linus_torvalds_working_on_hefty_linux
 
 ### 2. Технологические эссе и культура (Tech Thought Leadership)
 

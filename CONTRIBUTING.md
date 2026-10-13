@@ -32,8 +32,9 @@ mostly in Russian; write yours in whatever language you are most exact in.
 - **`android/`** — the Android app: Kotlin over the core, through one JNI entry point
   (`src/android.rs`) that answers in JSON. No androidx.
 - **`src/hosts.rs`** — the per-host rules, in one small table: reddit read through its
-  feed, Hacker News threads and story lists read from its own markup
-  (`src/hosts/hacker_news.rs`), the search engine's results page, and royallib's reader,
+  feed, Hacker News and Lobsters threads and story lists read from their own markup
+  (`src/hosts/hacker_news.rs`, `src/hosts/lobsters.rs`, what a thread looks like in
+  `src/hosts/thread.rs`), the search engine's results page, and royallib's reader,
   whose book comes part by part. Everything else is ruled by the shape of a page, never
   by its site. The results
   page is tested against a saved copy in `tests/fixtures/`; when DuckDuckGo changes its

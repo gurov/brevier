@@ -487,7 +487,7 @@ fn label(link: &NodeRef) -> String {
 ///   оказавшийся в подвале;
 /// - **один адрес — одна строка**: меню на странице лежит дважды, для
 ///   широкого экрана и для узкого, и оба раза целиком.
-fn site(doc: &Document, url: &str) -> Vec<Link> {
+pub(crate) fn site(doc: &Document, url: &str) -> Vec<Link> {
     const MAX_TITLE: usize = 40;
     const MAX_ROWS: usize = 60;
 

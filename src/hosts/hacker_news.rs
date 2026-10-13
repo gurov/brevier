@@ -19,26 +19,19 @@
 //! от ответа соседу. Время — день из `title` у `span.age` (ISO, UTC),
 //! а не «3 hours ago»: копия в архиве через месяц врала бы.
 
-use dom_query::{Document, NodeRef, Selection};
+use dom_query::{Document, NodeRef};
 use url::Url;
 
+use super::thread::{
+    Page, Reply, absolute, all, count_heading, first, squeeze, title_of, write_replies,
+};
 use crate::extract::Link;
 use crate::feed::{date_text, destination, heading, inline, reply_markdown};
-use crate::markdown::MAX_NEST;
 
 const HOST: &str = "news.ycombinator.com";
 
 /// Шаг распорки отступа — на случай, если у ячейки нет `indent`.
 const SPACER_STEP: usize = 40;
-
-/// Страница HN, разобранная правилом.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Page {
-    pub title: String,
-    pub markdown: String,
-    /// Тред читают — это статья. Список историй — список ссылок.
-    pub thread: bool,
-}
 
 /// Адрес на хосте HN. Какая это страница, решает форма (см. [`read`]).
 pub fn is_hacker_news(url: &str) -> bool {
@@ -58,10 +51,12 @@ pub fn read(doc: &Document, url: &str) -> Option<Page> {
     // Ссылка «reply» под каждой репликой — для вошедших; читателю не нужна.
     doc.select("div.reply").remove();
     let root = doc.root();
-    match first(&root, "table.fatitem") {
+    let mut page = match first(&root, "table.fatitem") {
         Some(item) => Some(thread(&root, &item, &base)),
         None => stories(&root, &base).or_else(|| comments(&root, &base)),
-    }
+    }?;
+    page.site = Some(site(doc, url));
+    Some(page)
 }
 
 /// Навигация сайта для полки: меню в шапке и свои страницы из подвала.
@@ -204,31 +199,19 @@ fn stories(root: &NodeRef, base: &Url) -> Option<Page> {
         title,
         markdown: out,
         thread: false,
+        site: None,
     })
 }
 
-/// Реплика дерева ответов или списка реплик.
-struct Reply {
-    depth: usize,
-    author: Option<String>,
-    date: Option<String>,
-    link: Option<String>,
-    /// История, к которой реплика, — в списках реплик (`newcomments`,
-    /// реплики одного автора); в треде её нет, там это сама страница.
-    on: Option<(String, Option<String>)>,
-    body: Option<String>,
-}
-
-impl Reply {
-    fn of(row: &NodeRef, base: &Url) -> Reply {
-        Reply {
-            depth: depth(row),
-            author: first(row, ".comhead a.hnuser").map(|node| squeeze(&node.text())),
-            date: first(row, ".comhead").as_ref().and_then(age),
-            link: row.attr("id").map(|id| item_url(&id)),
-            on: on_story(row, base),
-            body: body(row, base.as_str()),
-        }
+/// Реплика из строки дерева или списка.
+fn reply(row: &NodeRef, base: &Url) -> Reply {
+    Reply {
+        depth: depth(row),
+        author: first(row, ".comhead a.hnuser").map(|node| squeeze(&node.text())),
+        date: first(row, ".comhead").as_ref().and_then(age),
+        link: row.attr("id").map(|id| item_url(&id)),
+        on: on_story(row, base),
+        body: body(row, base.as_str()),
     }
 }
 
@@ -239,7 +222,7 @@ fn replies(root: &NodeRef, base: &Url) -> Vec<Reply> {
         .iter()
         .filter(|row| first(row, ".comhead").is_some())
         .filter(|row| !row.ancestors_it(None).any(|up| up.is("table.fatitem")))
-        .map(|row| Reply::of(row, base))
+        .map(|row| reply(row, base))
         .collect()
 }
 
@@ -251,16 +234,13 @@ fn thread(root: &NodeRef, item: &NodeRef, base: &Url) -> Page {
         None => comment_head(item, base),
     };
     let replies = replies(root, base);
-    out.push_str(&match replies.len() {
-        0 => format!("## No {word}s yet\n\n"),
-        1 => format!("## 1 {word}\n\n"),
-        count => format!("## {count} {}\n\n", plural(word)),
-    });
+    out.push_str(&count_heading(replies.len(), word));
     write_replies(&replies, &mut out);
     Page {
         title,
         markdown: out,
         thread: true,
+        site: None,
     }
 }
 
@@ -279,60 +259,8 @@ fn comments(root: &NodeRef, base: &Url) -> Option<Page> {
         title,
         markdown: out,
         thread: false,
+        site: None,
     })
-}
-
-/// Реплики подряд: шапка — автор, кому отвечает (если отступ кончился),
-/// день ссылкой на реплику, история; под ней текст; уровень — цитатой.
-fn write_replies(replies: &[Reply], out: &mut String) {
-    // Кто на каком уровне ответил последним: родитель реплики глубже
-    // отступа — последний автор уровнем выше.
-    let mut authors: Vec<Option<String>> = Vec::new();
-    for reply in replies {
-        authors.truncate(reply.depth);
-        let parent = reply
-            .depth
-            .checked_sub(1)
-            .and_then(|level| authors.get(level).cloned().flatten());
-        authors.resize(reply.depth, None);
-        authors.push(reply.author.clone());
-
-        let mut head = Vec::new();
-        if let Some(author) = &reply.author {
-            head.push(format!("**{}**", inline(author)));
-        }
-        if reply.depth > MAX_NEST
-            && let Some(parent) = parent
-        {
-            head.push(format!("replying to {}", inline(&parent)));
-        }
-        let when = reply.date.as_deref().unwrap_or("link");
-        match &reply.link {
-            Some(link) => head.push(format!("[{}]({})", inline(when), destination(link))),
-            None if reply.date.is_some() => head.push(inline(when)),
-            None => {}
-        }
-        match &reply.on {
-            Some((story, Some(link))) => {
-                head.push(format!("on [{}]({})", inline(story), destination(link)));
-            }
-            Some((story, None)) => head.push(format!("on {}", inline(story))),
-            None => {}
-        }
-        let mut text = head.join(" · ");
-        if let Some(body) = &reply.body {
-            if !text.is_empty() {
-                text.push_str("\n\n");
-            }
-            text.push_str(body);
-        }
-        // Между репликами — пустая строка без знака цитаты: со знаком
-        // соседние ответы одного уровня склеились бы в одну цитату.
-        out.push_str(&quote(&text, reply.depth.min(MAX_NEST)));
-        out.push_str("\n\n");
-    }
-    out.truncate(out.trim_end().len());
-    out.push('\n');
 }
 
 /// История, к которой реплика: `.onstory` в её шапке. Полное название —
@@ -463,62 +391,12 @@ fn age(node: &NodeRef) -> Option<String> {
     Some(date_text(stamp))
 }
 
-/// Цитата нужной глубины: строка за строкой, пустые — одним знаком.
-fn quote(text: &str, depth: usize) -> String {
-    if depth == 0 {
-        return text.to_owned();
-    }
-    let mark = "> ".repeat(depth);
-    text.lines()
-        .map(|line| {
-            if line.trim().is_empty() {
-                mark.trim_end().to_owned()
-            } else {
-                format!("{mark}{line}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn plural(word: &str) -> String {
-    match word {
-        "reply" => "replies".to_owned(),
-        word => format!("{word}s"),
-    }
-}
-
 fn page_title(root: &NodeRef) -> String {
-    first(root, "title")
-        .map(|node| squeeze(&node.text()))
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Hacker News".to_owned())
+    title_of(root).unwrap_or_else(|| "Hacker News".to_owned())
 }
 
 fn item_url(id: &str) -> String {
     format!("https://{HOST}/item?id={id}")
-}
-
-/// Адрес от страницы. Только http и https: `javascript:` никуда не ведёт.
-fn absolute(base: &Url, href: &str) -> Option<String> {
-    let url = base.join(href.trim()).ok()?;
-    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
-}
-
-fn first<'a>(node: &NodeRef<'a>, selector: &str) -> Option<NodeRef<'a>> {
-    Selection::from(*node)
-        .select(selector)
-        .nodes()
-        .first()
-        .cloned()
-}
-
-fn all<'a>(node: &NodeRef<'a>, selector: &str) -> Vec<NodeRef<'a>> {
-    Selection::from(*node).select(selector).nodes().to_vec()
-}
-
-fn squeeze(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]

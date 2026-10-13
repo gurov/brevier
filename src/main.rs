@@ -12,7 +12,8 @@ use brevier::{Address, address, extract, fetch, markdown};
 const HELP: &str = "\
 brevier — a JavaScript-free reader: fetches a page, extracts the article,
 prints it as Markdown (CommonMark + GFM). A feed (RSS, Atom, JSON) prints as
-a list of links, and a feed that discusses one page as a thread.
+a list of links, and a feed that discusses one page as a thread. Hacker News
+and Lobsters print their threads and lists of stories the same way.
 
 Usage: brevier [options] <url|feed://…|gh:owner/repo|gl:owner/repo|path|brevier:history>
        brevier --check [--min <0..100>] [--badge <path>] <url>…
@@ -363,10 +364,10 @@ fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
         eprintln!("brevier: search results, shown as a list of links");
         return Ok(document.markdown);
     }
-    // Тред и списки Hacker News — тоже своим правилом (#11), и навигацию
+    // Треды и списки площадок обсуждений — тоже своим правилом (#11), и навигацию
     // сайта `--nav` печатает ту, что покажет полка.
     if !args.html
-        && let Some(document) = brevier::from_hacker_news(html, url)
+        && let Some(document) = brevier::from_discussion(html, url)
     {
         if args.nav {
             let mut out = String::new();

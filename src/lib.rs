@@ -310,16 +310,17 @@ pub fn from_search(html: &str, url: &str) -> Result<Document, Error> {
     })
 }
 
-/// Hacker News (#11): тред и списки историй разбирает правило хоста
-/// (`hosts::hacker_news`), мимо извлечения; навигацию сайта — тоже оно.
-/// Ленты, язык и следующая страница — те же, что нашёл бы общий тракт.
-/// Страница HN другой формы — `None`, и её читает общий тракт.
-pub fn from_hacker_news(html: &str, url: &str) -> Option<Document> {
-    if !hosts::hacker_news::is_hacker_news(url) || nesting::html_too_deep(html) {
+/// Площадки обсуждений (#11) — Hacker News, Lobsters: тред и списки
+/// разбирает правило хоста (`hosts::discussion`), мимо извлечения.
+/// Ленты, язык и следующая страница — те же, что нашёл бы общий тракт;
+/// навигация сайта — правила, если оно её знает. Страница другой формы —
+/// `None`, и её читает общий тракт.
+pub fn from_discussion(html: &str, url: &str) -> Option<Document> {
+    if !hosts::is_discussion(url) || nesting::html_too_deep(html) {
         return None;
     }
     let doc = dom_query::Document::from(html);
-    let page = hosts::hacker_news::read(&doc, url)?;
+    let page = hosts::discussion(&doc, url)?;
     Some(Document {
         address: Address::Web(url.to_owned()),
         title: page.title,
@@ -330,7 +331,7 @@ pub fn from_hacker_news(html: &str, url: &str) -> Option<Document> {
             Kind::Listing
         },
         served: false,
-        site: hosts::hacker_news::site(&doc, url),
+        site: page.site.unwrap_or_else(|| extract::site(&doc, url)),
         feeds: feed::advertised(&doc, url),
         lang: extract::html_lang(&doc),
         next: extract::next_page(&doc, url),
@@ -348,7 +349,7 @@ pub fn from_html(html: &str, url: &str) -> Result<Document, Error> {
     if hosts::search_query(url).is_some() {
         return from_search(html, url);
     }
-    if let Some(document) = from_hacker_news(html, url) {
+    if let Some(document) = from_discussion(html, url) {
         return Ok(document);
     }
     let article = extract::extract(html, url)?;
