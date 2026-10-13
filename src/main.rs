@@ -12,8 +12,8 @@ use brevier::{Address, address, extract, fetch, markdown};
 const HELP: &str = "\
 brevier — a JavaScript-free reader: fetches a page, extracts the article,
 prints it as Markdown (CommonMark + GFM). A feed (RSS, Atom, JSON) prints as
-a list of links, and a feed that discusses one page as a thread. Hacker News
-and Lobsters print their threads and lists of stories the same way.
+a list of links, and a feed that discusses one page as a thread. Hacker News,
+Lobsters and Discourse forums print their threads and lists the same way.
 
 Usage: brevier [options] <url|feed://…|gh:owner/repo|gl:owner/repo|path|brevier:history>
        brevier --check [--min <0..100>] [--badge <path>] <url>…

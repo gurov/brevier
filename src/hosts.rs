@@ -6,7 +6,8 @@
 //! плагинов вокруг нет и не будет: строка таблицы — функция здесь.
 //!
 //! Сейчас в таблице reddit, Hacker News (`hacker_news`), Lobsters
-//! (`lobsters`), поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
+//! (`lobsters`), форумы Discourse (`discourse`, по программе, а не по хосту),
+//! поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
 //! и полным текстом каждой реплики. Цена — вложенности ответов в ленте нет,
@@ -32,21 +33,27 @@
 use dom_query::Document;
 use url::Url;
 
+pub mod discourse;
 pub mod hacker_news;
 pub mod lobsters;
 mod thread;
 
 pub use thread::Page;
 
-/// Площадка обсуждений, которую читает своё правило (#11), — по хосту.
+/// Площадка обсуждений, которую читает своё правило (#11): Hacker News
+/// и Lobsters — по хосту, форумы Discourse — по программе в шапке.
 /// Какая это страница, решает форма, и не той формы — `None`.
 pub fn discussion(doc: &Document, url: &str) -> Option<Page> {
-    hacker_news::read(doc, url).or_else(|| lobsters::read(doc, url))
+    hacker_news::read(doc, url)
+        .or_else(|| lobsters::read(doc, url))
+        .or_else(|| discourse::read(doc, url))
 }
 
-/// Адрес на площадке, у которой своё правило.
-pub fn is_discussion(url: &str) -> bool {
-    hacker_news::is_hacker_news(url) || lobsters::is_lobsters(url)
+/// Стоит ли разбирать страницу правилом площадки: хост из таблицы или
+/// Discourse в сыром HTML. Дёшево и до разбора — общему тракту не нужно
+/// платить за второй разбор каждой страницы.
+pub fn may_be_discussion(url: &str, html: &str) -> bool {
+    hacker_news::is_hacker_news(url) || lobsters::is_lobsters(url) || discourse::may_be(html)
 }
 
 /// Хосты reddit, чьи страницы читаются через ленту.

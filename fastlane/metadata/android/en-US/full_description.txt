@@ -6,7 +6,7 @@ What it does
 • Long reads remember where you stopped and offer to continue from there.
 • Every article you read is kept on the phone as your copy: it opens after the site has changed or gone, and "Search what you've read" looks through all of them.
 • Search from the address bar: words that are not an address go to DuckDuckGo Lite, and the results come back as a list of links.
-• RSS, Atom and JSON feeds, including feed files and feed:// links. A feed of comments on one page reads as a thread, and so do Hacker News and Lobsters.
+• RSS, Atom and JSON feeds, including feed files and feed:// links. A feed of comments on one page reads as a thread, and so do Hacker News, Lobsters and Discourse forums.
 • Documentation straight from GitHub and GitLab repositories: type gh:owner/repo.
 • Tabs, history, bookmarks, find on page, zoom, saving an article as Markdown (with its images, as a zip).
 • Pages read in the last week open without downloading.

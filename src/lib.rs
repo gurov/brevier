@@ -310,13 +310,13 @@ pub fn from_search(html: &str, url: &str) -> Result<Document, Error> {
     })
 }
 
-/// Площадки обсуждений (#11) — Hacker News, Lobsters: тред и списки
+/// Площадки обсуждений (#11) — Hacker News, Lobsters, Discourse: тред и списки
 /// разбирает правило хоста (`hosts::discussion`), мимо извлечения.
 /// Ленты, язык и следующая страница — те же, что нашёл бы общий тракт;
 /// навигация сайта — правила, если оно её знает. Страница другой формы —
 /// `None`, и её читает общий тракт.
 pub fn from_discussion(html: &str, url: &str) -> Option<Document> {
-    if !hosts::is_discussion(url) || nesting::html_too_deep(html) {
+    if !hosts::may_be_discussion(url, html) || nesting::html_too_deep(html) {
         return None;
     }
     let doc = dom_query::Document::from(html);

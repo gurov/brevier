@@ -162,6 +162,9 @@ https://oc.bizibah.com/posts/2026-09-05-week-of-august-29/
 https://news.ycombinator.com/item?id=49359425
 # Тред Lobsters — страница строки таблицы правил (#11), добавлена 13 октября 2026.
 https://lobste.rs/s/iq5xtw/linus_torvalds_working_on_hefty_linux
+# Тема на Discourse без markdown (страница для роботов) — строка таблицы (#11).
+# Обновится форум — отдаст markdown сам, и эталон станет его текстом.
+https://forum.obsidian.md/t/open-with-does-not-open-the-file-if-obsidian-is-not-running/119080
 
 ### 2. Технологические эссе и культура (Tech Thought Leadership)
 

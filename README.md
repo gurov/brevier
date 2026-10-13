@@ -238,10 +238,11 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **Feeds** open as lists of entries with date, author and a short summary — from an
   address, a `feed://` link or a file. A feed of comments on one page (a reddit thread,
   WordPress comments) reads as a thread.
-- **Hacker News and Lobsters read as threads.** The story, then every comment with its
-  author and day, replies indented; a reply too deep to indent says whom it answers. The
-  front page and the other lists of stories are lists of links, with points and a link to
-  the comments.
+- **Hacker News, Lobsters and Discourse forums read as threads.** The story, then every
+  comment with its author and day, replies indented; a reply too deep to indent says whom
+  it answers. The front page and the other lists of stories are lists of links, with
+  points and a link to the comments. A Discourse forum recent enough to serve Markdown is
+  read as it serves it.
 - **Repository folders can be listed:** end the address with a slash
   (`gh:owner/repo/docs/`) or use **Files in this directory** on the shelf.
 - **Search.** Anything that is not an address goes to DuckDuckGo Lite, and the results
@@ -359,8 +360,9 @@ line keeps no history.
 - **Markdown first.** Every request asks for `text/markdown` before HTML, and
   `<link rel="alternate" type="text/markdown">` is followed when a page has one.
 - **Very few per-site rules.** reddit is read through its `.rss` feeds (its pages are empty
-  without JavaScript); Hacker News and Lobsters are read from their own markup, since the
-  general extractor drops the author of every comment, or every comment but one;
+  without JavaScript); Hacker News, Lobsters and Discourse forums are read from their own
+  markup, since the general extractor drops the author of every comment, or every comment
+  but one;
   royallib's books open part by part; DuckDuckGo Lite results are unwrapped from its click
   tracker. Your search queries go to DuckDuckGo.
 - **The Wayback Machine is asked only when you press the button.** A page that is gone
