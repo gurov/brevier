@@ -28,10 +28,15 @@
     </p>
     <p>What you get:</p>
     <ul>
-      <li>One measure, one scale, one paper colour on every site, light or dark</li>
+      <li>Your typography on every site, on warm paper, light or dark: four
+          ready-made styles, or your own face, size, line length and spacing</li>
       <li>Fonts that travel with the program, so the page cannot pick its own</li>
-      <li>A shelf with the page's table of contents, the site's own menu, and the
-          project's documentation</li>
+      <li>A shelf with the page's table of contents, the site's own menu and feeds,
+          and the project's documentation</li>
+      <li>A copy of every article you read, kept and searchable after the site has
+          changed or gone, and long reads that offer to continue where you stopped</li>
+      <li>Feeds and search as lists of links; Hacker News and Lobsters as
+          threads</li>
       <li>Tabs that survive closing the window, history, bookmarks, and page search</li>
       <li>Images off by one switch: after JavaScript is gone, the image decoder is the
           one serious attack surface left</li>

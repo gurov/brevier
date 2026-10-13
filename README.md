@@ -29,8 +29,8 @@ Screen readers are known to work on Linux only (see
 
 ![An article in Brevier: an essay on keyboard latency set on ivory paper in the reader's
 own measure, hyphenated, its quotes ruled at the left; the shelf at the right lists the
-page's contents with the section being read marked, and the site's own links under
-them](assets/screenshot-article.png)
+page's contents with the section being read marked, and the site's own links under them;
+a thin line along the bottom shows how far into the page the reader is](assets/screenshot-article.png)
 
 ## Install
 
@@ -75,7 +75,7 @@ with. Updates install over it as long as they are signed with the same release k
 30:A4:32:B8:2F:3E:F0:FC:E5:F4:68:1F:D7:F9:FE:20:5F:4B:17:A2:F4:34:19:C2:45:0C:A2:6B:E6:8D:34:80
 ```
 
-An F-Droid listing is under review.
+F-Droid has accepted Brevier; it appears there after F-Droid's next build.
 
 Every release is built by CI from its tag, and `SHA256SUMS` lists the checksum of each
 file. To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building).
@@ -149,7 +149,7 @@ files, then the chapter's sections](assets/screenshot-repository.png)
 change and how many points each finding cost, and exits with an error below `--min`
 (80 by default). In the window the same report is in the menu, **Check this page**.
 
-![The check of example.com inside Brevier: a score of 81 out of 100, the arithmetic behind
+![The check of example.com inside Brevier: a score of 73 out of 100, the arithmetic behind
 it, and the findings by stage, each with what to change](assets/screenshot-check.png)
 
 In CI it is a GitHub Action:
