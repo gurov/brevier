@@ -446,7 +446,7 @@ fn intro() -> String {
         served: false,
         site: Vec::new(),
         feeds: Vec::new(),
-        lang: None,
+        lang: Some(crate::intro::LANG.to_owned()),
         next: None,
         archived: None,
     };

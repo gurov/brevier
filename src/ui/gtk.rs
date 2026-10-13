@@ -4341,7 +4341,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         served: false,
         site: Vec::new(),
         feeds: Vec::new(),
-        lang: None,
+        lang: Some(brevier::intro::LANG.to_owned()),
         next: None,
         archived: None,
     };

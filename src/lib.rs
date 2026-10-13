@@ -214,10 +214,18 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
         served: false,
         site: Vec::new(),
         feeds: Vec::new(),
-        lang: None,
+        lang: own_language(page),
         next: None,
         archived,
     })
+}
+
+/// Язык своей страницы. История и закладки написаны по-английски, а чужие
+/// заголовки в них стоят пунктами списка, которые не выключаются: без
+/// языка абзац над списком в наборе по ширине шёл бы дырами. Поиск, копии
+/// и отчёт проверки несут чужой текст — их язык не наш.
+fn own_language(page: &Internal) -> Option<String> {
+    matches!(page, Internal::History | Internal::Bookmarks).then(|| intro::LANG.to_owned())
 }
 
 fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
