@@ -435,6 +435,12 @@ fn from_html(html: &str, url: &str, access: Access) -> Report {
     structure_findings(&doc, &mut findings);
     extras_findings(&doc, access_measured, &mut findings);
     let preview = text_findings(html, url, &doc, &mut findings);
+    // Страницу, которую разбирает правило хоста (Hacker News, #11), читатель
+    // видит его глазами, а не глазами общего тракта: на главной HN тот
+    // не находит ничего.
+    let preview = crate::from_hacker_news(html, url)
+        .map(|document| first_screen(&document.markdown))
+        .or(preview);
 
     from_findings_with_preview(url.to_owned(), findings, access_measured, preview)
 }

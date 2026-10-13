@@ -810,6 +810,12 @@ mod tests {
     }
 
     #[test]
+    fn the_check_shows_what_the_reader_sees() {
+        let report = crate::check::check_html(&thread_html(), THREAD).to_markdown();
+        assert!(report.contains("**leumon** · [20 August 2026]"));
+    }
+
+    #[test]
     fn the_shelf_gets_the_menu_not_the_reply_links() {
         let doc = Document::from(thread_html());
         let links: Vec<(String, String)> = site(&doc, THREAD)
