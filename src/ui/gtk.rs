@@ -2806,17 +2806,20 @@ fn open_current(ui: &Ui, state: &Rc<RefCell<State>>, address: Address, remember:
     let Some(index) = ui.notebook.current_page() else {
         return;
     };
-    let id = match state.borrow().tabs.get(index as usize) {
+    // Заимствование отпускаем до `new_tab`: в заголовке `match` оно жило бы
+    // до конца `match`, и набор адреса на вкладке настроек ронял окно.
+    let tab = state
+        .borrow()
+        .tabs
+        .get(index as usize)
+        .map(|tab| (tab.id, tab.settings));
+    match tab {
         // На вкладке настроек статье места нет — открываем её новой вкладкой,
         // а не поверх переключателей.
-        Some(tab) if tab.settings => {
-            new_tab(ui, state, Some(address));
-            return;
-        }
-        Some(tab) => tab.id,
-        None => return,
-    };
-    open(ui, state, id, address, remember);
+        Some((_, true)) => new_tab(ui, state, Some(address)),
+        Some((id, false)) => open(ui, state, id, address, remember),
+        None => {}
+    }
 }
 
 /// Шаг по истории текущей вкладки.
