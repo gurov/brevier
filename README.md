@@ -196,9 +196,11 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 **Reading**
 
 - **Your typography, the same on every site.** Out of the box: 16.5 pt Noto Sans, about
-  65 characters per line, airy leading, headings lighter than the text. Settings change
-  the face (the built-in Noto Sans, or your system's serif or sans), the size, the line
-  length and the line spacing, once for every site; zoom stays on top, for the run.
+  65 characters per line, airy leading, headings lighter than the text. Settings offer
+  four ready-made styles — Brevier, Book (your system's serif, justified), Large print and
+  Compact — and under **Fine-tune**, the face (the built-in Noto Sans, or your system's
+  serif or sans), the size, the line length and the line spacing, once for every site;
+  zoom stays on top, for the run.
 - **Hyphenation by the page's language** (English and Russian are built in); in Russian
   and Czech no line ends on a one-letter word. Copy and find-on-page see the plain text.
 - **Justified text** as a setting: paragraphs get a straight right edge; headings, lists

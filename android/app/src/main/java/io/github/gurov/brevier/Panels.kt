@@ -15,6 +15,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -397,6 +398,8 @@ class SettingsPage(
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private var dark = false
     private var images = true
+    /** Развёрнута ли тонкая настройка набора; `null` — по набору: свой — да. */
+    private var fineTune: Boolean? = null
 
     init {
         visibility = GONE
@@ -465,43 +468,95 @@ class SettingsPage(
      */
     private fun typeSection(palette: Palette, reader: ReaderType) {
         val stored = Core.settings()
-        val usual = ReaderType.of(stored.getJSONObject("usual"))
         column.addView(section("Type", palette))
+
+        // Готовые наборы — кнопками в ряд, горит совпавший; свой набор
+        // не зажигает ни одной. Ряд прокручивается, если экран узкий.
+        val styles = stored.getJSONArray("styles")
+        val style = stored.optInt("style", -1)
+        val strip = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        for (at in 0 until styles.length()) {
+            val item = styles.getJSONObject(at)
+            val set = ReaderType.of(item.getJSONObject("type"))
+            strip.addView(
+                chip(item.getString("name"), at == style, palette) { if (at != style) typeChanged(set) }.apply {
+                    contentDescription = "${item.getString("name")}: ${item.getString("note")}"
+                },
+                LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    marginEnd = context.dp(8f)
+                },
+            )
+        }
+        column.addView(context.label("Four ready-made looks; the sample below shows the one you pick.", fonts, palette.dim, 13f).apply {
+            setPadding(0, context.dp(4f), 0, context.dp(8f))
+        })
+        column.addView(HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(strip)
+        })
+        val note = if (style >= 0) styles.getJSONObject(style).getString("note") else "Your own, fine-tuned below."
+        column.addView(context.label(note, fonts, palette.dim, 13f).apply {
+            setPadding(0, context.dp(8f), 0, context.dp(4f))
+        })
         column.addView(sample(palette, reader))
+
+        // Тонкая настройка свёрнута, пока набор — один из готовых: пять
+        // выборов подряд пугают того, кому хватит кнопки. Раскрыл — так
+        // и остаётся, пока открыты настройки.
+        val open = fineTune ?: (style < 0)
+        val fine = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (open) VISIBLE else GONE
+        }
+        val toggle = button(if (open) "Hide" else "Show", palette.ink, palette) {}
+        toggle.setOnClickListener {
+            val now = fine.visibility != VISIBLE
+            fineTune = now
+            fine.visibility = if (now) VISIBLE else GONE
+            toggle.text = if (now) "Hide" else "Show"
+        }
+        column.addView(row("Fine-tune", "Face, size, line length, spacing and justified text, one by one.", toggle, palette))
+        column.addView(fine)
 
         val faces = stored.getJSONArray("faces")
         val faceLabels = (0 until faces.length()).map { faces.getJSONObject(it).getString("label") }
         val faceNames = (0 until faces.length()).map { faces.getJSONObject(it).getString("name") }
-        column.addView(row(
+        fine.addView(row(
             "Typeface",
             "Noto Sans comes with Brevier and looks the same everywhere. The others are whatever your system calls serif and sans.",
             choice(palette, "Typeface", faceLabels, faceNames.indexOf(reader.face)) { at -> typeChanged(reader.copy(face = faceNames[at])) },
             palette,
         ))
-        column.addView(row(
+        fine.addView(row(
             "Size", "Everything grows with it: headings, indents, code. Zoom stays on top, for this run only.",
             numbers(palette, "Size", stored.getJSONArray("sizes"), reader.size) { value -> typeChanged(reader.copy(size = value)) },
             palette,
         ))
-        column.addView(row(
+        fine.addView(row(
             "Line length", "Kept in ems, so a line holds the same number of letters at any size. On a phone the screen is usually narrower.",
             numbers(palette, "Line length", stored.getJSONArray("measures"), reader.measure) { value -> typeChanged(reader.copy(measure = value)) },
             palette,
         ))
-        column.addView(row(
+        fine.addView(row(
             "Line spacing", "In parts of the size.",
             numbers(palette, "Line spacing", stored.getJSONArray("leadings"), reader.leading) { value -> typeChanged(reader.copy(leading = value)) },
             palette,
         ))
-        column.addView(row(
+        fine.addView(row(
             "Justified text", "Even right edges. Bearable only with hyphenation, which Brevier does when the page names its language.",
             switch(palette, reader.justify) { on -> typeChanged(reader.copy(justify = on)) }, palette,
         ))
-        column.addView(row(
-            "Brevier's own type", "Back to Noto Sans at 16.5 points, about 65 characters a line.",
-            button("Reset", palette.ink, palette) { typeChanged(usual) }, palette,
-        ))
     }
+
+    /** Кнопка готового набора: выбранная — залита, как выделение. */
+    private fun chip(label: String, chosen: Boolean, palette: Palette, act: () -> Unit) =
+        button(label, palette.ink, palette, act).apply {
+            isSelected = chosen
+            if (chosen) {
+                (background as GradientDrawable).setColor(palette.chosen)
+                typeface = fonts.medium
+            }
+        }
 
     /** Образец: заголовок и абзац, набранные выбранным, на бумаге статьи. */
     private fun sample(palette: Palette, reader: ReaderType): View {
@@ -533,7 +588,8 @@ class SettingsPage(
             textLocale = Locale.ENGLISH
             if (Build.VERSION.SDK_INT >= 23) {
                 breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
-                hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NORMAL
+                // Как в статье (`ArticleView`): по ширине — переносы чаще, иначе дыры.
+                hyphenationFrequency = if (reader.justify) Layout.HYPHENATION_FREQUENCY_FULL else Layout.HYPHENATION_FREQUENCY_NORMAL
             }
             if (Build.VERSION.SDK_INT >= 26) {
                 justificationMode = if (reader.justify) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE

@@ -118,6 +118,59 @@ pub const MEASURES: [f32; 8] = [28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0, 44.0];
 /// Интерлиньяж на выбор.
 pub const LEADINGS: [f32; 6] = [1.35, 1.45, 1.55, 1.65, 1.75, 1.9];
 
+/// Готовые наборы (13 октября 2026, мейнтейнер): пять настроек подряд
+/// пугают, поэтому сверху — четыре набора, а тонкая настройка свёрнута
+/// под ними. Значения — из списков выше, чтобы выбор под ними их показал.
+/// Первый — сам Brevier: он же и «вернуть как было».
+pub const STYLES: [Style; 4] = [
+    Style {
+        name: "Brevier",
+        note: "Noto Sans, 16.5 pt, about 65 characters a line",
+        set: Type::USUAL,
+    },
+    Style {
+        name: "Book",
+        note: "Your system's serif, 18 pt, justified",
+        set: Type {
+            face: Face::Serif,
+            size: 18.0,
+            measure: 34.0,
+            leading: 1.45,
+            justify: true,
+        },
+    },
+    Style {
+        name: "Large print",
+        note: "21 pt, shorter lines, more space between them",
+        set: Type {
+            face: Face::Bundled,
+            size: 21.0,
+            measure: 30.0,
+            leading: 1.65,
+            justify: false,
+        },
+    },
+    Style {
+        name: "Compact",
+        note: "15 pt, longer lines, more on the screen",
+        set: Type {
+            face: Face::Bundled,
+            size: 15.0,
+            measure: 40.0,
+            leading: 1.45,
+            justify: false,
+        },
+    },
+];
+
+/// Готовый набор: имя на кнопке, подпись к нему и сам набор.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style {
+    pub name: &'static str,
+    pub note: &'static str,
+    pub set: Type,
+}
+
 /// Пределы для правки руками: `settings.tsv` читатель открывает
 /// в редакторе, и число вне них — опечатка, а не выбор.
 const SIZE_LIMITS: (f32, f32) = (9.0, 36.0);
@@ -133,6 +186,20 @@ impl Type {
         leading: LINE_HEIGHT,
         justify: false,
     };
+
+    /// Готовый набор, с которым этот совпадает, — его кнопка горит.
+    /// `None` — набор свой, собранный тонкой настройкой.
+    pub fn style(&self) -> Option<usize> {
+        let near = |a: f32, b: f32| (a - b).abs() < 0.001;
+        STYLES.iter().position(|style| {
+            let set = style.set;
+            set.face == self.face
+                && near(set.size, self.size)
+                && near(set.measure, self.measure)
+                && near(set.leading, self.leading)
+                && set.justify == self.justify
+        })
+    }
 
     /// Во сколько раз кегль читателя больше нашего: на столько множится
     /// вся модель.
@@ -741,6 +808,26 @@ mod tests {
         assert_eq!(size_label(18.0), "18 pt");
         assert_eq!(leading_label(1.55), "1.55");
         assert_eq!(leading_label(1.9), "1.9");
+    }
+
+    /// Готовые наборы: первый — сам Brevier, все значения — из списков
+    /// выбора (иначе тонкая настройка показала бы не то), наборы разные,
+    /// и свой набор ни с одним не совпадает.
+    #[test]
+    fn the_styles_are_made_of_the_choices() {
+        assert_eq!(STYLES[0].set, Type::USUAL);
+        assert_eq!(Type::USUAL.style(), Some(0));
+        for (index, style) in STYLES.iter().enumerate() {
+            assert!(SIZES.contains(&style.set.size), "{}", style.name);
+            assert!(MEASURES.contains(&style.set.measure), "{}", style.name);
+            assert!(LEADINGS.contains(&style.set.leading), "{}", style.name);
+            assert_eq!(style.set.style(), Some(index), "{}", style.name);
+        }
+        let own = Type {
+            size: 19.5,
+            ..Type::USUAL
+        };
+        assert_eq!(own.style(), None);
     }
 
     /// Своё значение, вписанное руками, встаёт среди готовых на своё место;

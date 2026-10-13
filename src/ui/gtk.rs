@@ -1412,16 +1412,14 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         .margin_bottom(6)
         .build();
     {
-        let buffer = sample.buffer();
         let borrowed = state.borrow();
-        tags(&buffer, borrowed.dark, page_scale(&borrowed), &chosen);
-        let mut end = buffer.end_iter();
-        buffer.insert_with_tags_by_name(&mut end, "The type is yours\n", &["h3"]);
-        buffer.insert_with_tags_by_name(
-            &mut end,
-            &brevier::typeset::typeset(SAMPLE, "en"),
-            &["body"],
+        tags(
+            &sample.buffer(),
+            borrowed.dark,
+            page_scale(&borrowed),
+            &chosen,
         );
+        fill_sample(&sample.buffer());
     }
 
     let faces: Vec<&str> = Face::ALL.iter().map(|face| face.label()).collect();
@@ -1443,10 +1441,49 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         .valign(gtk::Align::Center)
         .active(chosen.justify)
         .build();
-    let reset = gtk::Button::builder()
-        .label("Reset")
-        .valign(gtk::Align::Center)
+
+    // Готовые наборы — кнопками в ряд, горит та, с которой совпадает набор;
+    // свой набор не зажигает ни одной.
+    let styles = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    styles.add_css_class("linked");
+    styles.set_valign(gtk::Align::Center);
+    let buttons: Vec<gtk::ToggleButton> = outline::STYLES
+        .iter()
+        .map(|style| {
+            gtk::ToggleButton::builder()
+                .label(style.name)
+                .tooltip_text(style.note)
+                .build()
+        })
+        .collect();
+    for button in &buttons {
+        if button != &buttons[0] {
+            button.set_group(Some(&buttons[0]));
+        }
+        styles.append(button);
+    }
+    // Под кнопками — что за набор горит: у телефона подсказок нет, и окно
+    // говорит то же строкой.
+    let described = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .margin_start(24)
         .build();
+    described.add_css_class("caption");
+    let mark = {
+        let buttons = buttons.clone();
+        let described = described.clone();
+        Rc::new(move |set: &Type| match set.style() {
+            Some(index) => {
+                buttons[index].set_active(true);
+                described.set_label(outline::STYLES[index].note);
+            }
+            None => {
+                buttons.iter().for_each(|button| button.set_active(false));
+                described.set_label("Your own, fine-tuned below.");
+            }
+        })
+    };
 
     // Каждый выбор правит своё поле набора, проверяет, что колонка ещё
     // помещается на экран, и перенабирает образец.
@@ -1454,6 +1491,7 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         let ui = ui.clone();
         let state = state.clone();
         let sample = sample.clone();
+        let mark = mark.clone();
         Rc::new(move |edit: &dyn Fn(&mut Type)| -> bool {
             let mut next = state.borrow().typography;
             edit(&mut next);
@@ -1465,16 +1503,23 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
             state.borrow_mut().typography = next;
             remember_settings(&ui, &state);
             let borrowed = state.borrow();
-            tags(
-                &sample.buffer(),
-                borrowed.dark,
-                page_scale(&borrowed),
-                &next,
-            );
+            let buffer = sample.buffer();
+            tags(&buffer, borrowed.dark, page_scale(&borrowed), &next);
             sample.set_width_request(
                 (f64::from(TEXT_SIZE * next.measure * page_scale(&borrowed)) * dpi() / 72.0).round()
                     as i32,
             );
+            // Высоту образца GTK считает по ширине прошлого размещения и от
+            // одних свойств тегов её не пересчитывает: крупный набор
+            // обрезался снизу. Поэтому текст — заново, а размер — ещё раз,
+            // когда новая ширина уже размещена.
+            fill_sample(&buffer);
+            {
+                let sample = sample.clone();
+                glib::idle_add_local_once(move || sample.queue_resize());
+            }
+            drop(borrowed);
+            mark(&next);
             true
         })
     };
@@ -1519,7 +1564,13 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
             change(&|next| next.justify = on);
         });
     }
-    {
+    // Готовый набор — весь разом, а не поле за полем: по дороге от одного
+    // к другому колонка могла бы не поместиться. Не поместился — горит
+    // прежний. Выбор под кнопками догоняет набор.
+    for (style, button) in outline::STYLES.iter().zip(&buttons) {
+        let change = change.clone();
+        let mark = mark.clone();
+        let state = state.clone();
         let (face, size, measure, leading, justify) = (
             face.clone(),
             size.clone(),
@@ -1527,20 +1578,27 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
             leading.clone(),
             justify.clone(),
         );
-        reset.connect_clicked(move |_| {
-            let usual = Type::USUAL;
-            face.set_selected(0);
+        let set = style.set;
+        button.connect_toggled(move |button| {
+            if !button.is_active() || state.borrow().typography == set {
+                return;
+            }
+            if !change(&|next| *next = set) {
+                mark(&state.borrow().typography);
+                return;
+            }
+            face.set_selected(Face::ALL.iter().position(|f| *f == set.face).unwrap_or(0) as u32);
             for (control, values, value) in [
-                (&size, &outline::SIZES[..], usual.size),
-                (&measure, &outline::MEASURES[..], usual.measure),
-                (&leading, &outline::LEADINGS[..], usual.leading),
+                (&size, &outline::SIZES[..], set.size),
+                (&measure, &outline::MEASURES[..], set.measure),
+                (&leading, &outline::LEADINGS[..], set.leading),
             ] {
                 let values = outline::choices(values, value);
                 if let Some(index) = values.iter().position(|v| *v == value) {
                     control.set_selected(index as u32);
                 }
             }
-            justify.set_active(usual.justify);
+            justify.set_active(set.justify);
         });
     }
 
@@ -1576,16 +1634,44 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
          does when the page names its language.",
         &justify,
     ));
-    rows.append(&action_row(
-        "Brevier's own type",
-        "Back to Noto Sans at 16.5 points, about 65 characters a line.",
-        &reset,
+
+    let ready = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    ready.add_css_class("rich-list");
+    ready.append(&setting_row(
+        "Style",
+        "Four ready-made looks; the sample below shows the one you pick. \
+         Fine-tune any of them further down.",
+        &styles,
     ));
+    // Тонкая настройка свёрнута, пока набор — один из готовых: пять выборов
+    // подряд пугают того, кому хватит кнопки. Свой набор — развёрнута.
+    let fine = gtk::Expander::builder()
+        .label("Fine-tune")
+        .expanded(chosen.style().is_none())
+        .child(&rows)
+        .margin_top(6)
+        .build();
+    fine.add_css_class("fine-tune");
+    page.append(&ready);
+    page.append(&described);
     page.append(&sample);
-    page.append(&rows);
+    page.append(&fine);
 }
 
 /// Образец набора в настройках: заголовок и абзац, по-английски, с переносами.
+fn fill_sample(buffer: &gtk::TextBuffer) {
+    buffer.set_text("");
+    let mut end = buffer.end_iter();
+    buffer.insert_with_tags_by_name(&mut end, "The type is yours\n", &["h3"]);
+    buffer.insert_with_tags_by_name(
+        &mut end,
+        &brevier::typeset::typeset(SAMPLE, "en"),
+        &["body"],
+    );
+}
+
 const SAMPLE: &str = "Choose the face, the size, the length of the line and the space \
 between lines once, and every page you open is set the same way: a news site, a blog, \
 the documentation of a library. The site decides what to say; how it reads is up to you.";

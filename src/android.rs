@@ -810,28 +810,45 @@ fn settings() -> String {
             out
         })
         .collect();
+    // Готовые наборы — кнопками над тонкой настройкой; `style` — какой
+    // из них горит, -1 — набор свой.
+    let styles: Vec<String> = outline::STYLES
+        .iter()
+        .map(|style| {
+            let mut out = String::from("{\"name\":");
+            json_string(&mut out, style.name);
+            out.push_str(",\"note\":");
+            json_string(&mut out, style.note);
+            out.push_str(&format!(",\"type\":{}}}", type_json(&style.set)));
+            out
+        })
+        .collect();
     format!(
-        "{{\"dark\":{},\"images\":{},\"archive\":{},\
-         \"type\":{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{}}},\
-         \"usual\":{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{}}},\
+        "{{\"dark\":{},\"images\":{},\"archive\":{},\"type\":{},\
+         \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
         settings.dark,
         settings.images,
         settings.archive,
-        chosen.face.name(),
-        chosen.size,
-        chosen.measure,
-        chosen.leading,
-        chosen.justify,
-        outline::Type::USUAL.face.name(),
-        outline::Type::USUAL.size,
-        outline::Type::USUAL.measure,
-        outline::Type::USUAL.leading,
-        outline::Type::USUAL.justify,
+        type_json(&chosen),
+        styles.join(","),
+        chosen.style().map_or(-1, |index| index as i64),
         faces.join(","),
         choices(&outline::SIZES, chosen.size, outline::size_label),
         choices(&outline::MEASURES, chosen.measure, outline::measure_label),
         choices(&outline::LEADINGS, chosen.leading, outline::leading_label),
+    )
+}
+
+/// Набор читателя для Kotlin (`ReaderType.of`).
+fn type_json(set: &outline::Type) -> String {
+    format!(
+        "{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{}}}",
+        set.face.name(),
+        set.size,
+        set.measure,
+        set.leading,
+        set.justify,
     )
 }
 
