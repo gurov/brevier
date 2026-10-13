@@ -1,0 +1,4 @@
+• Hacker News, Lobsters and Discourse read as threads: every comment with its author and day, replies indented; their front pages are lists of links.
+• Rust documentation from docs.rs reads whole and clean.
+• Wikipedia's infoboxes and other label tables keep their labels.
+• An avatar among words stays in its line; dates and counts no longer break.

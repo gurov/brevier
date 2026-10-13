@@ -95,6 +95,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.11.0" date="2026-10-13" type="development">
+      <description>
+        <p>Hacker News, Lobsters and Discourse forums read as threads: the
+          story, then every comment with its author and day, replies indented,
+          and their front pages as lists of links. Rust documentation from
+          docs.rs and the standard library reads whole and clean. Tables of
+          labels and values, such as Wikipedia's infoboxes, keep their labels;
+          a small picture among words, such as an avatar, stays in its line;
+          and a date or a count no longer breaks across lines.</p>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-10-13" type="development">
       <description>
         <p>Four ready-made styles for the type — Brevier, Book, Large print and
