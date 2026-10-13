@@ -23,10 +23,13 @@
 
         <!-- Одна активность на всё: вкладки, полка и настройки живут в ней,
              как в окне десктопа. Поворот экрана её не пересоздаёт — статья
-             перекладывается под новую ширину, а не грузится заново. -->
+             перекладывается под новую ширину, а не грузится заново. Смена
+             сети оператора (mcc/mnc) и языка системы — тоже: пересоздание
+             поднимало сессию с диска, и только что открытая страница
+             могла смениться начальной. -->
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|mcc|mnc|locale|layoutDirection"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">

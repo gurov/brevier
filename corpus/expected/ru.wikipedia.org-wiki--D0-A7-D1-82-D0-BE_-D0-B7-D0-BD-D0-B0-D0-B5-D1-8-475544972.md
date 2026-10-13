@@ -2,45 +2,69 @@
 
 Contributors to Wikimedia projects
 
-Оливия Киттеридж
+**Оливия Киттеридж**
 
 [англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Olive Kitteridge
 
 [![](https://upload.wikimedia.org/wikipedia/ru/a/a0/Olive_Kitteridge_poster.jpg?utm_source=ru.wikipedia.org&utm_campaign=parser&utm_content=thumbnail_unscaled)](https://ru.wikipedia.org/wiki/Файл:Olive_Kitteridge_poster.jpg)
 
-[драма](https://ru.wikipedia.org/wiki/Драма_\(жанр\) "Драма (жанр)")
+**Жанр:** [драма](https://ru.wikipedia.org/wiki/Драма_\(жанр\) "Драма (жанр)")
+
+**Создатель:**
 
 - [Лиза Холоденко](https://ru.wikipedia.org/wiki/Холоденко,_Лиза "Холоденко, Лиза")
 
-[Оливия Киттеридж](https://ru.wikipedia.org/wiki/Оливия_Киттеридж "Оливия Киттеридж")
+**На основе:** [Оливия Киттеридж](https://ru.wikipedia.org/wiki/Оливия_Киттеридж "Оливия Киттеридж")
 
-[Лиза Холоденко](https://ru.wikipedia.org/wiki/Холоденко,_Лиза "Холоденко, Лиза")
+**Режиссёр:** [Лиза Холоденко](https://ru.wikipedia.org/wiki/Холоденко,_Лиза "Холоденко, Лиза")
 
-[Джейн Андерсон](https://ru.wikipedia.org/wiki/Джейн_Андерсон "Джейн Андерсон")
+**Сценарист:** [Джейн Андерсон](https://ru.wikipedia.org/wiki/Джейн_Андерсон "Джейн Андерсон")
 
-- [Энн Дауд](https://ru.wikipedia.org/wiki/Дауд,_Энн "Дауд, Энн") - [Фрэнсис Макдорманд](https://ru.wikipedia.org/wiki/Макдорманд,_Фрэнсис "Макдорманд, Фрэнсис") - [Ричард Дженкинс](https://ru.wikipedia.org/wiki/Дженкинс,_Ричард "Дженкинс, Ричард") - [Кен Чизман](https://ru.wikipedia.org/w/index.php?title=%D0%9A%D0%B5%D0%BD_%D0%A7%D0%B8%D0%B7%D0%BC%D0%B0%D0%BD&action=edit&editintro=T:Нет_статьи/editintro&preload=T:Нет_статьи/preload&preloadparams%5B%5D=Q6387437&preloadparams%5B%5D=%D0%9A%D0%B5%D0%BD+%D0%A7%D0%B8%D0%B7%D0%BC%D0%B0%D0%BD&preloadparams%5B%5D=%D0%9F%D0%B5%D1%80%D1%81%D0%BE%D0%BD%D0%B0)
+**В главных ролях:**
 
-[Картер Бёруэлл](https://ru.wikipedia.org/wiki/Бёруэлл,_Картер "Бёруэлл, Картер")
+- [Энн Дауд](https://ru.wikipedia.org/wiki/Дауд,_Энн "Дауд, Энн")
+- [Фрэнсис Макдорманд](https://ru.wikipedia.org/wiki/Макдорманд,_Фрэнсис "Макдорманд, Фрэнсис")
+- [Ричард Дженкинс](https://ru.wikipedia.org/wiki/Дженкинс,_Ричард "Дженкинс, Ричард")
+- [Кен Чизман](https://ru.wikipedia.org/w/index.php?title=%D0%9A%D0%B5%D0%BD_%D0%A7%D0%B8%D0%B7%D0%BC%D0%B0%D0%BD&action=edit&editintro=T:Нет_статьи/editintro&preload=T:Нет_статьи/preload&preloadparams%5B%5D=Q6387437&preloadparams%5B%5D=%D0%9A%D0%B5%D0%BD+%D0%A7%D0%B8%D0%B7%D0%BC%D0%B0%D0%BD&preloadparams%5B%5D=%D0%9F%D0%B5%D1%80%D1%81%D0%BE%D0%BD%D0%B0)
 
-[США](https://ru.wikipedia.org/wiki/Соединённые_Штаты_Америки "Соединённые Штаты Америки")
+**Композитор:** [Картер Бёруэлл](https://ru.wikipedia.org/wiki/Бёруэлл,_Картер "Бёруэлл, Картер")
 
-[английский](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык")
+**Страна:**  [США](https://ru.wikipedia.org/wiki/Соединённые_Штаты_Америки "Соединённые Штаты Америки")
 
-[Гари Гоэцман](https://ru.wikipedia.org/wiki/Гари_Гоэцман?action=edit&redlink=1 "Гари Гоэцман (страница отсутствует)")   [Том Хэнкс](https://ru.wikipedia.org/wiki/Хэнкс,_Том "Хэнкс, Том")   Джейн Андерсон   Френсис Макдоманд   Стив Шеашиан   Дэвид Коутсворт
+**Язык:** [английский](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык")
 
-[Фредерик Элмс](https://ru.wikipedia.org/wiki/Элмс,_Фредерик "Элмс, Фредерик")
+**Число сезонов:** 1
 
-[HBO](https://ru.wikipedia.org/wiki/HBO "HBO")
+**Число серий:** 4
 
-[Hulu](https://ru.wikipedia.org/wiki/Hulu "Hulu") и [HBO Max](https://ru.wikipedia.org/wiki/HBO_Max "HBO Max")
+**Производство**
 
-[HBO](https://ru.wikipedia.org/wiki/HBO "HBO")
+**Продюсеры:** [Гари Гоэцман](https://ru.wikipedia.org/wiki/Гари_Гоэцман?action=edit&redlink=1 "Гари Гоэцман (страница отсутствует)")\
+[Том Хэнкс](https://ru.wikipedia.org/wiki/Хэнкс,_Том "Хэнкс, Том")\
+Джейн Андерсон\
+Френсис Макдоманд\
+Стив Шеашиан\
+Дэвид Коутсворт
 
-2 ноября — 3 ноября 2014
+**Оператор:** [Фредерик Элмс](https://ru.wikipedia.org/wiki/Элмс,_Фредерик "Элмс, Фредерик")
 
-[16:9](https://ru.wikipedia.org/wiki/16:9 "16:9")
+**Длина серии:** 58 мин
 
-[ID 3012698](https://www.imdb.com/title/tt3012698/ "imdbtitle:3012698")
+**Студия:** [HBO](https://ru.wikipedia.org/wiki/HBO "HBO")
+
+**Дистрибьюторы:** [Hulu](https://ru.wikipedia.org/wiki/Hulu "Hulu") и [HBO Max](https://ru.wikipedia.org/wiki/HBO_Max "HBO Max")
+
+**Оригинальная трансляция**
+
+**Телеканал:** [HBO](https://ru.wikipedia.org/wiki/HBO "HBO")
+
+**Трансляция:** 2 ноября — 3 ноября 2014
+
+**Формат изображения:** [16:9](https://ru.wikipedia.org/wiki/16:9 "16:9")
+
+**Ссылки**
+
+**[IMDb](https://ru.wikipedia.org/wiki/Internet_Movie_Database "Internet Movie Database"):** [ID 3012698](https://www.imdb.com/title/tt3012698/ "imdbtitle:3012698")
 
 [Официальный сайт](http://www.hbo.com/olive-kitteridge#/olive-kitteridge/index.html)
 

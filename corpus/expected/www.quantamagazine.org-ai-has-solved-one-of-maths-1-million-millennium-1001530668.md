@@ -1,4 +1,4 @@
-# AI Has Solved One of Math’s $1 Million Millennium Prize Problems | Quanta Magazine
+# AI Has Solved One of Math’s $1 Million Millennium Prize Problems
 
 By Konstantin Kakaes September 8, 2026
 

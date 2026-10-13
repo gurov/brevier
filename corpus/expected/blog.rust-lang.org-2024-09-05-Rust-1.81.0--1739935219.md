@@ -1,4 +1,4 @@
-# Announcing Rust 1.81.0 | Rust Blog
+# Announcing Rust 1.81.0 \| Rust Blog
 
 Sept. 5, 2024 · The Rust Release Team
 

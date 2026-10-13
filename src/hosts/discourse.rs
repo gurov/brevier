@@ -69,9 +69,38 @@ impl Post {
                 .and_then(|meta| first(meta, "time.post-time"))
                 .and_then(|time| time.attr("datetime"))
                 .map(|stamp| date_text(&stamp)),
-            body: first(post, ".post")
-                .and_then(|text| reply_markdown(&text.inner_html(), base.as_str())),
+            body: first(post, ".post").and_then(|text| {
+                unbox(&text);
+                reply_markdown(&text.inner_html(), base.as_str())
+            }),
         }
+    }
+}
+
+/// Превью ссылки (`aside.onebox`) — ссылкой-абзацем. Discourse рисует его
+/// карточкой с заголовком `<h3>`, и заголовок уезжал на полку разделом
+/// темы, которого в ней нет.
+fn unbox(post: &NodeRef) {
+    for card in all(post, "aside.onebox") {
+        let link = first(&card, "h3 a").or_else(|| first(&card, "header a"));
+        let Some((title, href)) = link.and_then(|link| {
+            let title = squeeze(&link.text());
+            let href = link.attr("href")?.to_string();
+            (!title.is_empty()).then_some((title, href))
+        }) else {
+            continue;
+        };
+        let escape = |text: &str| {
+            text.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+        };
+        card.replace_with_html(format!(
+            "<p><a href=\"{}\">{}</a></p>",
+            escape(&href),
+            escape(&title)
+        ));
     }
 }
 
@@ -138,6 +167,7 @@ fn thread(root: &NodeRef, posts: &[NodeRef], base: &Url) -> Page {
             date: post.date,
             on: None,
             body: post.body,
+            anchor: None,
         })
         .collect();
     write_replies(&replies, &mut out);
@@ -263,6 +293,23 @@ mod tests {
              **WhiteNoise** · [6 October 2026](https://forum.example.org/t/open-with/119080/2)\n\n\
              Perhaps we will change it later.\n"
         );
+    }
+
+    #[test]
+    fn a_link_preview_is_a_link_not_a_heading() {
+        let html = topic(&[
+            post(1, "mikar", "05", "<p>Hi.</p>"),
+            post(2, "noa", "06", "<p>Try this:</p><aside class=\"onebox allowlistedgeneric\">\
+                <header class=\"source\"><a href=\"https://swiss.example/\">swiss.example</a></header>\
+                <article class=\"onebox-body\"><h3><a href=\"https://swiss.example/send\">Send large files</a></h3>\
+                <p>Securely and free.</p></article></aside>"),
+        ].concat());
+        let md = read(&Document::from(html), TOPIC).unwrap().markdown;
+        assert!(
+            md.ends_with("Try this:\n\n[Send large files](https://swiss.example/send)\n"),
+            "{md}"
+        );
+        assert!(!md.contains("### "), "{md}");
     }
 
     #[test]

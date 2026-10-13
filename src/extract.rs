@@ -209,6 +209,25 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let chrome = chrome(&doc, url);
     // Язык страницы — до того, как `Readability` заберёт документ себе.
     let lang = html_lang(&doc);
+    // rustdoc (#11): статья у него в известном месте, угадывать её незачем.
+    if let Some(page) = crate::hosts::rustdoc::read(&doc) {
+        // Ссылки разворачивала бы Readability; без неё — сами.
+        let (content_html, notes) = lift_notes(absolute_html(&page.html, url));
+        return Ok(Article {
+            title: page.title,
+            byline: None,
+            published: None,
+            content_html,
+            thumbs,
+            listing_html: None,
+            notes,
+            site: navigation,
+            feeds,
+            next,
+            lang,
+            claims_article: false,
+        });
+    }
     // Копия — под сверку с извлечённым: `Readability` документ забирает себе
     // и чистит на месте, а сироты ищутся в исходном дереве (см. `restore`).
     let source = doc.clone();
@@ -277,8 +296,9 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // в одном дереве.
     let (content_html, notes) = lift_notes(content_html);
 
+    let title = heading_title(&source, &article.title).unwrap_or_else(|| article.title.to_string());
     Ok(Article {
-        title: article.title.to_string(),
+        title,
         byline: article.byline.filter(|b| !b.trim().is_empty()),
         published: article.published_time.filter(|p| !p.trim().is_empty()),
         content_html,
@@ -291,6 +311,37 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         lang,
         claims_article,
     })
+}
+
+/// Заголовок из `<h1>`, когда `<title>` — тот же заголовок с хвостом сайта
+/// («<details> HTML details disclosure element - HTML | MDN»).
+///
+/// Хвост умеет срезать и `markdown::dedup_title`, но только сверяясь
+/// с `<h1>` в тексте статьи, а Readability его часто оставляет снаружи —
+/// у MDN он в шапке над статьёй. Сверяемся с единственным `<h1>` страницы:
+/// он должен быть началом `<title>` и кончаться на разделителе.
+fn heading_title(source: &Document, title: &str) -> Option<String> {
+    const TAILS: [&str; 6] = [" | ", " — ", " – ", " · ", " :: ", " - "];
+    let h1 = source.select("h1");
+    if h1.length() != 1 {
+        return None;
+    }
+    let heading = squeeze(&h1.text());
+    if heading.chars().count() < 12 {
+        return None;
+    }
+    let lower = title.to_lowercase();
+    let prefix = heading.to_lowercase();
+    // Хвост — имя сайта: короче самого заголовка. Иначе `<h1>` — это имя
+    // сайта, а за разделителем — заголовок статьи («Сайт | Статья»).
+    TAILS
+        .iter()
+        .find_map(|tail| lower.strip_prefix(&format!("{prefix}{tail}")))
+        .is_some_and(|rest| {
+            let rest = rest.chars().count();
+            rest < heading.chars().count() && rest <= 60
+        })
+        .then_some(heading)
 }
 
 /// Объявила ли страница себя той статьёй, которую мы извлекли.
@@ -524,8 +575,12 @@ pub(crate) fn site(doc: &Document, url: &str) -> Vec<Link> {
         if host.as_deref() != parsed.host_str() {
             continue;
         }
-        // Ссылка на страницу, на которой читатель и стоит, никуда не ведёт.
-        if here.as_deref() == Some(address.trim_end_matches('#')) {
+        // Ссылка на страницу, на которой читатель и стоит, никуда не ведёт;
+        // с решёткой — это прыжок внутри неё («Skip to main content»,
+        // оглавление), а не навигация сайта.
+        let mut bare = parsed.clone();
+        bare.set_fragment(None);
+        if here.as_deref() == Some(bare.as_str()) {
             continue;
         }
         let title = label(link);
@@ -1734,6 +1789,11 @@ fn language_of(node: &NodeRef) -> Option<String> {
     }
 
     let class = node.attr("class")?;
+    // SyntaxHighlighter и MDN пишут язык через двоеточие и пробел:
+    // `class="brush: html notranslate"`.
+    if let Some(language) = class.split("brush:").nth(1).and_then(language_token) {
+        return Some(language);
+    }
     class.split_whitespace().find_map(|class| {
         LANG_PREFIXES
             .iter()
@@ -2989,6 +3049,40 @@ mod tests {
         assert!(markdown.contains("```shell\n"), "{markdown}");
     }
 
+    /// SyntaxHighlighter и MDN пишут язык как `class="brush: html"`.
+    #[test]
+    fn a_brush_class_names_the_language() {
+        let html = page(
+            "<pre class=\"brush: html notranslate\"><code>&lt;details&gt;\n&lt;/details&gt;</code></pre>",
+        );
+        let article = extract(&html, "https://example.org/post").unwrap();
+        let markdown = crate::markdown::from_article(&article).unwrap().markdown;
+        assert!(markdown.contains("```html\n<details>"), "{markdown}");
+    }
+
+    /// `<title>` — это `<h1>` плюс имя сайта: заголовком берём `<h1>`,
+    /// даже если Readability оставила его за статьёй. Наоборот — нет:
+    /// «Сайт | Статья» с именем сайта в `<h1>` не режется до имени сайта.
+    #[test]
+    fn the_site_s_tail_is_cut_from_the_title() {
+        let doc = Document::from(
+            "<html><head><title>&lt;details&gt; HTML details element - HTML | MDN</title></head>\
+             <body><h1><code>&lt;details&gt;</code> HTML details element</h1></body></html>",
+        );
+        assert_eq!(
+            heading_title(&doc, "<details> HTML details element - HTML | MDN").as_deref(),
+            Some("<details> HTML details element")
+        );
+        let site = Document::from("<html><body><h1>The Critic Magazine</h1></body></html>");
+        assert_eq!(
+            heading_title(
+                &site,
+                "The Critic Magazine | On clichéd critiques of the Conservatives"
+            ),
+            None
+        );
+    }
+
     /// Код-спан посреди абзаца языком обёртки не красится: у него
     /// ограждения нет вовсе, а `data-lang` в тексте — мусор.
     #[test]
@@ -3211,6 +3305,7 @@ mod tests {
     #[test]
     fn site_navigation_skips_the_page_we_are_on() {
         let page = "<html><body><nav>\
+             <a href=\"#content\">Skip to main content</a><a href=\"/here#search\">Skip to search</a>\
              <a href=\"/here\">Эта страница</a><a href=\"/there\">Другая</a>\
              </nav></body></html>";
         let doc = Document::from(page.to_string());

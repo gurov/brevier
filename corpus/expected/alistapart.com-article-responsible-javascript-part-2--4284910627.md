@@ -95,9 +95,9 @@ The [simplest pattern](https://developers.google.com/web/fundamentals/primers/mo
 
 ```html
 <!-- Modern browsers load this file: -->
-[/js/app.mjs](https://alistapart.com/js/app.mjs)
+/js/app.mjs
 <!-- Legacy browsers load this file: -->
-[/js/app.js](https://alistapart.com/js/app.js)
+/js/app.js
 ```
 
 Unfortunately, there’s a caveat with this pattern: legacy browsers like IE 11—and even relatively modern ones such as Edge versions 15 through 18—will download *both* bundles. If this is an acceptable trade-off for you, then worry no further.

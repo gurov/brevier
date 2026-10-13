@@ -34,8 +34,9 @@ mostly in Russian; write yours in whatever language you are most exact in.
 - **`src/hosts.rs`** — the per-host rules, in one small table: reddit read through its
   feed, Hacker News, Lobsters and Discourse threads and lists read from their own markup
   (`src/hosts/hacker_news.rs`, `lobsters.rs`, `discourse.rs` — Discourse by its generator
-  tag rather than its host; what a thread looks like is in `src/hosts/thread.rs`), the
-  search engine's results page, and royallib's reader,
+  tag rather than its host; what a thread looks like is in `src/hosts/thread.rs`), rustdoc
+  pages read from their main column (`rustdoc.rs`, also by generator), the search engine's
+  results page, and royallib's reader,
   whose book comes part by part. Everything else is ruled by the shape of a page, never
   by its site. The results
   page is tested against a saved copy in `tests/fixtures/`; when DuckDuckGo changes its

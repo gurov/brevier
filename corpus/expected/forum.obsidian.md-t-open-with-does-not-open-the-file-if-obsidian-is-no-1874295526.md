@@ -81,13 +81,7 @@ Enabled restricted mode, and still happens.
 
 Made screen recordings, but can’t figure out how to attach them here, so uploaded:
 
-![](https://www.swisstransfer.com/favicon.ico) [SwissTransfer](https://www.swisstransfer.com/dl/01a11331-840c-7313-b94a-03f9e7f62e4a)
-
-![](https://www.swisstransfer.com/og.webp)
-
-### [SwissTransfer - Send large files securely and free of charge](https://www.swisstransfer.com/dl/01a11331-840c-7313-b94a-03f9e7f62e4a)
-
-Send up to 50 GB - Free and no registration required - Keep your transfers for 30 days
+[SwissTransfer - Send large files securely and free of charge](https://www.swisstransfer.com/dl/01a11331-840c-7313-b94a-03f9e7f62e4a)
 
 `with_file_open.mov` illustrates the case where a file is already open in Obsidian (new file not loaded if Obsidian is not running). “Opening with…” or `"open -a Obsidian"` again once Obsidian is running then loads the file (but replaces the tab content instead of opening a new one as it should).
 

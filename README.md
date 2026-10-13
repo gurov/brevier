@@ -243,6 +243,11 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   it answers. The front page and the other lists of stories are lists of links, with
   points and a link to the comments. A Discourse forum recent enough to serve Markdown is
   read as it serves it.
+- **Rust documentation reads whole.** docs.rs and the standard library's pages are read
+  from rustdoc's own layout: signatures as highlighted code, every method and
+  implementation, none of the buttons.
+- **Tables of labels and values** — Wikipedia's infoboxes, MDN's summaries — keep their
+  labels: each row becomes a line, **Developer:** The Rust Team.
 - **Repository folders can be listed:** end the address with a slash
   (`gh:owner/repo/docs/`) or use **Files in this directory** on the shelf.
 - **Search.** Anything that is not an address goes to DuckDuckGo Lite, and the results
@@ -292,9 +297,9 @@ The maintainer uses it every day. It hasn't been tested with TalkBack yet.
 
 ## How well it works
 
-On our test set of 108 live pages, **80 read well (74%)**. Of the 89 pages that reached
-the extractor, 80 read well (90%); the other 19 were blocked before that — by
-certificates, 403/401 responses, or anti-bot walls.
+When we last measured our test set — 108 live pages, on 11 September 2026 — **80 read
+well (74%)**. Of the 89 pages that reached the extractor, 80 read well (90%); the other 19
+were blocked before that — by certificates, 403/401 responses, or anti-bot walls.
 
 These are our own numbers. The rubric (`corpus/RUBRIC.md`) is ours, the marking is done
 by hand, and we relaxed the rubric once after seeing the results; the strict reading gave
@@ -362,7 +367,7 @@ line keeps no history.
 - **Very few per-site rules.** reddit is read through its `.rss` feeds (its pages are empty
   without JavaScript); Hacker News, Lobsters and Discourse forums are read from their own
   markup, since the general extractor drops the author of every comment, or every comment
-  but one;
+  but one; rustdoc pages are read from their main column;
   royallib's books open part by part; DuckDuckGo Lite results are unwrapped from its click
   tracker. Your search queries go to DuckDuckGo.
 - **The Wayback Machine is asked only when you press the button.** A page that is gone

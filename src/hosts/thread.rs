@@ -38,6 +38,9 @@ pub(crate) struct Reply {
     /// там это сама страница.
     pub on: Option<(String, Option<String>)>,
     pub body: Option<String>,
+    /// Имя якоря реплики — то, что площадка ставит после решётки в ссылке
+    /// на реплику внутри треда: ссылка с ним прокручивает к месту.
+    pub anchor: Option<String>,
 }
 
 /// Заголовок над репликами: «12 comments», «1 reply», «No comments yet».
@@ -72,6 +75,17 @@ pub(crate) fn write_replies(replies: &[Reply], out: &mut String) {
         authors.push(reply.author.clone());
 
         let mut head = Vec::new();
+        // Якорь — сырым HTML: другого способа поставить его в markdown нет,
+        // и так же ставят якоря в README (`<a id="…"></a>`).
+        let mark = reply
+            .anchor
+            .as_ref()
+            .filter(|name| {
+                name.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            })
+            .map(|name| format!("<a id=\"{name}\"></a>"))
+            .unwrap_or_default();
         if let Some(author) = &reply.author {
             head.push(format!("**{}**", inline(author)));
         }
@@ -93,7 +107,7 @@ pub(crate) fn write_replies(replies: &[Reply], out: &mut String) {
             Some((story, None)) => head.push(format!("on {}", inline(story))),
             None => {}
         }
-        let mut text = head.join(" · ");
+        let mut text = format!("{mark}{}", head.join(" · "));
         if let Some(body) = &reply.body {
             if !text.is_empty() {
                 text.push_str("\n\n");

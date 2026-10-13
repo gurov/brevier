@@ -31,6 +31,18 @@ pub fn is_lobsters(url: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Якорь, к которому ведёт ссылка на реплику `/c/<id>`. Сервер уводит её
+/// на тред с решёткой `#c_<id>`, но решётку из перенаправления HTTP
+/// не доносит до читателя — её восстанавливаем по самому адресу.
+pub fn comment_anchor(url: &str) -> Option<String> {
+    if !is_lobsters(url) {
+        return None;
+    }
+    let parsed = Url::parse(url).ok()?;
+    let id = parsed.path().strip_prefix("/c/")?.trim_end_matches('/');
+    (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric())).then(|| format!("c_{id}"))
+}
+
 /// Тред, список историй или список реплик — или `None`, если страница
 /// не той формы и её читает общий тракт.
 pub fn read(doc: &Document, url: &str) -> Option<Page> {
@@ -267,11 +279,10 @@ fn reply(comment: &NodeRef, base: &Url) -> Reply {
         .find(|link| href(link).is_some_and(|href| href.starts_with("/~")))
         .map(|link| squeeze(&link.text()))
         .filter(|name| !name.is_empty());
-    let link = links
-        .iter()
-        .filter_map(href)
-        .find(|href| href.starts_with("/c/"))
-        .and_then(|href| absolute(base, &href));
+    let short = comment
+        .attr("data-shortid")
+        .map(|id| id.to_string())
+        .filter(|id| !id.is_empty());
     let on = links
         .iter()
         .find(|link| href(link).is_some_and(|href| href.starts_with("/s/")))
@@ -282,11 +293,32 @@ fn reply(comment: &NodeRef, base: &Url) -> Reply {
             )
         })
         .filter(|(title, _)| !title.is_empty());
+    // `/c/<id>` уводит на тред с решёткой `#c_<id>`; ведём туда сразу —
+    // в треде это прокрутка к реплике, а не новый запрос.
+    let thread = on
+        .as_ref()
+        .and_then(|(_, link)| link.clone())
+        .unwrap_or_else(|| {
+            let mut page = base.clone();
+            page.set_fragment(None);
+            page.to_string()
+        });
+    let link = short
+        .as_ref()
+        .map(|id| format!("{thread}#c_{id}"))
+        .or_else(|| {
+            links
+                .iter()
+                .filter_map(href)
+                .find(|href| href.starts_with("/c/"))
+                .and_then(|href| absolute(base, &href))
+        });
     Reply {
         depth: depth(comment),
         author,
         date: byline.as_ref().and_then(time),
         link,
+        anchor: short.map(|id| format!("c_{id}")),
         on,
         body: first(comment, ".comment_text")
             .and_then(|text| reply_markdown(&text.inner_html(), base.as_str())),
@@ -428,17 +460,17 @@ mod tests {
         assert!(md.starts_with(
             "# [Linus and Claude](https://www.phoronix.com/news/x)\n\n\
              *phoronix.com · linux, ask · 61 votes · ada · 12 October 2026*\n\n## 6 comments\n\n\
-             **bmo** · [12 October 2026](https://lobste.rs/c/a1)\n\n\
+             <a id=\"c_a1\"></a>**bmo** · [12 October 2026](https://lobste.rs/s/abc123/a_story#c_a1)\n\n\
              Read the [patch](https://example.com/patch).\n\n> No reference.\n\n\
-             > **simonw** · [12 October 2026](https://lobste.rs/c/b2)\n>\n> Gross.\n\n"
+             > <a id=\"c_b2\"></a>**simonw** · [12 October 2026](https://lobste.rs/s/abc123/a_story#c_b2)\n>\n> Gross.\n\n"
         ));
-        assert!(md.contains("> > > **dee** · [12 October 2026]"));
+        assert!(md.contains("> > > <a id=\"c_d4\"></a>**dee** · [12 October 2026]"));
         assert!(md.contains(
-            "> > > **eve** · replying to dee · [12 October 2026](https://lobste.rs/c/e5)"
+            "> > > <a id=\"c_e5\"></a>**eve** · replying to dee · [12 October 2026](https://lobste.rs/s/abc123/a_story#c_e5)"
         ));
         // Удалённая реплика держит своё место в дереве.
         assert!(md.ends_with(
-            "**fay** · [12 October 2026](https://lobste.rs/c/f6)\n\n\\[Comment removed by author\\]\n"
+            "<a id=\"c_f6\"></a>**fay** · [12 October 2026](https://lobste.rs/s/abc123/a_story#c_f6)\n\n\\[Comment removed by author\\]\n"
         ));
         // Форма ответа и копии в архивах читателю не нужны.
         assert!(!md.contains("logged in"));
@@ -508,9 +540,19 @@ mod tests {
         assert_eq!(
             page.markdown,
             "# Newest Comments \\| Lobsters\n\n\
-             **lin** · [12 October 2026](https://lobste.rs/c/r1) · \
+             <a id=\"c_r1\"></a>**lin** · [12 October 2026](https://lobste.rs/s/xyz/reverts#c_r1) · \
              on [The reverts will continue](https://lobste.rs/s/xyz/reverts)\n\nAgreed.\n"
         );
+    }
+
+    #[test]
+    fn a_comment_link_scrolls_to_its_comment() {
+        assert_eq!(
+            comment_anchor("https://lobste.rs/c/qdpll5").as_deref(),
+            Some("c_qdpll5")
+        );
+        assert_eq!(comment_anchor("https://lobste.rs/s/abc/x"), None);
+        assert_eq!(comment_anchor("https://example.com/c/qdpll5"), None);
     }
 
     #[test]

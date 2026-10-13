@@ -58,6 +58,7 @@ impl Typesetter {
         } else {
             text.to_owned()
         };
+        let glued = keep_numbers(&glued);
         match &self.dict {
             Some(dict) => hyphenate(&glued, dict),
             None => glued,
@@ -126,23 +127,41 @@ fn primary(lang: &str) -> String {
 /// Расставить мягкие переносы по словам. Слово — подряд идущие буквы; всё
 /// прочее (пробелы, пунктуация, цифры, наш неразрывный пробел) проходит
 /// как есть.
+///
+/// Слово, приклеенное неразрывным пробелом к числу, не переносим: «13
+/// October 2026», «321 comments» — число с единицей рвать не принято,
+/// а неразрывный пробел там затем и стоит.
 fn hyphenate(text: &str, dict: &Standard) -> String {
     let mut out = String::with_capacity(text.len() + text.len() / 8);
     let mut word = String::new();
+    // Два знака перед началом текущего слова.
+    let mut before = (None::<char>, None::<char>);
+    let mut last = (None::<char>, None::<char>);
+    let flush = |out: &mut String, word: &mut String, before: (Option<char>, Option<char>)| {
+        if word.is_empty() {
+            return;
+        }
+        let counted = before.1 == Some(NBSP) && before.0.is_some_and(|c| c.is_ascii_digit());
+        if counted {
+            out.push_str(word);
+        } else {
+            push_hyphenated(out, word, dict);
+        }
+        word.clear();
+    };
     for ch in text.chars() {
         if ch.is_alphabetic() {
+            if word.is_empty() {
+                before = last;
+            }
             word.push(ch);
         } else {
-            if !word.is_empty() {
-                push_hyphenated(&mut out, &word, dict);
-                word.clear();
-            }
+            flush(&mut out, &mut word, before);
             out.push(ch);
         }
+        last = (last.1, Some(ch));
     }
-    if !word.is_empty() {
-        push_hyphenated(&mut out, &word, dict);
-    }
+    flush(&mut out, &mut word, before);
     out
 }
 
@@ -158,6 +177,31 @@ fn push_hyphenated(out: &mut String, word: &str, dict: &Standard) {
         last = point;
     }
     out.push_str(&word[last..]);
+}
+
+/// Приклеить число к соседнему слову: пробел после числа перед словом
+/// («13 October», «321 comments») и пробел перед годом после слова
+/// («October 2026») становятся неразрывными. Число с единицей и дату рвать
+/// не принято ни в одной традиции; длина строки та же — знак на знак.
+fn keep_numbers(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out: String = String::with_capacity(text.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let glue = c == ' '
+            && i > 0
+            && i + 1 < chars.len()
+            && ((chars[i - 1].is_ascii_digit() && chars[i + 1].is_alphabetic())
+                || (chars[i - 1].is_alphabetic() && is_year(&chars[i + 1..])));
+        out.push(if glue { NBSP } else { c });
+    }
+    out
+}
+
+/// Год — ровно четыре цифры, за которыми не цифра.
+fn is_year(rest: &[char]) -> bool {
+    rest.len() >= 4
+        && rest[..4].iter().all(char::is_ascii_digit)
+        && rest.get(4).is_none_or(|c| !c.is_ascii_digit())
 }
 
 /// Приклеить однобуквенный предлог/союз к следующему слову: пробел после
@@ -205,6 +249,17 @@ mod tests {
         assert!(out.contains(SOFT_HYPHEN), "{out:?}");
         // Снятые обратно — то же слово, что было.
         assert_eq!(plain(&out), "hyphenation");
+    }
+
+    #[test]
+    fn a_word_glued_to_a_number_stays_whole() {
+        let text = "13 October 2026 · 321 comments, and communications";
+        let set = typeset(text, "en");
+        assert_eq!(plain(&set), text, "длина и текст те же");
+        assert!(set.contains("13\u{a0}October\u{a0}2026"), "{set:?}");
+        assert!(set.contains("321\u{a0}comments,"), "{set:?}");
+        // Без числа перед ним слово переносится, как всякое.
+        assert!(set.contains(SOFT_HYPHEN), "{set:?}");
     }
 
     #[test]

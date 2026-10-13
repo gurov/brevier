@@ -342,14 +342,17 @@ pub struct Entry {
 ///
 /// Буквы не только латинские: кириллический якорь в ссылке приезжает
 /// процентными кодами, поэтому сначала раскодируем.
+///
+/// Подчёркивание — тот же разделитель, что дефис: MDN называет раздел
+/// «Technical summary» якорем `#technical_summary`, а не `-summary`.
 pub fn anchor(text: &str) -> String {
     let text = percent_decode(text);
     let mut out = String::with_capacity(text.len());
 
     for ch in text.chars() {
-        if ch.is_alphanumeric() || ch == '_' {
+        if ch.is_alphanumeric() {
             out.extend(ch.to_lowercase());
-        } else if (ch == '-' || ch.is_whitespace()) && !out.ends_with('-') {
+        } else if (ch == '-' || ch == '_' || ch.is_whitespace()) && !out.ends_with('-') {
             out.push('-');
         }
     }
@@ -845,5 +848,11 @@ mod tests {
         for face in Face::ALL {
             assert_eq!(Face::from_name(face.name()), Some(face));
         }
+    }
+
+    #[test]
+    fn an_underscore_in_a_fragment_finds_its_heading() {
+        assert_eq!(anchor("Technical summary"), anchor("technical_summary"));
+        assert_eq!(anchor("#c_qdpll5".trim_start_matches('#')), "c-qdpll5");
     }
 }

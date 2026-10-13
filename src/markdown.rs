@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use comrak::nodes::{AstNode, NodeValue};
 use comrak::{Arena, Options};
+use dom_query::{Document, NodeRef};
 use htmd::element_handler::{HandlerResult, Handlers};
 use htmd::options::{
     BrStyle, BulletListMarker, CodeBlockStyle, HeadingStyle, LinkStyle, Options as HtmdOptions,
@@ -88,13 +89,15 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
     let (title, body) = dedup_title(article.title.trim(), body.trim());
 
     let mut doc = String::with_capacity(body.len() + 128);
+    // Заголовок и автор — простой текст страницы, а не markdown: `<details>`
+    // в заголовке MDN иначе ушёл бы в отрисовку тегом и пропал.
     if !title.is_empty() {
         doc.push_str("# ");
-        doc.push_str(&title);
+        doc.push_str(&crate::feed::heading(&title));
         doc.push_str("\n\n");
     }
     if let Some(byline) = &article.byline {
-        doc.push_str(byline.trim());
+        doc.push_str(&crate::feed::block(byline.trim()));
         doc.push_str("\n\n");
     }
     doc.push_str(body.trim());
@@ -280,7 +283,7 @@ fn heading(title: &str, body: &str) -> String {
     if title.is_empty() || body.trim_start().starts_with("# ") {
         return body.to_owned();
     }
-    format!("# {title}\n\n{}", body.trim_start())
+    format!("# {}\n\n{}", crate::feed::heading(title), body.trim_start())
 }
 
 /// Вернуть ленте миниатюры записей.
@@ -1439,6 +1442,8 @@ fn to_markdown(html: &str) -> Result<String, Error> {
 /// видно и ссылку, и её цель. Обработчик замыкает их в себе: другого
 /// способа донести знание о статье до обработчика htmd нет.
 fn convert(html: &str, notes: &HashMap<String, usize>) -> Result<String, Error> {
+    let html = prepare(html);
+    let html = html.as_ref();
     let notes = notes.clone();
     let converter = HtmlToMarkdown::builder()
         .skip_tags(SKIP.to_vec())
@@ -1470,6 +1475,147 @@ fn convert(html: &str, notes: &HashMap<String, usize>) -> Result<String, Error> 
         .build();
 
     converter.convert(html).map_err(Error::Convert)
+}
+
+/// HTML перед htmd — там, где htmd теряет текст. Разбираем, только если
+/// есть что чинить, и пишем заново, только если что-то починили.
+fn prepare(html: &str) -> Cow<'_, str> {
+    let tables = html.contains("<th");
+    let code = html.contains("<pre");
+    if !tables && !code {
+        return Cow::Borrowed(html);
+    }
+    let doc = Document::from(html);
+    let mut changed = tables && row_headers(&doc);
+    if code {
+        changed |= code_links(&doc);
+    }
+    if changed {
+        Cow::Owned(doc.html().to_string())
+    } else {
+        Cow::Borrowed(html)
+    }
+}
+
+/// Ссылки внутри блока кода — текстом.
+///
+/// rustdoc ставит ссылку на каждый тип в сигнатуре (`fn serialize<S>(…) ->
+/// Result<S::Ok, …>`), htmd честно печатает их markdown-ом, а внутри
+/// ограждения markdown не действует: читателю доставались
+/// `[serialize](#tymethod.serialize)` посреди кода. Текст оставляем, ссылку
+/// снимаем — блок кода ссылок держать не умеет.
+fn code_links(doc: &Document) -> bool {
+    let links = doc.select("pre a");
+    let found = links.exists();
+    for link in links.nodes() {
+        // `unwrap_node` у dom_query снимает родителя, как `unwrap` в jQuery,
+        // а не саму ссылку, — поэтому заменой на её текст.
+        let text = link.text();
+        let escaped = text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        link.replace_with_html(escaped);
+    }
+    found
+}
+
+/// Подписи строк таблицы — `<th>` в строке рядом с `<td>`.
+///
+/// htmd берёт из строки ячейки одного вида: шапку — из `<th>` первой строки,
+/// остальные строки — только из `<td>`. Подпись строки поэтому пропадала
+/// всегда, а у первой строки вместе с ней пропадало и значение: у инфобокса
+/// википедии оставались одни значения без «Developer», «First appeared»,
+/// у сводки MDN — без «Permitted content».
+///
+/// Таблица, где у каждой строки подпись (а прочие строки — одна ячейка
+/// на всю ширину: заголовок, картинка), — не данные, а карточка «подпись —
+/// значение»: она становится абзацами «**Подпись:** значение», которые
+/// видят и поиск по странице, и копирование. В таблице с данными подпись
+/// строки становится первой ячейкой, жирной. Без `<th>` HTML не трогаем.
+fn row_headers(doc: &Document) -> bool {
+    let mut changed = false;
+    for table in doc.select("table").nodes() {
+        let rows = own_rows(table);
+        fn cells<'a>(row: &NodeRef<'a>) -> Vec<NodeRef<'a>> {
+            row.element_children()
+                .into_iter()
+                .filter(|cell| matches!(cell.node_name().as_deref(), Some("th" | "td")))
+                .collect()
+        }
+        fn labelled(row: &NodeRef) -> bool {
+            let cells = cells(row);
+            cells.len() > 1
+                && cells[0].node_name().as_deref() == Some("th")
+                && cells[1..]
+                    .iter()
+                    .all(|cell| cell.node_name().as_deref() == Some("td"))
+        }
+        if !rows.iter().any(labelled) {
+            continue;
+        }
+        changed = true;
+        if rows
+            .iter()
+            .all(|row| labelled(row) || cells(row).len() <= 1)
+        {
+            let mut out = String::new();
+            for row in &rows {
+                let cells = cells(row);
+                match cells.as_slice() {
+                    [] => {}
+                    [only] if only.node_name().as_deref() == Some("th") => {
+                        out.push_str(&format!("<p><strong>{}</strong></p>", only.inner_html()));
+                    }
+                    [only] => out.push_str(&format!("<div>{}</div>", only.inner_html())),
+                    [label, values @ ..] => {
+                        let label = label.inner_html();
+                        let colon = if label.trim_end().ends_with(':') {
+                            ""
+                        } else {
+                            ":"
+                        };
+                        let values: Vec<String> = values
+                            .iter()
+                            .map(|cell| cell.inner_html().to_string())
+                            .collect();
+                        out.push_str(&format!(
+                            "<div><strong>{}{colon}</strong> {}</div>",
+                            label.trim(),
+                            values.join(" ")
+                        ));
+                    }
+                }
+            }
+            table.replace_with_html(out);
+        } else {
+            for row in rows.iter().filter(|row| labelled(row)) {
+                let label = cells(row)[0];
+                let inner = label.inner_html();
+                label.set_html(format!("<strong>{inner}</strong>"));
+                label.rename("td");
+            }
+        }
+    }
+    changed
+}
+
+/// Строки самой таблицы, без строк вложенных в неё таблиц.
+fn own_rows<'a>(table: &NodeRef<'a>) -> Vec<NodeRef<'a>> {
+    let mut rows = Vec::new();
+    for child in table.element_children() {
+        match child.node_name().as_deref() {
+            Some("tr") => rows.push(child),
+            Some("thead" | "tbody" | "tfoot") => rows.extend(
+                child
+                    .element_children()
+                    .into_iter()
+                    .filter(|row| row.node_name().as_deref() == Some("tr")),
+            ),
+            _ => {}
+        }
+    }
+    rows
 }
 
 /// Блок кода, свёрстанный без `<pre>`.
@@ -1533,6 +1679,21 @@ fn anchor_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerRe
     let Some(href) = href else {
         return Some(content.into());
     };
+    // Перенос строки (`<br>`) внутри подписи ссылки — вёрстка: у MDN
+    // «HTML<br><small># the-details-element</small>». Обратная черта
+    // переноса экранировала бы `]`, и ссылка разваливалась в текст.
+    let text = content.trim();
+    if text.contains("\\\n") || text.ends_with('\\') {
+        let joined = text
+            .split("\\\n")
+            .map(|piece| piece.trim().trim_end_matches('\\').trim_end())
+            .filter(|piece| !piece.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.is_empty() && !joined.contains('\n') {
+            return Some(format!("[{joined}]({})", crate::feed::destination(&href)).into());
+        }
+    }
     if content.trim().contains('\n') {
         return Some(card_link(content.trim(), &href).into());
     }
@@ -2563,6 +2724,71 @@ mod tests {
             from_html("<table><tr><th>а</th><th>б</th></tr><tr><td>1</td><td>2</td></tr></table>")
                 .unwrap();
         assert!(md.contains("| а | б |"), "таблица развалилась:\n{md}");
+    }
+
+    /// Карточка «подпись — значение» (инфобокс википедии, сводка MDN):
+    /// htmd терял подписи строк, а у первой строки — и значение.
+    #[test]
+    fn a_table_of_labelled_rows_becomes_labelled_paragraphs() {
+        let md = from_html(
+            "<table class=\"infobox\"><tbody>\
+             <tr><th colspan=\"2\">Rust</th></tr>\
+             <tr><th scope=\"row\"><a href=\"https://e.org/dev\">Developer</a></th><td>The Rust Team</td></tr>\
+             <tr><th scope=\"row\">First appeared</th><td>January 20, 2012</td></tr>\
+             <tr><th scope=\"row\">Typing:</th><td><ul><li>static</li><li>strong</li></ul></td></tr>\
+             </tbody></table>",
+        )
+        .unwrap();
+        assert_eq!(
+            md.trim(),
+            "**Rust**\n\n**[Developer](https://e.org/dev):** The Rust Team\n\n\
+             **First appeared:** January 20, 2012\n\n**Typing:**\n\n- static\n- strong"
+        );
+    }
+
+    /// В таблице с шапкой подпись строки — первая ячейка, жирная.
+    #[test]
+    fn a_row_header_in_a_data_table_is_its_first_cell() {
+        let md = from_html(
+            "<table><thead><tr><th>Format</th><th>Size</th></tr></thead><tbody>\
+             <tr><th scope=\"row\">JSON</th><td>big</td></tr>\
+             <tr><th scope=\"row\">CBOR</th><td>small</td></tr></tbody></table>",
+        )
+        .unwrap();
+        assert!(md.contains("| Format"), "{md}");
+        assert!(md.contains("| **JSON** | big"), "{md}");
+        assert!(md.contains("| **CBOR** | small"), "{md}");
+    }
+
+    /// `<br>` в подписи ссылки — пробел, а не разорванная ссылка.
+    #[test]
+    fn a_line_break_inside_a_link_is_a_space() {
+        let md = from_html(
+            "<p><a href=\"https://html.spec.whatwg.org/#d\">HTML<br><small>the details element</small></a> \
+             and <a href=\"https://e.org/x\">trailing<br></a>.</p>",
+        )
+        .unwrap();
+        assert!(
+            md.contains("[HTML the details element](https://html.spec.whatwg.org/#d)"),
+            "{md}"
+        );
+        assert!(md.contains("[trailing](https://e.org/x)"), "{md}");
+    }
+
+    /// Ссылки внутри блока кода (сигнатура rustdoc) — текстом: markdown
+    /// внутри ограждения не действует.
+    #[test]
+    fn links_inside_a_code_block_become_text() {
+        let md = from_html(
+            "<pre><code>fn <a href=\"#m\">serialize</a>&lt;S&gt;(&amp;self) -&gt; \
+             <a href=\"https://doc.rust-lang.org/r\">Result</a>&lt;S::Ok&gt;;\nfn other();</code></pre>",
+        )
+        .unwrap();
+        assert!(
+            md.contains("fn serialize<S>(&self) -> Result<S::Ok>;\nfn other();"),
+            "{md}"
+        );
+        assert!(!md.contains("]("), "{md}");
     }
 
     #[test]

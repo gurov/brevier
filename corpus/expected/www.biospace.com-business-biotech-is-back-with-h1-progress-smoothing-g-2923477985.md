@@ -1,6 +1,6 @@
 # Biotech is back, with H1 progress smoothing glide path through end of year: Truist
 
-September 4, 2026 | 3 min read | Annalee Armstrong
+September 4, 2026 \| 3 min read \| Annalee Armstrong
 
 The biotech sector’s performance over the past 18 months has “more than made up for a challenging 2+ year period,” analysts from Truist Securities said. And with regulatory risks abating, M&A already topping 2025 and more positive trends underway, the firm believes the momentum will continue through the end of the year.
 

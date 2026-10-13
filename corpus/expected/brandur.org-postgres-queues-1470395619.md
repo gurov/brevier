@@ -1,4 +1,4 @@
-# Postgres Job Queues & Failure By MVCC
+# Postgres Job Queues \& Failure By MVCC
 
 Brandur Leach
 

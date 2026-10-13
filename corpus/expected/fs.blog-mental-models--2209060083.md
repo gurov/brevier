@@ -1,4 +1,4 @@
-# Mental Models: The Best Way to Make Intelligent Decisions (~100 Models Explained)
+# Mental Models: The Best Way to Make Intelligent Decisions (\~100 Models Explained)
 
 ## What Are Mental Models?
 

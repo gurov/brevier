@@ -1,4 +1,4 @@
-# Buenos Aires: The Paris of South America? - David Perell
+# Buenos Aires: The Paris of South America?
 
 Have you ever met somebody who was trying really hard to convince you that they’re somebody they’re not, and then you get to know them and you like them but not for the person they’re trying to be? That’s how I feel about Buenos Aires.
 

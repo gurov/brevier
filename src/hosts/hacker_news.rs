@@ -212,6 +212,8 @@ fn reply(row: &NodeRef, base: &Url) -> Reply {
         link: row.attr("id").map(|id| item_url(&id)),
         on: on_story(row, base),
         body: body(row, base.as_str()),
+        // HN ссылается на реплику в треде решёткой с её номером («context»).
+        anchor: row.attr("id").map(|id| id.to_string()),
     }
 }
 
@@ -506,18 +508,18 @@ mod tests {
         ));
         // Реплика из одной ссылки — общий тракт её выбрасывал.
         assert!(md.contains(
-            "**leumon** · [20 August 2026](https://news.ycombinator.com/item?id=1)\n\n\
+            "<a id=\"1\"></a>**leumon** · [20 August 2026](https://news.ycombinator.com/item?id=1)\n\n\
              Suspicious: [https://example.com/captcha](https://example.com/captcha)"
         ));
         assert!(md.contains(
-            "> **bob** · [20 August 2026](https://news.ycombinator.com/item?id=2)\n>\n\
+            "> <a id=\"2\"></a>**bob** · [20 August 2026](https://news.ycombinator.com/item?id=2)\n>\n\
              > First paragraph.\n>\n> Second & last."
         ));
         // Ссылки «reply», «parent», «next» читателю не нужны.
         assert!(!md.contains("reply?id"));
         assert!(!md.contains("parent"));
         assert!(md.ends_with(
-            "**fay** · [20 August 2026](https://news.ycombinator.com/item?id=6)\n\n*\\[flagged\\]*\n"
+            "<a id=\"6\"></a>**fay** · [20 August 2026](https://news.ycombinator.com/item?id=6)\n\n*\\[flagged\\]*\n"
         ));
     }
 
@@ -525,14 +527,14 @@ mod tests {
     fn deeper_than_the_indent_a_reply_says_whom_it_answers() {
         let md = read_page(&thread_html(), THREAD).unwrap().markdown;
         // Третий уровень — последний, что отступает.
-        assert!(md.contains("> > > **dee** · [20 August 2026]"));
+        assert!(md.contains("> > > <a id=\"4\"></a>**dee** · [20 August 2026]"));
         assert!(md.contains(
-            "> > > **eve** · replying to dee · [20 August 2026](https://news.ycombinator.com/item?id=5)"
+            "> > > <a id=\"5\"></a>**eve** · replying to dee · [20 August 2026](https://news.ycombinator.com/item?id=5)"
         ));
         // Мельче — родителя видно по отступу, и он не назван.
         assert!(!md.contains("replying to bob"));
         // Соседние реплики — разные цитаты: между ними пустая строка без знака.
-        assert!(md.contains("Deeper.\n\n> > > **dee**"));
+        assert!(md.contains("Deeper.\n\n> > > <a id=\"4\"></a>**dee**"));
     }
 
     #[test]
@@ -615,7 +617,7 @@ mod tests {
              *13 October 2026 · [parent](https://news.ycombinator.com/item?id=40) · \
              [whole thread](https://news.ycombinator.com/item?id=100)*\n\n\
              *\\[flagged\\]*\n\n## 1 reply\n\n\
-             **noa** · [20 August 2026](https://news.ycombinator.com/item?id=60)\n\nA reply.\n"
+             <a id=\"60\"></a>**noa** · [20 August 2026](https://news.ycombinator.com/item?id=60)\n\nA reply.\n"
         );
     }
 
@@ -636,7 +638,7 @@ mod tests {
         assert_eq!(
             page.markdown,
             "# New Comments \\| Hacker News\n\n\
-             **lin** · [13 October 2026](https://news.ycombinator.com/item?id=70) · \
+             <a id=\"70\"></a>**lin** · [13 October 2026](https://news.ycombinator.com/item?id=70) · \
              on [Firefox Enterprise](https://news.ycombinator.com/item?id=60)\n\nDiversify.\n"
         );
     }

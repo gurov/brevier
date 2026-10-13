@@ -1,4 +1,4 @@
-# When It Makes Sense To “Block” The Main Thread — Smashing Magazine
+# When It Makes Sense To “Block” The Main Thread
 
 Victor Ayomipo
 

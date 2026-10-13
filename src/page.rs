@@ -537,7 +537,10 @@ pub fn anchor_in(address: &Address) -> Option<String> {
             .split_once('#')
             .map(|(_, fragment)| fragment)
             .filter(|fragment| !fragment.is_empty())
-            .map(anchor),
+            .map(anchor)
+            // Без решётки — то, что подразумевает сам адрес (ссылка на
+            // реплику Lobsters, #11).
+            .or_else(|| crate::hosts::implied_anchor(url).map(|name| anchor(&name))),
         _ => None,
     }
 }
@@ -974,6 +977,11 @@ impl Writer<'_> {
                 self.put("\n", &styles);
             }
             NodeValue::ThematicBreak => self.put("* * *\n\n", &[Style::Dim]),
+            NodeValue::HtmlBlock(html) => {
+                for name in html_anchors(&html.literal) {
+                    self.page.anchors.push((anchor(&name), self.chars));
+                }
+            }
             NodeValue::Table(table) => {
                 let alignments = table.alignments.clone();
                 self.table(node, &alignments);
@@ -1074,6 +1082,13 @@ impl Writer<'_> {
                 }
                 NodeValue::SoftBreak => self.put(" ", styles),
                 NodeValue::LineBreak => self.put("\n", styles),
+                // `<a id="…"></a>` — якорь, поставленный руками: так в README
+                // на GitHub метят место, и так тред метит реплику (#11).
+                NodeValue::HtmlInline(html) => {
+                    for name in html_anchors(html) {
+                        self.page.anchors.push((anchor(&name), self.chars));
+                    }
+                }
                 _ => self.inlines(child, styles),
             }
         }
@@ -1179,20 +1194,74 @@ fn fill_cell<'n>(node: &'n AstNode<'n>, cell: &mut Cell, chars: &mut usize, styl
     }
 }
 
-/// Стоит ли картинка в абзаце одна.
+/// Имена якорей в сыром HTML: `id` или `name` у тегов `<a>`. Разбор
+/// грубый нарочно — ищем только `<a … id="…">`, остальное HTML окно
+/// не рисует.
+fn html_anchors(html: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let lower = html.to_ascii_lowercase();
+    let mut rest = 0;
+    while let Some(start) = lower[rest..].find("<a").map(|at| rest + at) {
+        let end = lower[start..]
+            .find('>')
+            .map_or(lower.len(), |at| start + at);
+        let tag = &html[start..end];
+        let opens = tag[2..].starts_with(|c: char| c.is_ascii_whitespace());
+        if opens {
+            for attribute in ["id=", "name="] {
+                let Some(at) = tag.to_ascii_lowercase().find(attribute) else {
+                    continue;
+                };
+                // Только целое имя атрибута: `data-id=` — не `id=`.
+                let whole = tag[..at].ends_with(|c: char| c.is_ascii_whitespace());
+                let value = &tag[at + attribute.len()..];
+                let quote = value.chars().next();
+                if let (true, Some(quote @ ('"' | '\''))) = (whole, quote)
+                    && let Some(close) = value[1..].find(quote)
+                    && close > 0
+                {
+                    names.push(value[1..1 + close].to_owned());
+                }
+            }
+        }
+        rest = end.max(start + 2);
+    }
+    names
+}
+
+/// Стоит ли картинка в абзаце одна — без текста вокруг.
 ///
-/// Соседи-пробелы не в счёт: `![схема](url)` на своей строке приходит
-/// с переводами строк по краям, и это всё равно иллюстрация.
+/// Пробелы и переводы строк не в счёт: `![схема](url)` на своей строке
+/// приходит с ними по краям, и это всё равно иллюстрация. Смотрим весь
+/// абзац, а не соседей: в строке «**Author:** ![имя](аватар) [@имя](…)»
+/// у аватарки по бокам пробелы, а текст — через них, и она часть строки,
+/// а не иллюстрация с подписью. Абзац из одних картинок (галерея, значки
+/// ссылками) — по-прежнему картинки своими строками.
 fn stands_alone<'n>(image: &'n AstNode<'n>) -> bool {
-    let empty = |node: Option<&'n AstNode<'n>>| match node {
-        None => true,
-        Some(node) => match &node.data.borrow().value {
-            NodeValue::Text(text) => text.trim().is_empty(),
-            NodeValue::SoftBreak | NodeValue::LineBreak => true,
-            _ => false,
-        },
+    let block = image
+        .ancestors()
+        .skip(1)
+        .find(|node| {
+            matches!(
+                node.data.borrow().value,
+                NodeValue::Paragraph | NodeValue::Heading(_) | NodeValue::TableCell
+            )
+        })
+        .or_else(|| image.parent());
+    let Some(block) = block else {
+        return true;
     };
-    empty(image.previous_sibling()) && empty(image.next_sibling())
+    !block.descendants().any(|node| {
+        let text = match &node.data.borrow().value {
+            NodeValue::Text(text) => !text.trim().is_empty(),
+            NodeValue::Code(_) => true,
+            _ => false,
+        };
+        // Подпись самой картинки (`alt`) — тоже текст, но не соседний.
+        text && !node
+            .ancestors()
+            .any(|up| matches!(up.data.borrow().value, NodeValue::Image(_)))
+    })
 }
 
 /// Текст узла без разметки — для подписей картинок и ячеек таблицы.
@@ -1566,6 +1635,49 @@ mod tests {
         let second = &page.blocks[1];
         assert!(matches!(&second.block, Block::Image { inline: true, .. }));
         assert_eq!(chars[second.at - 1], ' ');
+    }
+
+    /// `<a id="…"></a>` и `<a name='…'>` — якоря, как у README на GitHub
+    /// и у реплик треда; `data-id` — не якорь.
+    #[test]
+    fn a_raw_html_anchor_is_an_anchor() {
+        let page = Page::of(&doc(
+            "Intro.\n\n<a name='install'></a>\n\n> <a id=\"c_ab12\"></a>**ada** · reply\n\n\
+             <a data-id=\"no\" href=\"#x\">x</a> end.\n",
+        ));
+        let names: Vec<&str> = page.anchors.iter().map(|(name, _)| name.as_str()).collect();
+        // Подчёркивание приводится к дефису — как и решётка в ссылке.
+        assert_eq!(names, vec!["install", "c-ab12"]);
+        let (_, at) = &page.anchors[1];
+        let rest: String = page.text.chars().skip(*at).take(3).collect();
+        assert_eq!(rest, "ada");
+    }
+
+    /// Ссылка на реплику Lobsters (`/c/<id>`) без решётки прокручивает
+    /// к реплике: решётку из перенаправления HTTP не доносит.
+    #[test]
+    fn a_lobsters_comment_link_implies_its_anchor() {
+        let address = Address::Web("https://lobste.rs/c/qdpll5".to_owned());
+        assert_eq!(anchor_in(&address).as_deref(), Some("c-qdpll5"));
+        let plain = Address::Web("https://lobste.rs/s/abc/x".to_owned());
+        assert_eq!(anchor_in(&plain), None);
+    }
+
+    /// Аватарка в строке «**Author:** ![имя](…) [@имя](…)» (markdown
+    /// Discourse) — часть строки, хотя по бокам у неё пробелы. Значки
+    /// ссылками в абзаце без текста — картинки своими строками, как были.
+    #[test]
+    fn an_image_among_words_is_inline_even_between_spaces() {
+        let page = Page::of(&doc(
+            "**Author:** ![ada](ava.png) [@ada](https://e.com/u/ada)\\\n**Post date:** today\n\n\
+             [![CI](ci.svg)](https://e.com/ci) [![Docs](docs.svg)](https://e.com/docs)\n",
+        ));
+        let inline: Vec<bool> = page
+            .blocks
+            .iter()
+            .map(|placed| matches!(placed.block, Block::Image { inline: true, .. }))
+            .collect();
+        assert_eq!(inline, vec![true, false, false]);
     }
 
     #[test]
