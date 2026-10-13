@@ -90,6 +90,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.10.0" date="2026-10-13" type="development">
+      <description>
+        <p>Four ready-made styles for the type — Brevier, Book, Large print and
+          Compact — with the single settings folded under Fine-tune. The menu
+          has two lists, History and Bookmarks, and Search what you've read;
+          bookmarks show the copy they keep for good, and Forget everything
+          leaves those copies. Typing an address on the Settings tab no longer
+          closes the window.</p>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-10-12" type="development">
       <description>
         <p>The type is yours: Settings choose the face (the built-in Noto Sans,

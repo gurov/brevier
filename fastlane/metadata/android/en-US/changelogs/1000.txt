@@ -1,0 +1,4 @@
+• Ready-made type: Brevier, Book, Large print and Compact; the single settings are under Fine-tune.
+• Two lists instead of three: the menu has History, Bookmarks and Search what you've read. Bookmarks show their copy, kept for good.
+• Forget everything keeps the bookmarks' copies.
+• A page from the week's cache says "Opened without downloading".
