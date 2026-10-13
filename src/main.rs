@@ -363,6 +363,23 @@ fn page_text(html: &str, url: &str, args: &Args) -> Result<String, Error> {
         eprintln!("brevier: search results, shown as a list of links");
         return Ok(document.markdown);
     }
+    // Тред и списки Hacker News — тоже своим правилом (#11), и навигацию
+    // сайта `--nav` печатает ту, что покажет полка.
+    if !args.html
+        && let Some(document) = brevier::from_hacker_news(html, url)
+    {
+        if args.nav {
+            let mut out = String::new();
+            for link in &document.site {
+                out.push_str(&format!("{}\t{}\n", link.address, link.title));
+            }
+            return Ok(out);
+        }
+        if document.kind == markdown::Kind::Listing {
+            eprintln!("brevier: a list of links, not an article");
+        }
+        return Ok(document.markdown);
+    }
 
     let article = extract::extract(html, url)?;
     if args.html {

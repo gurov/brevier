@@ -32,8 +32,10 @@ mostly in Russian; write yours in whatever language you are most exact in.
 - **`android/`** — the Android app: Kotlin over the core, through one JNI entry point
   (`src/android.rs`) that answers in JSON. No androidx.
 - **`src/hosts.rs`** — the per-host rules, in one small table: reddit read through its
-  feed, the search engine's results page, and royallib's reader, whose book comes part by
-  part. Everything else is ruled by the shape of a page, never by its site. The results
+  feed, Hacker News threads and story lists read from its own markup
+  (`src/hosts/hacker_news.rs`), the search engine's results page, and royallib's reader,
+  whose book comes part by part. Everything else is ruled by the shape of a page, never
+  by its site. The results
   page is tested against a saved copy in `tests/fixtures/`; when DuckDuckGo changes its
   markup, that test fails instead of the reader.
 - **`corpus/`** — the regression corpus, its expected outputs and the scripts that measure.

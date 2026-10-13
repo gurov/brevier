@@ -238,6 +238,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **Feeds** open as lists of entries with date, author and a short summary — from an
   address, a `feed://` link or a file. A feed of comments on one page (a reddit thread,
   WordPress comments) reads as a thread.
+- **Hacker News reads as threads.** The story, then every comment with its author and day,
+  replies indented; a reply too deep to indent says whom it answers. The front page and the
+  other lists of stories are lists of links, with points and a link to the comments.
 - **Repository folders can be listed:** end the address with a slash
   (`gh:owner/repo/docs/`) or use **Files in this directory** on the shelf.
 - **Search.** Anything that is not an address goes to DuckDuckGo Lite, and the results
@@ -355,8 +358,10 @@ line keeps no history.
 - **Markdown first.** Every request asks for `text/markdown` before HTML, and
   `<link rel="alternate" type="text/markdown">` is followed when a page has one.
 - **Very few per-site rules.** reddit is read through its `.rss` feeds (its pages are empty
-  without JavaScript); royallib's books open part by part; DuckDuckGo Lite results are
-  unwrapped from its click tracker. Your search queries go to DuckDuckGo.
+  without JavaScript); Hacker News is read from its own table markup, since the general
+  extractor drops the author of every comment; royallib's books open part by part;
+  DuckDuckGo Lite results are unwrapped from its click tracker. Your search queries go to
+  DuckDuckGo.
 - **The Wayback Machine is asked only when you press the button.** A page that is gone
   does not send its address to archive.org by itself.
 - **An honest User-Agent:** `Brevier/0.1`. On our test set, pretending to be a browser lost

@@ -403,7 +403,7 @@ fn plain_words(text: &str) -> String {
 /// с разными языками на странице бывает несколько — в ленте, — и тогда
 /// язык не наш: переносы по чужим правилам хуже, чем никаких. Язык
 /// отдельного абзаца — на будущее: markdown его не несёт.
-fn html_lang(doc: &Document) -> Option<String> {
+pub(crate) fn html_lang(doc: &Document) -> Option<String> {
     let value = |selection: dom_query::Selection, name: &str| {
         selection
             .attr(name)
@@ -2115,7 +2115,7 @@ fn is_note_mark(text: &str) -> bool {
 /// `<a>` (у неё есть подпись), потом у `<link>` в шапке. Подпись — текст
 /// ссылки, без него её `title`, без него сам адрес. Ссылка на эту же
 /// страницу и не-веб адреса — не следующая страница.
-fn next_page(doc: &Document, url: &str) -> Option<Link> {
+pub(crate) fn next_page(doc: &Document, url: &str) -> Option<Link> {
     let base = Url::parse(url).ok();
     let bare = |address: &str| {
         Url::parse(address).ok().map(|mut url| {

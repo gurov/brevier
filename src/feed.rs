@@ -913,7 +913,14 @@ fn body_markdown(entry: &Entry, page: &str) -> Option<String> {
         Some(html) => crate::hosts::reply_html(html),
         None => format!("<p>{}</p>", escape_html(entry.summary.as_deref()?)),
     };
-    let doc = dom_query::Document::fragment(html.as_str());
+    reply_markdown(&html, page)
+}
+
+/// Реплика чужим HTML — markdown-ом, со ссылками и картинками, развёрнутыми
+/// от страницы. Не разобралась — хотя бы текстом. Общая для тредов из ленты
+/// и тредов, которые разбирает правило хоста (`hosts::hacker_news`).
+pub(crate) fn reply_markdown(html: &str, page: &str) -> Option<String> {
+    let doc = dom_query::Document::fragment(html);
     let base = Url::parse(page).ok();
     for (selector, attribute) in [("a[href]", "href"), ("img[src]", "src")] {
         for node in doc.select(selector).nodes() {
