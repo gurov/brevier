@@ -132,7 +132,8 @@ family is still to come.
 - `brevier:archive`, and full-text search across it (`Ctrl+Shift+F`) — files, no
   database; a reading life is thousands of pages, not millions.
 - Bookmarks keep their copy for good; the rest ages out with history. A setting turns
-  the archive off, and "forget everything" empties it together with the journal.
+  the archive off, and "forget everything" empties it together with the journal,
+  bookmarks' copies aside.
 
 ### 7. When the page is gone (#9)
 

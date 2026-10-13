@@ -154,7 +154,12 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
     let mut archived = None;
     let (title, markdown) = match page {
         Internal::History => ("History".to_owned(), store::Store::open().page()),
-        Internal::Bookmarks => ("Bookmarks".to_owned(), store::Marks::open().page()),
+        Internal::Bookmarks => {
+            let marks = store::Marks::open();
+            let copies = archive::Archive::open()
+                .latest_of(marks.marks().iter().map(|mark| mark.address.as_str()));
+            ("Bookmarks".to_owned(), marks.page(&copies))
+        }
         Internal::Check(None) => ("Check".to_owned(), check::about().to_owned()),
         Internal::Check(Some(url)) => {
             let report = check::check(url, ua)?;
@@ -171,7 +176,7 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
             ("Archive".to_owned(), archive::Archive::open().page())
         }
         Internal::Archive(ArchivePage::Search(query)) => (
-            format!("Archive: {query}"),
+            format!("What you've read: {query}"),
             archive::Archive::open().search_page(query),
         ),
         // Копия — файл как есть, шапка YAML с ним: её прячет рендерер,
@@ -192,9 +197,9 @@ fn open_internal(page: &Internal, ua: UserAgent) -> Result<Document, Error> {
                 (title, copy.markdown)
             }
             None => (
-                "Not in the archive".to_owned(),
-                "# Not in the archive\n\nThis copy is no longer in your archive. \
-                 [The archive](brevier:archive) lists what it keeps.\n"
+                "No longer kept".to_owned(),
+                "# No longer kept\n\nThis copy is gone: a copy stays as long as its line \
+                 in the [history](brevier:history), and a bookmark keeps the latest one.\n"
                     .to_owned(),
             ),
         },

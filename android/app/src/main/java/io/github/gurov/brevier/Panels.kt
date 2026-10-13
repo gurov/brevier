@@ -446,13 +446,13 @@ class SettingsPage(
 
         column.addView(section("History", palette))
         column.addView(row(
-            "Keep a copy of every page",
-            "Each article you read is kept as a compressed Markdown file in brevier:archive, so you can read and search it even when the site is gone. Off: new pages are not kept; what is there stays.",
+            "Keep a copy of every page you read",
+            "Each article you read is kept as a compressed Markdown file — your copy, next to the page in the history — so you can read it and search it even when the site is gone. Off: new pages are not kept; what is there stays.",
             switch(palette, archive) { on -> keepCopies(on) }, palette,
         ))
         column.addView(row(
             "Forget everything you have read",
-            "The list at brevier:history goes away, the address bar stops suggesting those pages, and the saved copies of pages and the archive are deleted. Bookmarks and open tabs stay.",
+            "The list at brevier:history goes away, the address bar stops suggesting those pages, and the copies of what you read are deleted. Bookmarks, with their copies, and open tabs stay.",
             button("Forget", 0xffb3261e.toInt(), palette) { forget() }, palette,
         ))
         visibility = VISIBLE

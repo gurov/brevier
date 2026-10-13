@@ -57,10 +57,11 @@ and the site's own design, so every site looks the same.
 - When a page names the next one, it ends with a **Next:** link. **Space** at
   the very end goes there.
 - **Back** returns you to the place where you stopped reading.
-- Pages you read this week open from a copy on this computer. **Ctrl+R** loads
-  a fresh one.
-- Every article you read is kept in your [archive](brevier:archive), even after
-  the site changes. **Ctrl+Shift+F** searches it.
+- Pages you read this week open without downloading. **Ctrl+R** loads a fresh
+  one.
+- Every article you read is kept as **your copy**, even after the site changes:
+  the [history](brevier:history) links to it, and **Ctrl+Shift+F** searches
+  them all.
 
 **Ctrl+L**\u{a0}address · **Ctrl+T**\u{a0}new\u{a0}tab · **Ctrl+F**\u{a0}find
 · **Ctrl+D**\u{a0}bookmark · **Ctrl+H**\u{a0}history · **Ctrl+S**\u{a0}save
@@ -93,10 +94,11 @@ Links shared from other apps open here too.
   and the site's own menu.
 - When a page names the next one, it ends with a **Next:** link.
 - Press and hold a link to open it in a new tab.
-- Pages you read this week open from a copy on your phone. **Reload** in the
-  menu loads a fresh one.
-- Every article you read is kept in your [archive](brevier:archive), even after
-  the site changes. **Search your archive** is in the menu.
+- Pages you read this week open without downloading. **Reload** in the menu
+  loads a fresh one.
+- Every article you read is kept as **your copy**, even after the site changes:
+  the [history](brevier:history) links to it, and **Search what you've read**
+  in the menu looks through them all.
 
 Find on page, bookmarks, history and settings are in the menu. Pinch the page
 to make it bigger or smaller.

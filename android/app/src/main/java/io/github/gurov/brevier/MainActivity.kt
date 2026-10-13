@@ -1377,8 +1377,8 @@ class MainActivity : Activity(), ArticleHost {
         }
         menu.item("History") { newTab("brevier:history") }
         menu.item("Bookmarks") { newTab("brevier:bookmarks") }
-        menu.item("Archive") { newTab("brevier:archive") }
-        menu.item("Search your archive") { searchArchive() }
+        // Архива списком нет: он — история и закладки с текстом (13 октября 2026).
+        menu.item("Search what you've read") { searchArchive() }
         menu.item("Settings") { showSettings() }
         menu.show(more)
     }
@@ -1460,7 +1460,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun forgetEverything() {
         AlertDialog.Builder(this)
             .setTitle("Forget everything you have read?")
-            .setMessage("The list of pages goes away, the address bar stops suggesting them, and the saved copies of pages are deleted. Bookmarks and open tabs stay.")
+            .setMessage("The list of pages goes away, the address bar stops suggesting them, and the copies of what you read are deleted. Bookmarks, with their copies, and open tabs stay.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Forget") { _, _ ->
                 Core.forget()

@@ -190,7 +190,9 @@ fn copy_note_at(saved: SystemTime, now: SystemTime) -> String {
         (1, _, _) => "yesterday".to_owned(),
         (d, _, _) => format!("{d} days ago"),
     };
-    format!("From your copy, saved {age}.")
+    // Не «your copy»: так читатель зовёт копию в архиве, и два разных
+    // хранилища под одним словом путались (13 октября 2026).
+    format!("Opened without downloading, saved {age}.")
 }
 
 /// Годится ли документ в кэш: статья из сети или из репозитория.
@@ -600,11 +602,23 @@ mod tests {
     fn the_note_says_how_old_the_copy_is() {
         let now = SystemTime::now();
         let ago = |seconds: u64| copy_note_at(now - Duration::from_secs(seconds), now);
-        assert_eq!(ago(5), "From your copy, saved a moment ago.");
-        assert_eq!(ago(90), "From your copy, saved a minute ago.");
-        assert_eq!(ago(20 * 60), "From your copy, saved 20 minutes ago.");
-        assert_eq!(ago(3 * 3600), "From your copy, saved 3 hours ago.");
-        assert_eq!(ago(30 * 3600), "From your copy, saved yesterday.");
-        assert_eq!(ago(4 * 24 * 3600), "From your copy, saved 4 days ago.");
+        assert_eq!(ago(5), "Opened without downloading, saved a moment ago.");
+        assert_eq!(ago(90), "Opened without downloading, saved a minute ago.");
+        assert_eq!(
+            ago(20 * 60),
+            "Opened without downloading, saved 20 minutes ago."
+        );
+        assert_eq!(
+            ago(3 * 3600),
+            "Opened without downloading, saved 3 hours ago."
+        );
+        assert_eq!(
+            ago(30 * 3600),
+            "Opened without downloading, saved yesterday."
+        );
+        assert_eq!(
+            ago(4 * 24 * 3600),
+            "Opened without downloading, saved 4 days ago."
+        );
     }
 }

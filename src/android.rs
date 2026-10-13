@@ -157,11 +157,7 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_init<'caller>(
         std::thread::spawn(|| {
             Cache::open().prune();
             let kept = Store::open().copies();
-            let marked = Marks::open()
-                .marks()
-                .iter()
-                .map(|mark| mark.address.clone())
-                .collect();
+            let marked = Marks::open().addresses();
             Archive::open().prune(&kept, &marked);
         });
         Ok(())
@@ -334,9 +330,10 @@ fn call(method: &str, arg: &str) -> String {
                 }
             }
             core().store.forget();
-            // Копии страниц и архив — такой же след прочитанного, как журнал.
+            // Копии страниц и архив — такой же след прочитанного, как журнал;
+            // кроме копий закладок — их закладка обещает навсегда.
             Cache::open().forget();
-            Archive::open().forget();
+            Archive::open().forget(&Marks::open().addresses());
             "{}".to_owned()
         }
         "docs" => docs(arg),

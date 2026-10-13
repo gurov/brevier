@@ -33,7 +33,7 @@ use gtk::pango;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow};
 
-use brevier::address::{self, Address, ArchivePage, Internal, Repo};
+use brevier::address::{self, Address, Internal, Repo};
 use brevier::failure::{Failure, describe, describe_page};
 use brevier::media::{self, Raster, Source};
 use brevier::outline::{
@@ -181,11 +181,7 @@ fn main() -> glib::ExitCode {
             // Архив (#8): копия живёт, пока на неё указывает журнал, а у
             // закладки — последняя копия навсегда.
             let kept = brevier::store::Store::open().copies();
-            let marked = brevier::store::Marks::open()
-                .marks()
-                .iter()
-                .map(|mark| mark.address.clone())
-                .collect();
+            let marked = brevier::store::Marks::open().addresses();
             brevier::archive::Archive::open().prune(&kept, &marked);
         });
     });
@@ -1372,17 +1368,18 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         .build();
     history_rows.add_css_class("rich-list");
     history_rows.append(&setting_row(
-        "Keep a copy of every page",
-        "Each article you read is kept as a compressed Markdown file in \
-         brevier:archive, so you can read and search it even when the site is \
-         gone. Off: new pages are not kept; what is there stays.",
+        "Keep a copy of every page you read",
+        "Each article you read is kept as a compressed Markdown file — your \
+         copy, next to the page in the history — so you can read it and search \
+         it even when the site is gone. Off: new pages are not kept; what is \
+         there stays.",
         &keep_copies,
     ));
     history_rows.append(&action_row(
         "Forget everything you have read",
         "The list at brevier:history goes away, the address bar stops \
-         suggesting those pages, and the saved copies of pages and the \
-         archive are deleted. Bookmarks and open tabs stay.",
+         suggesting those pages, and the copies of what you read are deleted. \
+         Bookmarks, with their copies, and open tabs stay.",
         &forget,
     ));
     page.append(&history_rows);
@@ -1714,21 +1711,6 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("bookmarks", &[], bookmarks);
 
-    // Архив (#8) — сосед истории: тот же журнал, только с текстом страниц.
-    let archive = gio::SimpleAction::new("archive", None);
-    {
-        let ui = ui.clone();
-        let state = state.clone();
-        archive.connect_activate(move |_, _| {
-            new_tab(
-                &ui,
-                &state,
-                Some(Address::Internal(Internal::Archive(ArchivePage::List))),
-            );
-        });
-    }
-    add("archive", &[], archive);
-
     // Поиск по архиву — адресом `brevier:archive?q=`: форм у Brevier нет,
     // а строка адреса уже умеет и набор, и подсказки, и Enter. Клавиша
     // ставит туда начало адреса и курсор за ним — остаётся набрать слова.
@@ -1789,7 +1771,9 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
 
     // Само меню под кнопкой в шапке. Сверху — про открытую страницу, под
     // чертой — места программы в том порядке, как просили: настройки,
-    // история, закладки.
+    // история, закладки. Архива списком нет (13 октября 2026): он — история
+    // плюс закладки, только с текстом, и третьим списком лишь путал; от него
+    // в меню — поиск по прочитанному, а копии — ссылками в тех двух списках.
     let page = gio::Menu::new();
     page.append(Some("Reload"), Some("app.reload"));
     page.append(Some("Check this page"), Some("app.check"));
@@ -1797,7 +1781,7 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     places.append(Some("Settings"), Some("app.settings"));
     places.append(Some("History"), Some("app.history"));
     places.append(Some("Bookmarks"), Some("app.bookmarks"));
-    places.append(Some("Archive"), Some("app.archive"));
+    places.append(Some("Search what you've read"), Some("app.search-archive"));
     let menu = gio::Menu::new();
     menu.append_section(None, &page);
     menu.append_section(None, &places);
@@ -2437,8 +2421,8 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         .message("Forget everything you have read?")
         .detail(
             "The list of pages goes away, the address bar stops suggesting them, \
-             and the saved copies of pages and the archive are deleted. Bookmarks \
-             and open tabs stay.",
+             and the copies of what you read are deleted. Bookmarks, with their \
+             copies, and open tabs stay.",
         )
         .buttons(["Cancel", "Forget"])
         .cancel_button(0)
@@ -2457,8 +2441,9 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         // Копии страниц — такой же след прочитанного, как журнал. Память
         // вкладок не трогаем: открытые вкладки остаются, как и обещано.
         brevier::cache::Cache::open().forget();
-        // Архив — тоже след прочитанного (#8): «забыть всё» значит всё.
-        brevier::archive::Archive::open().forget();
+        // Архив — тоже след прочитанного (#8): «забыть всё» значит всё,
+        // кроме копий закладок — их закладка обещает навсегда.
+        brevier::archive::Archive::open().forget(&brevier::store::Marks::open().addresses());
         // И что прочитано на страницах (#19): файл и счёт в открытых вкладках.
         {
             let mut borrowed = state.borrow_mut();

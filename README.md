@@ -176,12 +176,12 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Tab` / `Shift+Tab` | mark the next / previous link |
 | `Enter` / `Ctrl+Enter` on a marked link | follow it / open it in a new tab |
 | `Ctrl+L` | go to the address bar |
-| `Ctrl+R`, `F5` | reload, skipping the saved copy |
+| `Ctrl+R`, `F5` | reload, downloading the page afresh |
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
 | `Ctrl+Tab`, `Ctrl+PageUp` / `PageDown` | switch tabs |
 | `Ctrl+F` | find on page |
 | `Ctrl+H` | history |
-| `Ctrl+Shift+F` | search your archive |
+| `Ctrl+Shift+F` | search what you've read |
 | `Ctrl+D` | bookmark the page, or remove the bookmark |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0`, `Ctrl`+wheel | zoom in / out / reset |
 | `Ctrl+S` | save the article |
@@ -224,9 +224,10 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **A new tab shows the five pages you read last.**
 - **Tabs come back** after you close the window; only the visible one loads at start.
 - **History and bookmarks**, and the address bar suggests pages you have read.
-- **The archive keeps every article you read**, as a compressed Markdown file, so you can
-  read and search it after the site has changed or gone: `brevier:archive`, and
-  `Ctrl+Shift+F` (Search your archive, in the menu on the phone).
+- **Every article you read is kept as your copy**, a compressed Markdown file, so you can
+  read and search it after the site has changed or gone. The history links each page to
+  its copy; a bookmark keeps its copy for good. **Search what you've read** is in the menu
+  (`Ctrl+Shift+F`), and `brevier:archive` lists every copy.
 
 **Any kind of page**
 
@@ -241,8 +242,8 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   come back as a list of links. A leading `?` forces a search.
 - **Images load right away, and one switch turns them off** — without JavaScript, the
   image decoder is the main thing left to attack.
-- **Pages read in the last week open from a copy on disk**, with no download. `Ctrl+R`
-  fetches a fresh one. Lists of links are always fetched, since what's new is the point.
+- **Pages read in the last week open without downloading**, from a cache on disk.
+  `Ctrl+R` fetches a fresh one. Lists of links are always fetched, since what's new is the point.
 - **Sites that serve Markdown are read exactly as written**, with no extraction. Brevier
   speaks CommonMark with GitHub's extensions; footnotes and GitHub alerts (`> [!NOTE]`)
   are kept.
@@ -331,7 +332,8 @@ History, open tabs and bookmarks are plain text, one line per entry:
 The archive holds one file per page, `<host>/<date>-<title>.md.lz4`: Markdown with a short
 header (title, address, when you read it), compressed in the standard LZ4 format, so
 `lz4 -d` opens it without Brevier. A copy stays as long as its line in the history, and a
-bookmarked page keeps its latest copy for good. A switch in Settings stops new copies.
+bookmarked page keeps its latest copy for good, even through **Forget everything**. A switch
+in Settings stops new copies.
 
 Settings are in `~/.config/brevier/settings.tsv`. The cache — the fonts, and week-old
 copies of pages (up to 64 MB of text and 256 MB of images) — is in `~/.cache/brevier`.
@@ -339,8 +341,9 @@ The usual `XDG_*` variables move these folders, and `BREVIER_DATA_DIR` moves the
 On Windows all of it is in `%LOCALAPPDATA%\Brevier`; on Android, in the app's own storage.
 
 There is no database: delete a line to forget a page. **Forget everything** in Settings
-clears the history, the saved copies and the archive, and keeps your bookmarks and tabs. Only the
-window writes these files; `brevier <url>` on the command line keeps no history.
+clears the history, the cache of pages and the archive, and keeps your bookmarks with their
+copies, and your tabs. Only the window writes these files; `brevier <url>` on the command
+line keeps no history.
 
 ## On the network
 

@@ -304,6 +304,15 @@ impl Store {
             out.push_str("Nothing here yet. Pages you read show up on this list.\n");
             return out;
         }
+        // Архив читателю — не третий список рядом с историей и закладками,
+        // а «your copy» у строки этого списка и поиск по прочитанному.
+        if self.visits.iter().any(|visit| !visit.copy.is_empty()) {
+            out.push_str(
+                "Next to a page, **your copy** is the text as you read it: it stays when \
+                 the site changes or goes. **Search what you've read**, in the menu, looks \
+                 through all of them.\n\n",
+            );
+        }
 
         // «Сегодня» считаем по часам последней записи: своего часового пояса
         // у ядра нет, а у визита он записан. Читатель, закрывший программу
@@ -503,6 +512,12 @@ impl Marks {
         self.marks.iter().any(|mark| mark.address == address)
     }
 
+    /// Адреса закладок: их последние копии архив хранит навсегда, и «забыть
+    /// всё» их не трогает.
+    pub fn addresses(&self) -> HashSet<String> {
+        self.marks.iter().map(|mark| mark.address.clone()).collect()
+    }
+
     /// Отметить страницу или снять отметку. Отвечает тем, отмечена ли она
     /// теперь: на этот ответ смотрит звёздочка в панели.
     pub fn toggle(&mut self, address: &Address, title: &str, offset: i32) -> bool {
@@ -524,14 +539,29 @@ impl Marks {
 
     /// Страница закладок. Дней тут нет, в отличие от истории: закладку
     /// ставят не «когда-то», а «вот это»; порядок — свежие сверху.
-    pub fn page(&self) -> String {
+    ///
+    /// `copies` — последние копии страниц в архиве по адресу
+    /// (`Archive::latest_of`). Закладка хранит свою навсегда, и это главное,
+    /// чем она отличается от строки истории, — поэтому копия видна здесь же,
+    /// с датой: закладка бывает старше любой строки истории.
+    pub fn page(&self, copies: &HashMap<String, crate::archive::Copy>) -> String {
         let mut out = String::from("# Bookmarks\n\n");
         if self.marks.is_empty() {
             out.push_str(
-                "Nothing here yet. **Ctrl+D** keeps the page you are reading, \
-                 and takes it off this list if it is already here.\n",
+                "Nothing here yet. The star (**Ctrl+D** in the window) keeps the page \
+                 you are reading; press it again to take the page off this list.\n",
             );
             return out;
+        }
+        if self
+            .marks
+            .iter()
+            .any(|mark| copies.contains_key(&mark.address))
+        {
+            out.push_str(
+                "A bookmark keeps **your copy** of its page for good — the text as you \
+                 last read it, even after you forget everything you have read.\n\n",
+            );
         }
         for mark in self.marks.iter().rev() {
             let title = if mark.title.is_empty() {
@@ -545,7 +575,20 @@ impl Marks {
             } else {
                 format!(" — {source}")
             };
-            out.push_str(&format!("- {}{source}\n", link(&title, &mark.address)));
+            let copy = match copies.get(&mark.address) {
+                Some(copy) => format!(
+                    " · {}",
+                    link(
+                        &format!("your copy from {}", crate::archive::long_date(&copy.read)),
+                        &crate::archive::copy_address(&copy.path),
+                    )
+                ),
+                None => String::new(),
+            };
+            out.push_str(&format!(
+                "- {}{source}{copy}\n",
+                link(&title, &mark.address)
+            ));
         }
         if let Some(path) = self.path.as_deref().filter(|_| self.writable) {
             out.push_str(&format!(
@@ -1326,12 +1369,11 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         let sivers = text.lines().find(|line| line.contains("sive.rs")).unwrap();
         assert_eq!(sivers.split('\t').count(), 3);
-        // На странице истории копия — ссылкой рядом со страницей.
-        assert!(
-            store
-                .page()
-                .contains("[your copy](brevier:archive/danluu.com/2026-10-09-latency.md.lz4)")
-        );
+        // На странице истории копия — ссылкой рядом со страницей, и сверху
+        // сказано, что это и где по ним искать.
+        let page = store.page();
+        assert!(page.contains("[your copy](brevier:archive/danluu.com/2026-10-09-latency.md.lz4)"));
+        assert!(page.contains("**Search what you've read**"));
     }
 
     #[test]
@@ -1586,15 +1628,32 @@ mod tests {
         marks.toggle(&web("https://sive.rs/faq"), "FAQ", 0);
         marks.toggle(&web("https://danluu.com/"), "danluu", 0);
 
-        let page = marks.page();
+        let page = marks.page(&HashMap::new());
         assert!(page.starts_with("# Bookmarks\n\n- "));
         assert!(!page.contains("brevier:history"));
+        assert!(!page.contains("your copy"));
         assert!(page.find("danluu").unwrap() < page.find("FAQ").unwrap());
         assert!(
             Marks::at(temporary("no-marks"))
-                .page()
+                .page(&HashMap::new())
                 .contains("Nothing here yet")
         );
+
+        // Копия закладки — ссылкой с датой, и сверху сказано, что она навсегда.
+        let copy = crate::archive::Copy {
+            path: "danluu.com/2026-10-09-danluu.md.lz4".to_owned(),
+            title: "danluu".to_owned(),
+            source: "https://danluu.com/".to_owned(),
+            read: Stamp::of_unix(1_791_540_000, 0),
+            markdown: String::new(),
+        };
+        let page = marks.page(&HashMap::from([(copy.source.clone(), copy)]));
+        assert!(page.contains("A bookmark keeps **your copy**"), "{page}");
+        assert!(
+            page.contains("· [your copy from 9 October 2026](brevier:archive/danluu.com/2026-10-09-danluu.md.lz4)"),
+            "{page}"
+        );
+        assert_eq!(page.matches("your copy from").count(), 1);
     }
 
     #[test]

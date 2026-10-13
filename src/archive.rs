@@ -23,8 +23,14 @@
 //! **Сколько живёт.** Строка истории указывает на свою копию; копия живёт,
 //! пока на неё указывает история (журнал подрезается своим `KEEP`), а у
 //! закладки последняя копия остаётся навсегда. Уборка — на запуске, в фоне.
-//! «Забыть всё» опустошает архив вместе с журналом; переключатель
+//! «Забыть всё» опустошает архив вместе с журналом, кроме копий закладок:
+//! закладки «забыть всё» оставляет, а с ними и обещанное; переключатель
 //! в настройках перестаёт класть новое.
+//!
+//! **Читателю архив — не третий список** (13 октября 2026): по уборке он
+//! ровно история плюс закладки, только с текстом. В меню его нет; копия —
+//! ссылкой «your copy» в истории и закладках, поиск — «Search what you've
+//! read». `brevier:archive` остаётся адресом.
 //!
 //! **Пишет только интерфейс**, как и историю: cli — инструмент конвейера.
 //! Читать архив cli может: `brevier brevier:archive/<путь>` печатает копию
@@ -160,28 +166,74 @@ impl Archive {
     /// лежат там, и весь архив ради одной страницы не читаем. Решётка
     /// адреса не в счёт: в копию страница ложится без неё.
     pub fn latest(&self, address: &Address) -> Option<Copy> {
-        let dir = self.dir.as_ref()?;
         let host = host_of(address)?;
         let shown = address.display();
         let source = shown.split('#').next().unwrap_or_default();
-        fs::read_dir(dir.join(&host))
-            .ok()?
-            .flatten()
-            .filter_map(|file| {
-                let name = file.file_name().to_str()?.to_owned();
-                if !name.ends_with(EXTENSION) {
-                    return None;
-                }
-                let head = read_head(&file.path())?;
-                (head.source == source).then(|| Copy {
-                    path: format!("{host}/{name}"),
-                    title: head.title,
-                    source: head.source,
-                    read: head.read,
-                    markdown: String::new(),
-                })
-            })
-            .max_by_key(|copy| moment(&copy.read))
+        let mut found = HashMap::new();
+        self.newest_in(&host, &HashSet::from([source]), &mut found);
+        found.remove(source)
+    }
+
+    /// Последние копии страниц из закладок, по адресу страницы: закладка
+    /// хранит свою копию навсегда, и страница закладок на неё ссылается.
+    /// Читаем папки только их хостов, каждую по разу.
+    pub fn latest_of<'a>(
+        &self,
+        sources: impl IntoIterator<Item = &'a str>,
+    ) -> HashMap<String, Copy> {
+        let mut wanted: HashMap<String, HashSet<&str>> = HashMap::new();
+        for source in sources {
+            let source = source.split('#').next().unwrap_or_default();
+            let Some(host) = crate::address::parse(source)
+                .ok()
+                .and_then(|address| host_of(&address))
+            else {
+                continue;
+            };
+            wanted.entry(host).or_default().insert(source);
+        }
+        let mut found = HashMap::new();
+        for (host, sources) in &wanted {
+            self.newest_in(host, sources, &mut found);
+        }
+        found
+    }
+
+    /// Самые свежие копии страниц `sources` в папке одного хоста.
+    fn newest_in(&self, host: &str, sources: &HashSet<&str>, found: &mut HashMap<String, Copy>) {
+        let Some(dir) = &self.dir else { return };
+        let Ok(files) = fs::read_dir(dir.join(host)) else {
+            return;
+        };
+        for file in files.flatten() {
+            let Some(name) = file.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if !name.ends_with(EXTENSION) {
+                continue;
+            }
+            let Some(head) = read_head(&file.path()) else {
+                continue;
+            };
+            if !sources.contains(head.source.as_str()) {
+                continue;
+            }
+            let newer = found
+                .get(&head.source)
+                .is_none_or(|known: &Copy| moment(&head.read) > moment(&known.read));
+            if newer {
+                found.insert(
+                    head.source.clone(),
+                    Copy {
+                        path: format!("{host}/{name}"),
+                        title: head.title,
+                        source: head.source,
+                        read: head.read,
+                        markdown: String::new(),
+                    },
+                );
+            }
+        }
     }
 
     /// Все копии, свежие сверху: шапки без текста.
@@ -288,13 +340,15 @@ impl Archive {
         found
     }
 
-    /// Страница с найденным: `brevier:archive?q=…`.
+    /// Страница с найденным: `brevier:archive?q=…`. Читателю это не «архив»,
+    /// а поиск по прочитанному — так зовётся и пункт меню; архив — где
+    /// лежат копии, а не третий список рядом с историей и закладками.
     pub fn search_page(&self, query: &str) -> String {
         let query = query.trim();
-        let mut out = format!("# Archive: {}\n\n", escape_text(query));
+        let mut out = format!("# What you've read: {}\n\n", escape_text(query));
         let found = self.search(query);
         match found.len() {
-            0 => out.push_str("No page in your archive has all of these words.\n"),
+            0 => out.push_str("None of your copies has all of these words.\n"),
             1 => out.push_str("One page.\n"),
             RESULTS => out.push_str(&format!("The newest {RESULTS} pages.\n")),
             count => out.push_str(&format!("{count} pages.\n")),
@@ -321,6 +375,23 @@ impl Archive {
     }
 
     fn prune_at(&self, kept: &HashSet<String>, marked: &HashSet<String>, now: SystemTime) {
+        self.sweep(kept, marked, |file| {
+            fs::metadata(file)
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_none_or(|age| age < GRACE)
+        });
+    }
+
+    /// Убрать копии, кроме тех, на которые указывает журнал (`kept`),
+    /// последних копий закладок (`marked`) и тех, что щадит `spare`.
+    fn sweep(
+        &self,
+        kept: &HashSet<String>,
+        marked: &HashSet<String>,
+        spare: impl Fn(&Path) -> bool,
+    ) {
         let Some(dir) = &self.dir else { return };
         let mut newest: HashMap<String, (i64, String)> = HashMap::new();
         let mut heads = Vec::new();
@@ -341,17 +412,10 @@ impl Archive {
         }
         let marked_copies: HashSet<String> = newest.into_values().map(|(_, path)| path).collect();
         for (path, file) in heads {
-            if kept.contains(&path) || marked_copies.contains(&path) {
+            if kept.contains(&path) || marked_copies.contains(&path) || spare(&file) {
                 continue;
             }
-            let young = fs::metadata(&file)
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|modified| now.duration_since(modified).ok())
-                .is_none_or(|age| age < GRACE);
-            if !young {
-                let _ = fs::remove_file(&file);
-            }
+            let _ = fs::remove_file(&file);
         }
         if let Ok(hosts) = fs::read_dir(dir) {
             for host in hosts.flatten() {
@@ -361,11 +425,18 @@ impl Archive {
         }
     }
 
-    /// Забыть всё: копии — такой же след прочитанного, как журнал.
-    pub fn forget(&self) {
-        if let Some(dir) = &self.dir {
+    /// Забыть всё: копии — такой же след прочитанного, как журнал. Кроме
+    /// последних копий закладок (`marked` — их адреса): закладка обещает
+    /// копию навсегда, а «забыть всё» закладки оставляет.
+    pub fn forget(&self, marked: &HashSet<String>) {
+        let Some(dir) = &self.dir else { return };
+        if marked.is_empty() {
             let _ = fs::remove_dir_all(dir);
+            return;
         }
+        self.sweep(&HashSet::new(), marked, |_| false);
+        // Пустой архив — пустая папка: её тоже нет.
+        let _ = fs::remove_dir(dir);
     }
 
     /// Где лежит архив и как его читать без Brevier — подвал обеих страниц.
@@ -376,8 +447,8 @@ impl Archive {
         };
         format!(
             "\n---\n\nThese are plain files in {place}, one per page; `lz4 -d` opens any of \
-             them without Brevier. To search them, type `brevier:archive?q=` and your words \
-             in the address bar (Ctrl+Shift+F in the window).\n"
+             them without Brevier. **Search what you've read**, in the menu, looks through them \
+             all, and so does `brevier:archive?q=` with your words in the address bar.\n"
         )
     }
 
@@ -923,10 +994,14 @@ mod tests {
 
         let results = archive.search_page("borrow checker");
         assert!(
-            results.starts_with("# Archive: borrow checker\n\n2 pages.\n"),
+            results.starts_with("# What you've read: borrow checker\n\n2 pages.\n"),
             "{results}"
         );
-        assert!(archive.search_page("[x]").starts_with("# Archive: \\[x\\]"));
+        assert!(
+            archive
+                .search_page("[x]")
+                .starts_with("# What you've read: \\[x\\]")
+        );
     }
 
     /// Кусок — из текста, который видел читатель, а не из исходника (#36):
@@ -1016,9 +1091,73 @@ mod tests {
             &article("https://a.org/1", "One", "x"),
             &stamp("2026-10-09T08:00:00Z"),
         );
-        archive.forget();
+        archive.forget(&HashSet::new());
         assert!(!dir.exists());
         assert!(archive.list().is_empty());
         assert!(archive.page().contains("Nothing here yet"));
+    }
+
+    /// Закладка обещает копию навсегда, а «забыть всё» закладки оставляет —
+    /// значит, и их последние копии. Свежесть не в счёт: забывают сразу.
+    #[test]
+    fn forgetting_keeps_the_bookmarks_copies() {
+        let dir = temporary("forget-marks");
+        let archive = Archive::at(&dir);
+        let older = archive
+            .keep(
+                &article("https://a.org/1", "One", "x"),
+                &stamp("2026-10-01T08:00:00Z"),
+            )
+            .unwrap();
+        let newer = archive
+            .keep(
+                &article("https://a.org/1", "One", "y"),
+                &stamp("2026-10-09T08:00:00Z"),
+            )
+            .unwrap();
+        let other = archive
+            .keep(
+                &article("https://b.org/2", "Two", "z"),
+                &stamp("2026-10-09T09:00:00Z"),
+            )
+            .unwrap();
+        archive.forget(&["https://a.org/1".to_owned()].into());
+        assert!(dir.join(&newer).exists());
+        assert!(!dir.join(&older).exists());
+        assert!(!dir.join(&other).exists());
+        assert!(!dir.join("b.org").exists());
+    }
+
+    /// Последние копии закладок: папки только их хостов, решётка не в счёт,
+    /// страница без копии — без строки.
+    #[test]
+    fn the_latest_copies_of_bookmarks() {
+        let dir = temporary("latest-of");
+        let archive = Archive::at(&dir);
+        archive.keep(
+            &article("https://a.org/1", "One", "x"),
+            &stamp("2026-10-01T08:00:00Z"),
+        );
+        let newer = archive
+            .keep(
+                &article("https://a.org/1", "One", "y"),
+                &stamp("2026-10-09T08:00:00Z"),
+            )
+            .unwrap();
+        archive.keep(
+            &article("https://a.org/2", "Two", "z"),
+            &stamp("2026-10-09T09:00:00Z"),
+        );
+        let found =
+            archive.latest_of(["https://a.org/1#part", "https://c.org/3", "not an address"]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found["https://a.org/1"].path, newer);
+        assert_eq!(
+            archive
+                .latest(&crate::address::parse("https://a.org/1").unwrap())
+                .unwrap()
+                .path,
+            newer
+        );
     }
 }
