@@ -2,18 +2,20 @@
 
 What is planned, in two horizons, and what has been decided. Nothing here has a
 date. Inside each list the order is roughly the order of attack. Every item in
-*Near* is also an open issue labelled `roadmap`, where the work is tracked: this
-file is the plan, the issues are the progress.
+*Near* is also an issue labelled `roadmap`, where the work is tracked: this file is
+the plan, the issues are the progress. An item whose issue is closed says "Done"
+and describes what was built.
 
 ## Near — the next releases
 
 ### 1. The check (#3)
 
-A developer should be able to point Brevier at their own site and be told what stands
+Done. A developer can point Brevier at their own site and be told what stands
 between it and a clean read. `brevier --check <url>` — and `--check --stdin <url>` for
 HTML that is not deployed yet — runs the ordinary pipeline, watches what happens at
-every stage, and prints a report. In Markdown, naturally: it reads in the window as
-`brevier:check`, and it diffs in a pull request.
+every stage, and prints a report. In Markdown, naturally: it reads in the window and
+on the phone as `brevier:check`, from "Check this page" in the menu, and it diffs in
+a pull request.
 
 The report has three parts.
 
@@ -23,7 +25,7 @@ score instead of deducting from it: text that exists only after a script has run
 caps it at 10, a 403 to an honest User-Agent is 0. A page that cannot be read does
 not "read at 70" because its headings were in order. The exit code follows the score
 against a threshold — 80 by default, `--min` to change it — so the check can sit in
-CI next to the linter.
+CI next to the linter. Several addresses exit by the worst of them.
 
 **Findings**, each with what was seen, what it cost, and what to change, grouped by
 the stage that produced them:
@@ -52,29 +54,35 @@ fetched response — no second fetch with a headless browser, no external servic
 advice is one sentence and names the element. The weights are in one table in the
 source and repeated in every report, so a score can be argued with, line by line.
 
-Work items:
+What was built:
 
 - a `Check` stage that records events from fetch, extraction and conversion — the
-  exit codes already tell the failures apart; the check turns them into sentences
+  exit codes tell the failures apart; the check turns them into sentences
 - the structural checks, run on the fetched DOM and on the extracted one
 - the weight table, the caps, and `--min`
 - the report template and `brevier:check`
-- `corpus/check/`: one page per failing check, with its expected report, so the
-  check is regression-tested like everything else
-- a GitHub Action that runs the check on a list of addresses and fails the build
-  below the threshold; a badge that shows the score
+- `corpus/check/`: pages with their expected reports, so the check is
+  regression-tested like everything else
+- a GitHub Action that runs the check on a list of addresses, writes the report to
+  the job summary and fails the build below the threshold; a badge (`--badge`) that
+  shows the lowest score
+
+Still loose: the threshold of the noise ratio has not been calibrated on the corpus.
 
 ### 2. Native Markdown (#2)
 
-- Send `Accept: text/markdown, text/html;q=0.9` on every fetch — today the header
-  lists Markdown behind HTML, at `q=0.9`. When the answer is `text/markdown`, skip
-  extraction and render as in repository mode; the status line says "Served as
-  Markdown by the site".
-- Follow `<link rel="alternate" type="text/markdown">` when the first answer was
+Done.
+
+- Every fetch sends `Accept: text/markdown, text/html;q=0.9` — Markdown first, where
+  the header used to list it behind HTML. When the answer is `text/markdown`,
+  extraction is skipped and the page renders as in repository mode; the status line
+  says "Served as Markdown by the site".
+- `<link rel="alternate" type="text/markdown">` is followed when the first answer was
   HTML. Two requests instead of one, for a page that then needs no extraction — a
-  good trade.
-- `/llms.txt`, where a site has one, as another entry point on the shelf in `--docs`
-  mode: whatever it was written for, it is an index of a site's text in Markdown.
+  good trade. The address stays the page's own.
+- `llms.txt`, where a repository has one at its root or in `docs/`, is another entry
+  point on the shelf in `--docs` mode: whatever it was written for, it is an index of
+  a site's text in Markdown.
 
 ### 3. Typesetting by language (#6)
 
@@ -115,13 +123,18 @@ family is still to come.
 
 ### 5. Feeds (#7)
 
-- An RSS or Atom address opens as the "list of links" view, with dates.
+Done.
+
+- An RSS, Atom or JSON Feed address — or a `feed://` link — opens as the "list of
+  links" view, with dates.
 - A site that advertises a feed gets it on the shelf: "This site has a feed."
 - Subscriptions come later (see *Far*); this is only reading a feed when handed one.
 
 ### 6. The archive (#8)
 
-- On by default. Every page read is kept under
+Done.
+
+- On by default. Every article read is kept under
   `$XDG_DATA_HOME/brevier/archive/<host>/<date>-<slug>.md.lz4`, one file per page,
   and the history line points to its copy. LZ4 in pure Rust (`lz4_flex`), for the
   same reason there is no SQLite; fast enough that the write is not felt and a search
@@ -134,13 +147,19 @@ family is still to come.
 - Bookmarks keep their copy for good; the rest ages out with history. A setting turns
   the archive off, and "forget everything" empties it together with the journal,
   bookmarks' copies aside.
+- To the reader it is not a third list next to the history and the bookmarks: a copy
+  is "your copy" in both, and the search is "Search what you've read" in the menu.
 
 ### 7. When the page is gone (#9)
 
-- 404, or a host that does not answer: the status line offers "Read the Wayback
-  copy" — a button, never automatic: a copy is not the page, and swapping one for
-  the other without asking would be pretending.
-- If the archive has the page: "You read this on ‹date›; open your copy."
+Done, on the page that explains the failure rather than in the status line.
+
+- 404 or 410, a server that fails, or a host that does not answer: a button offers
+  "Read the Wayback copy" — never automatic: a copy is not the page, and swapping one
+  for the other without asking would be pretending. Not on a 403: there the copy
+  would be a way around the site's decision.
+- If the archive has the page, whatever the failure: "You read this page on ‹date›,
+  and your archive keeps a copy", and a button, "Open your copy".
 
 ### 8. Threads and documentation hosts (#11)
 
@@ -188,9 +207,8 @@ Work items:
 
 Submit `io.github.gurov.brevier`: metainfo, screenshots, the offline build already
 in `packaging/`. After that Brevier is one search away instead of one wget away, and
-updates arrive with the store — the bundle in Releases has none. Before the
-submission, the window has to be run on Wayland at least once (#12): every test so
-far ran on X11.
+updates arrive with the store — the bundle in Releases has none. The window has been
+run on Wayland, as a native client (#12), which the submission waited for.
 
 Two cheaper doors alongside: crates.io (`cargo install brevier --features ui`, once
 `Cargo.toml` has its metadata and an `exclude` for the corpus), and the cli as one
@@ -199,9 +217,10 @@ Published on tags, not on pushes.
 
 ### 12. Reading progress (#19)
 
-A long page is read over several sittings, and it should not start from the top each
-time. Back and forward already return to the place, and so does the session; a page
-opened afresh — from a link, the history, a bookmark, another tab — does not.
+Done in the window and on Android, but for two things, below. A long page is read
+over several sittings, and it should not start from the top each time. Back and
+forward return to the place, and so does the session; a page opened afresh — from a
+link, the history, a bookmark, another tab — did not.
 
 - **Continue, offered.** A page read for more than ten minutes is remembered: where
   the reader stopped, and which parts were read. Opened again, it opens at the top,
@@ -214,11 +233,13 @@ opened afresh — from a link, the history, a bookmark, another tab — does not
 - **What has been read, not how far.** A stretch of text counts once it has stayed on
   screen for a few seconds; one scrolled past does not. A jump through the contents to
   the last section does not read the article.
-- **On the shelf**, a thin bar at the right edge of every row: the share of its
-  section read. Waypoints — the paragraph starts that stand in for headings when a
-  page has none — carry the share in their label: "40% · Beginning of the
-  paragraph…". A section several screens long is split by waypoints of its own, shown
-  for the current section only.
+- **On the shelf**, a thin bar under every row: the share of its section read.
+  Waypoints — the paragraph starts that stand in for headings when a page has none —
+  are rows like the others. The label of every row carries a number, "40% ·
+  Beginning of the paragraph…", but it is the row's place in the text, not the share
+  read; which of the two belongs there is still open (#24). A section several screens
+  long is to be split by waypoints of its own, shown for the current section only:
+  the core computes them, neither front-end shows them yet.
 - **A file you own:** `reading.tsv`, one line per page — address, a fingerprint of the
   text, the place, the stretches read. Capped; "forget everything" empties it. The
   core does the counting, so the window and Android share one implementation.
