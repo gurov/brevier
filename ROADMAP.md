@@ -192,7 +192,7 @@ link-density rule (7 of 91) — a threshold the corpus has pinned for articles.
   underscores finds its heading. Rust documentation — docs.rs, the standard library,
   any rustdoc build, known by its generator tag — has a rule of its own and comes
   whole, its code highlighted.
-- **Still to come: Mastodon**, put off on 13 October 2026.
+- **Still to come: Mastodon** (#37), put off on 13 October 2026.
 
 ### 9. Tables in the buffer (#10)
 
