@@ -23,7 +23,8 @@ Why it is built this way is in the [manifesto](MANIFESTO.md); what comes next is
 
 **Status: early.** Brevier runs on Linux and Windows, as a GTK window, and on Android, as a
 native app over the same core. Builds are in
-[Releases](https://github.com/gurov/brevier/releases/latest); nothing is in a store yet.
+[Releases](https://github.com/gurov/brevier/releases/latest); the Android app is also on
+[F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/).
 Screen readers are known to work on Linux only (see
 [What it does not do](#what-it-does-not-do)).
 
@@ -66,7 +67,9 @@ Brevier without installing it, unpack
 [`brevier-0.11.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.11.0/brevier-0.11.0-windows-x86_64.zip)
 anywhere and start `bin\brevier-ui.exe`; `bin\brevier.exe` is the command line.
 
-**Android** 7.0 or later, 64-bit ARM. Download
+**Android** 7.0 or later, 64-bit ARM. Install it from
+[F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/), which keeps it up to
+date. Or download
 [`brevier-0.11.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.11.0/brevier-0.11.0-arm64.apk)
 on the phone and open it; Android asks once to allow installs from the app you opened it
 with. Updates install over it as long as they are signed with the same release key:
@@ -75,7 +78,9 @@ with. Updates install over it as long as they are signed with the same release k
 30:A4:32:B8:2F:3E:F0:FC:E5:F4:68:1F:D7:F9:FE:20:5F:4B:17:A2:F4:34:19:C2:45:0C:A2:6B:E6:8D:34:80
 ```
 
-F-Droid has accepted Brevier; it appears there after F-Droid's next build.
+F-Droid builds Brevier from source and publishes this same APK, signed with this key, only
+when its build matches ours byte for byte. So an install from either place updates from the
+other. A new version reaches F-Droid a few days after it appears in Releases.
 
 Every release is built by CI from its tag, and `SHA256SUMS` lists the checksum of each
 file. To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building).

@@ -10,5 +10,6 @@
 
 - [Source and README](https://github.com/gurov/brevier): what it does, how to install it
 - [Releases](https://github.com/gurov/brevier/releases): Linux (Flatpak, tar.gz), Windows (installer, zip), Android (APK)
+- [F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/): the Android app, the same APK as in the releases
 - [Manifesto](https://github.com/gurov/brevier/blob/main/MANIFESTO.md): what Brevier promises
 - [Roadmap](https://github.com/gurov/brevier/blob/main/ROADMAP.md): where it is going next
