@@ -163,17 +163,36 @@ Done, on the page that explains the failure rather than in the status line.
 
 ### 8. Threads and documentation hosts (#11)
 
-Per-host extraction rules, kept in one small table rather than a plugin system, each
-with pages in the corpus:
+Done, but for Mastodon. Per-host rules, kept in one small table in `src/hosts.rs`
+rather than a plugin system, each row with a page in the corpus.
 
-- threads: Hacker News, Lobsters, Discourse forums, old.reddit, public Mastodon
-  pages — shown as threads, with author and time, indented
-- documentation: MDN, docs.rs, Read the Docs, GitBook and Mintlify sites, Wikipedia
+A thread needed a path of its own, the way the repository mode has one. Measured on a
+Hacker News page, the generic path stripped the author and time of every comment as
+chrome (0 authors of 91) and dropped a short reply that was mostly a link by the
+link-density rule (7 of 91) — a threshold the corpus has pinned for articles.
 
-What the generic path cannot give a thread, measured on a Hacker News page: the
-author and time of every comment are stripped as chrome, and a short reply that is
-mostly a link is dropped by the link-density rule — a threshold the corpus has
-pinned for articles. Hence a path of its own, the way the repository mode has one.
+- **One look for every thread:** the post first, with its link, site, author and day;
+  then every reply with its author and its day, linked to the reply. Replies are
+  indented as quotes, three levels deep; a deeper reply says whom it answers. Lists of
+  stories or topics read as lists of links, and a list's "More" or "Page 2" is its
+  next page.
+- **Hacker News and Lobsters**, by host: story pages, story lists, comment lists.
+  Every reply carries an anchor, so a link to a comment opens the thread at it. The
+  shelf gets the site's own menu, not the hundreds of "parent" and "next" links.
+  Profiles and other pages take the general path.
+- **Discourse**, by the forum software rather than by host. Recent forums answer
+  `Accept: text/markdown` with Markdown that carries every post's author and date, and
+  are read as they come; older ones serve a page for clients without JavaScript, and
+  the rule reads that. Discourse threads are flat, and so is this.
+- **reddit**, through the `.rss` of a thread or a subreddit: the pages are empty
+  without JavaScript. Flat as well — the feed carries no nesting, and the page says so.
+- **Documentation.** Read the Docs, GitBook and Mintlify sites serve Markdown
+  themselves (#2). MDN and Wikipedia read through the general path, after fixes every
+  page gets: a table whose rows are labelled keeps its labels, a fragment written with
+  underscores finds its heading. Rust documentation — docs.rs, the standard library,
+  any rustdoc build, known by its generator tag — has a rule of its own and comes
+  whole, its code highlighted.
+- **Still to come: Mastodon**, put off on 13 October 2026.
 
 ### 9. Tables in the buffer (#10)
 
@@ -217,16 +236,16 @@ Published on tags, not on pushes.
 
 ### 12. Reading progress (#19)
 
-Done in the window and on Android, but for two things, below. A long page is read
-over several sittings, and it should not start from the top each time. Back and
-forward return to the place, and so does the session; a page opened afresh — from a
-link, the history, a bookmark, another tab — did not.
+Done in the window and on Android, but for two things at the end. A long page is read
+over several sittings, and it should not start from the top each time. Back, forward
+and the session already returned to the place; now a page opened afresh — from a link,
+the history, a bookmark, another tab — does too.
 
 - **Continue, offered.** A page read for more than ten minutes is remembered: where
-  the reader stopped, and which parts were read. Opened again, it opens at the top,
-  and the status line offers "Continue from 43%". An offer, never a jump: opening a
-  link can be a deliberate re-read. An address with a `#fragment` goes to the
-  fragment, and no offer is made.
+  the reader stopped, and which parts were read. Opened again, it opens at the top and
+  offers "Continue from 43%" — in the status line in the window, as a line to tap on
+  the phone. An offer, never a jump: opening a link can be a deliberate re-read. An
+  address with a `#fragment` goes to the fragment, and no offer is made.
 - **Ten minutes of reading**, counted only while the page is on screen and the reader
   is there. A page left open overnight has not been read for eight hours. Shorter
   visits are not written down.
@@ -235,31 +254,40 @@ link, the history, a bookmark, another tab — did not.
   the last section does not read the article.
 - **On the shelf**, a thin bar under every row: the share of its section read.
   Waypoints — the paragraph starts that stand in for headings when a page has none —
-  are rows like the others. The label of every row carries a number, "40% ·
-  Beginning of the paragraph…", but it is the row's place in the text, not the share
-  read; which of the two belongs there is still open (#24). A section several screens
-  long is to be split by waypoints of its own, shown for the current section only:
-  the core computes them, neither front-end shows them yet.
+  are rows like the others.
 - **A file you own:** `reading.tsv`, one line per page — address, a fingerprint of the
-  text, the place, the stretches read. Capped; "forget everything" empties it. The
-  core does the counting, so the window and Android share one implementation.
+  text, the place, the stretches read. A thousand pages at most, the oldest leaving
+  first; "forget everything" empties it. The core does the counting, so the window and
+  Android share one implementation.
 
 Known cost: offsets hold only while the text is the same, and pages change. When the
-fingerprint differs, what was read is carried over by heading anchors, or dropped.
-The archive (#8) removes the problem for the pages it keeps: a stored copy does not
-change.
+fingerprint differs, the place moves with the nearest heading's anchor, and what was
+read starts over.
+
+Still open:
+
+- Every row of the shelf is labelled "40% · …", but the number is the row's place in
+  the text, not the share read, which the bar shows. Which of the two belongs in the
+  label is #24.
+- A section several screens long is to be split by waypoints of its own, shown for the
+  current section only. The core computes them; neither front-end shows them yet.
 
 ### 13. F-Droid (#31)
 
-The Android app is a signed APK in Releases, found only by those who already know where
-to look. The readers most likely to want it — no JavaScript, no trackers, no account —
-look in F-Droid first.
+Done: Brevier is on F-Droid since 15 October 2026, starting with 0.11.0. The readers
+most likely to want it — no JavaScript, no trackers, no account — look there first,
+rather than in Releases.
 
-F-Droid builds from source: a recipe in `fdroiddata` (Gradle in `android/`, the Rust core
-through the NDK), the store text and screenshots in `fastlane/` in this repository, and a
-reproducible build, so that F-Droid publishes the APK with our signature rather than its
-own. One key across Releases and F-Droid means an install from one updates from the
-other; with two keys, switching means losing the reader's history.
+- **Our APK, built by F-Droid.** The recipe in `fdroiddata` builds from source — Gradle
+  in `android/`, the Rust core through the NDK, with Rust, the NDK and the JDK pinned —
+  and F-Droid publishes the APK from Releases, with our signature, only when its own
+  build matches it byte for byte. One key across Releases and F-Droid: an install from
+  either updates from the other, and switching does not lose the reader's history.
+  Every release checks the same in CI (`apksigcopier compare`).
+- **The store page lives here**: the text, screenshots and a changelog per version in
+  `fastlane/`, taken from the tagged commit.
+- **New versions arrive by themselves**: F-Droid reads each new tag and builds it; a
+  release reaches F-Droid a few days after Releases.
 
 IzzyOnDroid, the quicker door, is closed: its policy declines apps whose code is written
 with generative AI, and Brevier's is.
