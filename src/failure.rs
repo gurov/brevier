@@ -233,15 +233,11 @@ mod tests {
     use crate::Document;
     use crate::address::parse;
     use crate::markdown::Kind;
+    use crate::scratch::Scratch;
     use crate::store::Stamp;
 
-    fn archive_with(url: &str) -> (Archive, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "brevier-failure-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn archive_with(url: &str) -> (Archive, Scratch) {
+        let dir = Scratch::new("failure");
         let archive = Archive::at(&dir);
         let document = Document {
             address: parse(url).unwrap(),
@@ -266,7 +262,7 @@ mod tests {
     #[test]
     fn a_page_that_is_gone_offers_your_copy_and_the_wayback_one() {
         let url = "https://danluu.com/keyboard-latency/";
-        let (archive, dir) = archive_with(url);
+        let (archive, _dir) = archive_with(url);
         let failure = describe_page(
             &Error::HttpStatus(404),
             &parse(&format!("{url}#computers")).unwrap(),
@@ -292,7 +288,6 @@ mod tests {
         );
         assert!(failure.detail.contains("The Wayback Machine"));
         assert!(failure.offer_browser);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Сайт не пустил — Wayback не выход, а своя копия — да. Нет копии —
@@ -300,7 +295,7 @@ mod tests {
     #[test]
     fn a_closed_door_offers_only_your_own_copy() {
         let url = "https://danluu.com/keyboard-latency/";
-        let (archive, dir) = archive_with(url);
+        let (archive, _dir) = archive_with(url);
         let closed = describe_page(&Error::HttpStatus(403), &parse(url).unwrap(), &archive);
         assert_eq!(closed.ways.len(), 1);
         assert_eq!(closed.ways[0].label, "Open your copy");
@@ -311,6 +306,5 @@ mod tests {
         assert_eq!(gone.ways.len(), 1);
         assert_eq!(gone.ways[0].label, "Read the Wayback copy");
         assert!(!gone.detail.contains("You read"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

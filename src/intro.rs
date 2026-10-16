@@ -112,20 +112,12 @@ to make it bigger or smaller.
 mod tests {
     use super::*;
     use crate::address::Address;
-
-    fn journal(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "brevier-intro-{}-{name}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir.join("history.tsv")
-    }
+    use crate::scratch::Scratch;
 
     #[test]
     fn a_first_run_gets_the_introduction_alone() {
-        let store = Store::at(journal("first"));
+        let dir = Scratch::new("intro-first");
+        let store = Store::at(dir.join("history.tsv"));
         assert_eq!(page(&store, false), MARKDOWN);
         assert_eq!(page(&store, true), TOUCH);
     }
@@ -141,7 +133,8 @@ mod tests {
 
     #[test]
     fn recent_pages_stand_above_the_introduction() {
-        let mut store = Store::at(journal("back"));
+        let dir = Scratch::new("intro-back");
+        let mut store = Store::at(dir.join("history.tsv"));
         store.record(&Address::Web("https://sive.rs/".to_owned()), "sivers", 0);
         let text = page(&store, true);
         assert!(text.starts_with("### Recently read\n\n- [sivers](https://sive.rs/)\n"));

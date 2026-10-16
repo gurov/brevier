@@ -1224,15 +1224,10 @@ fn unescape(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::address::{Repo, RepoHost};
+    use crate::scratch::Scratch;
 
-    fn temporary(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "brevier-store-{}-{name}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        dir.join("history.tsv")
+    fn temporary(name: &str) -> Scratch {
+        Scratch::new(&format!("store-{name}"))
     }
 
     fn web(url: &str) -> Address {
@@ -1298,7 +1293,8 @@ mod tests {
 
     #[test]
     fn a_visit_survives_closing_the_program() {
-        let path = temporary("visits");
+        let dir = temporary("visits");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(
             &web("https://danluu.com/keyboard-latency/"),
@@ -1315,7 +1311,8 @@ mod tests {
 
     #[test]
     fn reloading_the_same_page_is_not_a_second_visit() {
-        let path = temporary("reload");
+        let dir = temporary("reload");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(&web("https://danluu.com/"), "danluu", 0);
         store.record(&web("https://danluu.com/"), "danluu", 0);
@@ -1332,7 +1329,8 @@ mod tests {
     /// с новой копией — новая строка, даже подряд.
     #[test]
     fn a_visit_points_to_its_copy_in_the_archive() {
-        let path = temporary("copies");
+        let dir = temporary("copies");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         let page = web("https://danluu.com/keyboard-latency/");
         store.record_with(
@@ -1378,7 +1376,8 @@ mod tests {
 
     #[test]
     fn internal_pages_stay_out_of_the_history() {
-        let path = temporary("internal");
+        let dir = temporary("internal");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(
             &Address::Internal(crate::address::Internal::History),
@@ -1390,7 +1389,8 @@ mod tests {
 
     #[test]
     fn the_repository_mode_keeps_its_short_form() {
-        let path = temporary("repo");
+        let dir = temporary("repo");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(
             &Address::Repo(Repo {
@@ -1413,7 +1413,8 @@ mod tests {
 
     #[test]
     fn a_page_is_remembered_by_the_title_it_had() {
-        let path = temporary("titles");
+        let dir = temporary("titles");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(&web("https://sive.rs/faq"), "FAQ", 0);
         store.record(&web("https://danluu.com/"), "danluu", 0);
@@ -1429,7 +1430,8 @@ mod tests {
 
     #[test]
     fn what_starts_with_the_host_comes_first() {
-        let path = temporary("suggest");
+        let dir = temporary("suggest");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         // Заголовком совпадает, адресом — нет.
         store.record(&web("https://example.test/1"), "Sive and the art", 0);
@@ -1448,7 +1450,8 @@ mod tests {
 
     #[test]
     fn the_scheme_is_not_part_of_the_search() {
-        let path = temporary("scheme");
+        let dir = temporary("scheme");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(&web("https://danluu.com/"), "danluu", 0);
         // `s` есть в «https» у каждого адреса на свете — и это не совпадение,
@@ -1460,7 +1463,8 @@ mod tests {
 
     #[test]
     fn where_you_go_often_outranks_where_you_went_once() {
-        let path = temporary("often");
+        let dir = temporary("often");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         for _ in 0..2 {
             store.record(&web("https://danluu.com/keyboard-latency/"), "Latency", 0);
@@ -1479,7 +1483,8 @@ mod tests {
 
     #[test]
     fn the_page_groups_by_day_and_links_every_row() {
-        let path = temporary("page");
+        let dir = temporary("page");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(
             &web("https://danluu.com/keyboard-latency/"),
@@ -1522,13 +1527,14 @@ mod tests {
 
     #[test]
     fn an_empty_history_says_so() {
-        let page = Store::at(temporary("empty")).page();
+        let page = Store::at(temporary("empty").join("history.tsv")).page();
         assert!(page.contains("Nothing here yet"));
     }
 
     #[test]
     fn brackets_in_a_title_do_not_break_the_link() {
-        let path = temporary("brackets");
+        let dir = temporary("brackets");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(&web("https://example.test/"), "Rust 1.90 [stable]", 0);
         assert!(
@@ -1540,7 +1546,8 @@ mod tests {
 
     #[test]
     fn recent_pages_are_the_freshest_each_once() {
-        let path = temporary("recent");
+        let dir = temporary("recent");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         for (url, title) in [
             ("https://a.test/", "A"),
@@ -1583,9 +1590,14 @@ mod tests {
 
     #[test]
     fn recent_pages_are_one_line_each_and_absent_on_a_first_run() {
-        assert_eq!(Store::at(temporary("recent-none")).recent_page(), "");
+        assert_eq!(
+            Store::at(temporary("recent-none").join("history.tsv")).recent_page(),
+            ""
+        );
 
-        let path = temporary("recent-long");
+        let dir = temporary("recent-long");
+
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         let long = "A title that goes on and on, far longer than one line of the list";
         store.record(&web("https://long.test/"), long, 0);
@@ -1597,7 +1609,8 @@ mod tests {
 
     #[test]
     fn a_title_is_always_one_line() {
-        let path = temporary("oneline");
+        let dir = temporary("oneline");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(&web("https://example.test/"), "  Two\n   lines  ", 0);
         assert_eq!(store.visits()[0].title, "Two lines");
@@ -1606,7 +1619,8 @@ mod tests {
 
     #[test]
     fn a_bookmark_goes_on_and_comes_off() {
-        let path = temporary("marks").with_file_name("bookmarks.tsv");
+        let dir = temporary("marks");
+        let path = dir.join("bookmarks.tsv");
         let mut marks = Marks::at(&path);
         let page = web("https://danluu.com/keyboard-latency/");
 
@@ -1623,7 +1637,8 @@ mod tests {
 
     #[test]
     fn the_bookmarks_page_lists_the_freshest_first() {
-        let path = temporary("marks-page").with_file_name("bookmarks.tsv");
+        let dir = temporary("marks-page");
+        let path = dir.join("bookmarks.tsv");
         let mut marks = Marks::at(&path);
         marks.toggle(&web("https://sive.rs/faq"), "FAQ", 0);
         marks.toggle(&web("https://danluu.com/"), "danluu", 0);
@@ -1634,7 +1649,7 @@ mod tests {
         assert!(!page.contains("your copy"));
         assert!(page.find("danluu").unwrap() < page.find("FAQ").unwrap());
         assert!(
-            Marks::at(temporary("no-marks"))
+            Marks::at(temporary("no-marks").join("bookmarks.tsv"))
                 .page(&HashMap::new())
                 .contains("Nothing here yet")
         );
@@ -1658,7 +1673,8 @@ mod tests {
 
     #[test]
     fn forgetting_empties_the_journal_but_leaves_the_file() {
-        let path = temporary("forget");
+        let dir = temporary("forget");
+        let path = dir.join("history.tsv");
         let mut store = Store::at(&path);
         store.record(&web("https://danluu.com/"), "danluu", 0);
         store.forget();
@@ -1682,7 +1698,8 @@ mod tests {
 
     #[test]
     fn settings_survive_the_round_trip() {
-        let path = temporary("settings").with_file_name("settings.tsv");
+        let dir = temporary("settings");
+        let path = dir.join("settings.tsv");
         let chosen = Settings {
             dark: true,
             images: false,
@@ -1705,7 +1722,8 @@ mod tests {
     /// остаётся умолчанием.
     #[test]
     fn the_type_is_written_only_where_the_reader_chose() {
-        let path = temporary("type").with_file_name("settings.tsv");
+        let dir = temporary("type");
+        let path = dir.join("settings.tsv");
         Settings::default().save_at(&path);
         let text = fs::read_to_string(&path).unwrap();
         assert!(!text.contains("size") && !text.contains("face"), "{text}");
@@ -1720,7 +1738,8 @@ mod tests {
 
     #[test]
     fn a_missing_setting_keeps_its_default() {
-        let path = temporary("half-settings").with_file_name("settings.tsv");
+        let dir = temporary("half-settings");
+        let path = dir.join("settings.tsv");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         // Файл правят руками: пробелы вместо табуляции, незнакомая строка,
         // половина ключей отсутствует.
@@ -1736,7 +1755,8 @@ mod tests {
 
     #[test]
     fn a_session_comes_back_as_it_went() {
-        let path = temporary("session").with_file_name("session.tsv");
+        let dir = temporary("session");
+        let path = dir.join("session.tsv");
         let tabs = vec![
             opened(&["https://a.test/", "https://b.test/"], 1, 4200, false),
             opened(&["gh:BurntSushi/ripgrep"], 0, 0, true),
@@ -1752,14 +1772,16 @@ mod tests {
 
     #[test]
     fn an_empty_tab_is_not_worth_remembering() {
-        let path = temporary("empty-tab").with_file_name("session.tsv");
+        let dir = temporary("empty-tab");
+        let path = dir.join("session.tsv");
         remember_at(&path, &[opened(&[], 0, 0, true)]);
         assert!(session_at(&path).is_empty());
     }
 
     #[test]
     fn a_deep_history_is_cut_from_the_old_end() {
-        let path = temporary("deep").with_file_name("session.tsv");
+        let dir = temporary("deep");
+        let path = dir.join("session.tsv");
         let addresses: Vec<String> = (0..DEPTH + 5)
             .map(|n| format!("https://example.test/{n}"))
             .collect();
@@ -1780,7 +1802,8 @@ mod tests {
 
     #[test]
     fn a_hand_broken_session_loses_only_the_broken_line() {
-        let path = temporary("broken-session").with_file_name("session.tsv");
+        let dir = temporary("broken-session");
+        let path = dir.join("session.tsv");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
             &path,
@@ -1795,7 +1818,8 @@ mod tests {
 
     #[test]
     fn a_long_log_is_trimmed_on_opening() {
-        let path = temporary("trim");
+        let dir = temporary("trim");
+        let path = dir.join("history.tsv");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut text = String::new();
         for number in 0..KEEP + 10 {
@@ -1814,7 +1838,8 @@ mod tests {
 
     #[test]
     fn a_broken_line_does_not_take_the_file_with_it() {
-        let path = temporary("broken");
+        let dir = temporary("broken");
+        let path = dir.join("history.tsv");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
             &path,

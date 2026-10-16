@@ -771,15 +771,10 @@ fn escape_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::address::parse;
+    use crate::scratch::Scratch;
 
-    fn temporary(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "brevier-archive-{}-{name}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        dir
+    fn temporary(name: &str) -> Scratch {
+        Scratch::new(&format!("archive-{name}"))
     }
 
     fn article(url: &str, title: &str, text: &str) -> Document {
@@ -872,7 +867,8 @@ mod tests {
     /// Ленту, свои страницы и файлы не кладём.
     #[test]
     fn only_articles_from_the_web_and_repositories_are_kept() {
-        let archive = Archive::at(temporary("worth"));
+        let dir = temporary("worth");
+        let archive = Archive::at(&dir);
         let read = stamp("2026-10-09T09:00:00Z");
         let mut listing = article("https://blog.example.org/", "Blog", "…");
         listing.kind = Kind::Listing;
@@ -890,7 +886,8 @@ mod tests {
     /// же заголовком — рядом, со своим номером; в другой день — новая копия.
     #[test]
     fn names_are_shared_only_by_the_same_page_on_the_same_day() {
-        let archive = Archive::at(temporary("names"));
+        let dir = temporary("names");
+        let archive = Archive::at(&dir);
         let monday = stamp("2026-10-05T10:00:00+02:00");
         let one = article("https://news.example.org/a/1", "Live", "first");
         let two = article("https://news.example.org/a/2", "Live", "second");
@@ -925,7 +922,8 @@ mod tests {
     /// Из адресной строки приходит что угодно: выйти из архива путь не должен.
     #[test]
     fn a_path_cannot_leave_the_archive() {
-        let archive = Archive::at(temporary("escape"));
+        let dir = temporary("escape");
+        let archive = Archive::at(&dir);
         for path in [
             "../history.tsv",
             "host/../../etc/passwd.md.lz4",
@@ -946,7 +944,8 @@ mod tests {
     /// текста, где они стоят.
     #[test]
     fn the_archive_lists_and_searches_its_copies() {
-        let archive = Archive::at(temporary("search"));
+        let dir = temporary("search");
+        let archive = Archive::at(&dir);
         let old = stamp("2026-10-01T08:00:00Z");
         let new = stamp("2026-10-09T08:00:00Z");
         archive.keep(
@@ -1009,7 +1008,8 @@ mod tests {
     /// слово только из адреса ссылки — не находка.
     #[test]
     fn a_snippet_is_the_text_the_reader_saw() {
-        let archive = Archive::at(temporary("plain"));
+        let dir = temporary("plain");
+        let archive = Archive::at(&dir);
         let read = stamp("2026-10-09T08:00:00Z");
         archive.keep(
             &article(

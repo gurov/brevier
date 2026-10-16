@@ -399,16 +399,10 @@ fn prune_dir(dir: &Path, now: SystemTime, budget: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
-    fn temporary(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "brevier-cache-{name}-{}-{nanos}",
-            std::process::id()
-        ))
+    fn temporary(name: &str) -> Scratch {
+        Scratch::new(&format!("cache-{name}"))
     }
 
     fn article(url: &str) -> Document {
@@ -462,7 +456,6 @@ mod tests {
                 .page(&Address::Web("https://e.com/a#part".to_owned()))
                 .is_some()
         );
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -477,7 +470,6 @@ mod tests {
                 .page(&Address::Web("https://e.com/new".to_owned()))
                 .is_some()
         );
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -492,7 +484,6 @@ mod tests {
         let lately = SystemTime::now() - KEEP_FOR + Duration::from_secs(3600);
         cache.keep_at(&page, &article("https://e.com/a"), lately);
         assert!(cache.page(&page).is_some());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -510,7 +501,6 @@ mod tests {
         own.address = history.clone();
         cache.keep(&history, &own);
         assert!(cache.page(&history).is_none());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -523,7 +513,6 @@ mod tests {
         let page = Address::Web(url.to_owned());
         cache.keep(&page, &article(url));
         assert_eq!(cache.page(&page).unwrap().document.address, page);
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -541,7 +530,6 @@ mod tests {
         )
         .unwrap();
         assert!(cache.page(&a).is_none());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -555,7 +543,6 @@ mod tests {
         assert_eq!(cache.image("https://e.com/b.png"), None);
         // Через неделю картинки нет, как и страницы.
         assert_eq!(cache.image_at(url, SystemTime::now() + KEEP_FOR), None);
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -578,7 +565,6 @@ mod tests {
         cache.forget();
         assert!(cache.page(&page).is_none());
         assert!(!dir.join("pages").exists());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -595,7 +581,6 @@ mod tests {
         prune_dir(&dir, SystemTime::now(), 1000);
         assert!(dir.join("new").exists());
         assert!(!dir.join("old").exists());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

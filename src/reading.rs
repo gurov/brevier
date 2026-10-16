@@ -496,6 +496,7 @@ fn parse_line(line: &str) -> Option<Saved> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
     fn text(chars: usize) -> String {
         "a".repeat(chars)
@@ -560,8 +561,7 @@ mod tests {
     /// место по якорю, прочитанное сброшено; без якоря — ничего.
     #[test]
     fn a_reading_survives_the_file_and_a_changed_page() {
-        let dir = std::env::temp_dir().join(format!("brevier-reading-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let dir = Scratch::new("reading");
         let path = dir.join("reading.tsv");
         let anchors = vec![("intro".to_owned(), 0), ("part-two".to_owned(), CHUNK * 10)];
         let mut progress = Progress::new("https://e.org/a", &text(CHUNK * 20), &anchors);
