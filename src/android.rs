@@ -43,6 +43,7 @@ use crate::cache::{self, Cache};
 use crate::failure::{describe, describe_page};
 use crate::fetch::UserAgent;
 use crate::media::{self, Fit, Look, Source};
+use crate::notes::{self, Notes};
 use crate::outline;
 use crate::page::{self, Page, json_string};
 use crate::palette;
@@ -74,7 +75,11 @@ struct Core {
     readings: Readings,
     /// Прогресс открытых страниц по адресу (#19): сам счёт, текст страницы
     /// (телефон считает в UTF-16, ядро — в знаках) и начала разделов полки.
+    /// Текст отсюда же берут заметки (#39): они бывают там же, где прогресс, —
+    /// у статей.
     progress: VecDeque<Reading>,
+    /// Заметки к страницам (#39): `notes.tsv`.
+    notes: Notes,
 }
 
 /// Прогресс одной страницы на телефоне.
@@ -128,6 +133,7 @@ fn core() -> std::sync::MutexGuard<'static, Core> {
             blobs: Blobs::default(),
             readings: Readings::open(),
             progress: VecDeque::new(),
+            notes: Notes::open(),
         })
     });
     // Отравленный мьютекс значит, что какой-то вызов упал посреди правки.
@@ -152,13 +158,12 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_init<'caller>(
         rustls_platform_verifier::android::init_with_env(env, context)?;
         crate::init_crypto();
         // Уборка недельного кэша страниц и архива — раз на запуск и в фоне.
-        // Копия архива живёт, пока на неё указывает журнал, а у закладки —
-        // последняя копия навсегда (#8).
+        // Копия архива живёт, пока на неё указывает журнал, а у закладки
+        // и у страницы с заметками — последняя копия навсегда (#8, #39).
         std::thread::spawn(|| {
             Cache::open().prune();
             let kept = Store::open().copies();
-            let marked = Marks::open().addresses();
-            Archive::open().prune(&kept, &marked);
+            Archive::open().prune(&kept, &notes::lasting());
         });
         Ok(())
     });
@@ -331,15 +336,32 @@ fn call(method: &str, arg: &str) -> String {
             }
             core().store.forget();
             // Копии страниц и архив — такой же след прочитанного, как журнал;
-            // кроме копий закладок — их закладка обещает навсегда.
+            // кроме копий закладок и страниц с заметками — их обещано навсегда.
+            // Сами заметки читатель написал сам: их «забыть всё» не трогает.
             Cache::open().forget();
-            Archive::open().forget(&Marks::open().addresses());
+            Archive::open().forget(&notes::lasting());
             "{}".to_owned()
         }
         "docs" => docs(arg),
         "savename" => savename(arg),
         "save" => save(field(0), field(1)),
         "picture.keep" => keep_picture(field(0), field(1)),
+        "notes.of" => notes_of(arg),
+        "notes.add" => add_note(
+            field(0).parse().unwrap_or(0),
+            field(1),
+            field(2).parse().unwrap_or(0),
+            field(3).parse().unwrap_or(0),
+            field(4),
+        ),
+        "notes.edit" => {
+            let done = core().notes.edit(field(0).parse().unwrap_or(0), field(1));
+            format!("{{\"ok\":{done}}}")
+        }
+        "notes.remove" => {
+            let done = core().notes.remove(field(0).parse().unwrap_or(0));
+            format!("{{\"ok\":{done}}}")
+        }
         other => {
             let mut out = String::from("{\"error\":");
             json_string(&mut out, &format!("unknown call: {other}"));
@@ -376,7 +398,7 @@ fn typography() -> String {
             "{{\"paper\":\"{paper}\",\"ink\":\"{ink}\",\"shelf\":\"{shelf}\",\
              \"link\":\"{}\",\"dim\":\"{}\",\"panel\":\"{}\",\"keyword\":\"{}\",\
              \"literal\":\"{}\",\"number\":\"{}\",\"comment\":\"{}\",\"rule\":\"{}\",\
-             \"chosen\":\"{}\",\"touched\":\"{}\"}}",
+             \"chosen\":\"{}\",\"touched\":\"{}\",\"note\":\"{}\",\"noteRule\":\"{}\"}}",
             colors.link,
             colors.dim,
             colors.panel,
@@ -387,6 +409,8 @@ fn typography() -> String {
             colors.rule,
             colors.chosen,
             colors.touched,
+            colors.note,
+            colors.note_rule,
         )
     };
     format!(
@@ -942,9 +966,15 @@ fn savename(key: &str) -> String {
 /// приложения: куда его положить у читателя, решает системный диалог,
 /// и копирует туда Kotlin.
 fn save(key: &str, path: &str) -> String {
-    let Some(document) = document(key) else {
+    let Some(mut document) = document(key) else {
         return "{\"ok\":false,\"headline\":\"Nothing to save yet\"}".to_owned();
     };
+    // Заметки едут в файл вместе со статьёй (#39): в конце, своим разделом.
+    {
+        let core = core();
+        let notes = core.notes.of(key);
+        document.markdown = notes::appended(&document.markdown, &notes);
+    }
     match save::write(std::path::Path::new(path), &document, UserAgent::Honest) {
         Ok(saved) => format!(
             "{{\"ok\":true,\"images\":{},\"missed\":{}}}",
@@ -957,6 +987,97 @@ fn save(key: &str, path: &str) -> String {
             out
         }
     }
+}
+
+/// Заметки открытой страницы (#39) — для подсветки, полки и полосы: места
+/// в UTF-16, как всё на телефоне. Сначала те, что нашлись, в порядке текста;
+/// потерявшие цитату — в конце, `from` у них −1.
+fn notes_of(address: &str) -> String {
+    let core = core();
+    let key = address.split('#').next().unwrap_or(address);
+    let notes = core.notes.of(key);
+    let text = core
+        .progress
+        .iter()
+        .find(|known| known.progress.address == key)
+        .map(|reading| reading.text.as_str());
+    let mut found: Vec<(Option<(usize, usize)>, &notes::Note)> = match text {
+        Some(text) => notes::place(text, &notes)
+            .into_iter()
+            .zip(notes.iter().copied())
+            .map(|(spot, note)| (spot.place, note))
+            .collect(),
+        None => notes.iter().map(|note| (None, *note)).collect(),
+    };
+    found.sort_by_key(|(place, _)| place.map_or(usize::MAX, |(from, _)| from));
+    let units: Vec<(usize, usize)> = match text {
+        Some(text) => {
+            let spans: Vec<(usize, usize)> = found
+                .iter()
+                .map(|(place, _)| place.unwrap_or((0, 0)))
+                .collect();
+            page::utf16_offsets(text, &spans)
+        }
+        None => vec![(0, 0); found.len()],
+    };
+    let mut out = String::from("[");
+    for (index, ((place, note), (from, to))) in found.iter().zip(units).enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let (from, to) = match place {
+            Some(_) => (from as i64, to as i64),
+            None => (-1, -1),
+        };
+        out.push_str(&format!(
+            "{{\"id\":{},\"from\":{from},\"to\":{to},\"quote\":",
+            note.id
+        ));
+        json_string(&mut out, &notes::preview(&note.quote));
+        out.push_str(",\"text\":");
+        json_string(&mut out, &note.text);
+        out.push('}');
+    }
+    out.push(']');
+    out
+}
+
+/// Новая заметка по выделению `[from, to)` в UTF-16 (#39). Только у статьи:
+/// текст страницы ядро держит там, где считает прогресс.
+fn add_note(offset: i32, address: &str, from: usize, to: usize, text: &str) -> String {
+    let mut core = core();
+    let key = address.split('#').next().unwrap_or(address);
+    let Some(reading) = core
+        .progress
+        .iter()
+        .find(|known| known.progress.address == key)
+    else {
+        return "{\"ok\":false,\"headline\":\"Notes are kept for articles\"}".to_owned();
+    };
+    let (from, to) = (
+        page::chars_of_utf16(&reading.text, from),
+        page::chars_of_utf16(&reading.text, to),
+    );
+    let selection = match notes::select(&reading.text, from, to) {
+        Ok(selection) => selection,
+        Err(refusal) => {
+            let mut out = String::from("{\"ok\":false,\"headline\":");
+            json_string(&mut out, refusal.headline());
+            out.push('}');
+            return out;
+        }
+    };
+    let title = core
+        .documents
+        .iter()
+        .rev()
+        .find(|(known, _)| known == key)
+        .map(|(_, document)| document.title.clone())
+        .unwrap_or_default();
+    let id = core
+        .notes
+        .add(key, &title, selection, text, Stamp::now(offset));
+    format!("{{\"ok\":true,\"id\":{id}}}")
 }
 
 /// Картинку — себе (#38): ядро кладёт её байты в папку `dir` под именем

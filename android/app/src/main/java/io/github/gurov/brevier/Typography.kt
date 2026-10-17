@@ -70,6 +70,9 @@ class Palette(json: JSONObject) {
     val rule = Typography.color(json.getString("rule"))
     val chosen = Typography.color(json.getString("chosen"))
     val touched = Typography.color(json.getString("touched"))
+    /** Заметка (#39): подложка отмеченного и черта под приписанным. */
+    val note = Typography.color(json.getString("note"))
+    val noteRule = Typography.color(json.getString("noteRule"))
 
     /** Линейка цитаты: приглушённая краска вполсилы — как в окне. */
     val quoteRule: Int get() = Color.argb(128, Color.red(dim), Color.green(dim), Color.blue(dim))

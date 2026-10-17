@@ -31,6 +31,8 @@ pub enum Address {
 pub enum Internal {
     History,
     Bookmarks,
+    /// Заметки к страницам (#39): все, по страницам.
+    Notes,
     /// Проверка страницы (`--check`): что стоит между ней и чтением.
     /// Адрес проверяемой страницы — часть адреса проверки
     /// (`brevier:check/https://…`), иначе отчёт не положить ни в историю
@@ -61,6 +63,7 @@ impl Internal {
         match self {
             Internal::History => "history",
             Internal::Bookmarks => "bookmarks",
+            Internal::Notes => "notes",
             Internal::Check(_) => "check",
             Internal::Archive(_) => "archive",
             Internal::Wayback(_) => "wayback",
@@ -72,6 +75,7 @@ impl Internal {
         match name.trim_end_matches('/') {
             "history" => return Some(Internal::History),
             "bookmarks" => return Some(Internal::Bookmarks),
+            "notes" => return Some(Internal::Notes),
             "check" => return Some(Internal::Check(None)),
             "archive" => return Some(Internal::Archive(ArchivePage::List)),
             _ => {}

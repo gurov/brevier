@@ -1191,14 +1191,14 @@ fn parse_line(line: &str) -> Option<Visit> {
 /// Табуляция и перевод строки — разделители файла, поэтому в поле они
 /// приезжают записанными, а не собой. Обратная косая уезжает первой,
 /// иначе она съела бы то, что мы сами и написали.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace('\\', r"\\")
         .replace('\t', r"\t")
         .replace('\n', r"\n")
         .replace('\r', "")
 }
 
-fn unescape(text: &str) -> String {
+pub(crate) fn unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text.chars();
     while let Some(letter) = rest.next() {

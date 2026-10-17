@@ -69,14 +69,16 @@ sealed class ShelfRow {
     class Header(val title: String) : ShelfRow()
     class Jump(val title: String, val level: Int, val at: Int, val heading: Boolean) : ShelfRow()
     class Open(val title: String, val address: String, val dim: Boolean) : ShelfRow()
+    /** Заметка (#39): начало цитаты и приписанное; нажатие — к месту в тексте. */
+    class Note(val note: NoteSpot) : ShelfRow()
 }
 
 /**
  * Полка — оглавление и навигация, выдвижная справа. На десктопе она стоит
  * рядом со статьёй; на телефоне рядом места нет, и она выезжает поверх.
  *
- * Групп три, в том же порядке, что в окне: точки входа в документацию проекта,
- * оглавление открытой страницы, навигация сайта. Группа проекта и группа
+ * Группы — в том же порядке, что в окне: точки входа в документацию проекта,
+ * заметки читателя (#39), оглавление открытой страницы, ленты, навигация сайта. Группа проекта и группа
  * сайта подписаны всегда — их строки уводят со страницы, и знать об этом
  * читатель должен до нажатия.
  */
@@ -217,10 +219,56 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
                     view.setPadding(side, context.dp(7f), side, context.dp(7f))
                     view.background = pressable(palette.touched, 0f)
                 }
+                is ShelfRow.Note -> {
+                    // Цитата — краской, приписанное — приглушённо под ней;
+                    // потерявшая место цитата приглушена вся.
+                    val note = row.note
+                    val text = android.text.SpannableStringBuilder(note.quote)
+                    if (note.text.isNotEmpty()) {
+                        val at = text.length
+                        text.append("\n").append(note.text)
+                        text.setSpan(android.text.style.ForegroundColorSpan(palette.dim), at, text.length, 0)
+                        text.setSpan(android.text.style.RelativeSizeSpan(0.93f), at, text.length, 0)
+                    }
+                    view.text = text
+                    view.typeface = fonts.regular
+                    view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    view.setTextColor(if (note.placed) palette.ink else palette.dim)
+                    view.setPadding(side + context.dp(8f), context.dp(7f), side, context.dp(7f))
+                    // Слева — полоска цвета заметки: та же, что под текстом.
+                    view.background = android.graphics.drawable.LayerDrawable(arrayOf(
+                        pressable(palette.touched, 0f),
+                        NoteMark(if (note.placed) palette.noteRule else palette.rule, side, context.dp(3f), context.dp(8f)),
+                    ))
+                }
             }
             return view
         }
     }
+}
+
+/** Полоска цвета заметки у левого края строки полки (#39). */
+class NoteMark(
+    private val color: Int,
+    private val left: Int,
+    private val width: Int,
+    private val inset: Int,
+) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint()
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        val top = bounds.top + inset
+        val bottom = bounds.bottom - inset
+        if (bottom <= top) return
+        paint.color = color
+        val x = bounds.left + left
+        canvas.drawRect(x.toFloat(), top.toFloat(), (x + width).toFloat(), bottom.toFloat(), paint)
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
 
 /**
@@ -258,6 +306,7 @@ class ShareMark(
  * Полоса внизу статьи (#19): тонкая линия, докуда дошли — темнее, начала
  * разделов — точками, как в читалках книг (CoolReader). Что рисовать,
  * отдаёт `source`: докуда дошли, длина текста и начала разделов — в UTF-16.
+ * Заметки (#39) — квадратиками цвета заметки (`notes`).
  */
 class ProgressStrip(context: Context) : View(context) {
     var palette: Palette? = null
@@ -268,6 +317,7 @@ class ProgressStrip(context: Context) : View(context) {
             invalidate()
         }
     var source: () -> Triple<Int, Int, List<Int>>? = { null }
+    var notes: () -> List<Int> = { emptyList() }
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
     override fun onDraw(canvas: android.graphics.Canvas) {
@@ -291,6 +341,12 @@ class ProgressStrip(context: Context) : View(context) {
             canvas.drawCircle(x(at), y, radius, paint)
         }
         paint.alpha = 255
+        // Квадратик крупнее точки раздела: заметку ищут глазами.
+        val side = context.dp(2.4f).toFloat()
+        paint.color = palette.noteRule
+        for (at in notes()) {
+            canvas.drawRect(x(at) - side, y - side, x(at) + side, y + side, paint)
+        }
     }
 }
 

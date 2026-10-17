@@ -218,14 +218,20 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 
 **Finding your way**
 
-- **The shelf on the right** lists the repository's documentation, the page's contents
-  (the section you are reading is marked), the site's feeds and the site's own menu. Drag
-  the divider to resize it.
+- **The shelf on the right** lists the repository's documentation, your notes on the page,
+  its contents (the section you are reading is marked), the site's feeds and the site's own
+  menu. Drag the divider to resize it.
 - **Back and forward return to the same spot**, instantly, without loading the page again.
 - **Pick up where you stopped.** A page you read for more than ten minutes remembers where
   you were and what you have read. Open it again and the status line offers **Continue
   from 43%**. The shelf shows how much of each section you have read, and a thin bar under
   the text shows how far you are, with a dot for each section.
+- **Notes on a page.** Select a passage and choose **Highlight** to mark it, or **Note** to
+  write a few words next to it. Open the page again and the marks are where you left them,
+  even when the site has changed around them: a note keeps its quote, not a position. The
+  shelf lists the page's notes above its contents, the bar under the text shows them as
+  small squares, and **Your notes** in the menu lists them all, by page. A saved article
+  carries its notes at the end, and a page with notes keeps its copy for good.
 - **Next page.** A page that names the one after it — a series, a book chapter, a thread's
   next page — ends with a **Next:** line, and `Space` at the very end goes there.
 - **A new tab shows the five pages you read last.**
@@ -288,6 +294,9 @@ text — not in a WebView — with the same typography and colours as the window
 - It can be your default browser, and **Open in your browser** still finds the others.
 - It opens links, shared text, `feed://` links and Markdown or feed files from other apps.
 - A long press on a link opens it in a new tab, copies it, or sends it to your browser.
+- **Highlight** and **Note** sit in the selection menu next to Copy; a tap on a marked
+  passage edits or removes its note.
+- A tap on a picture saves it to your gallery or shares it.
 - A very long page — a whole novel — shows its first screen at once.
 - With a keyboard attached, the window's shortcuts work, and `Alt+←` / `Alt+→` go back and
   forward.
@@ -345,12 +354,14 @@ History, open tabs and bookmarks are plain text, one line per entry:
 ~/.local/share/brevier/bookmarks.tsv   # the pages you kept
 ~/.local/share/brevier/archive/        # a copy of every article you read
 ~/.local/share/brevier/reading.tsv     # where you stopped in long pages
+~/.local/share/brevier/notes.tsv       # your highlights and notes
 ```
 
 The archive holds one file per page, `<host>/<date>-<title>.md.lz4`: Markdown with a short
 header (title, address, when you read it), compressed in the standard LZ4 format, so
 `lz4 -d` opens it without Brevier. A copy stays as long as its line in the history, and a
-bookmarked page keeps its latest copy for good, even through **Forget everything**. A switch
+bookmarked page, and a page with notes, keeps its latest copy for good, even through
+**Forget everything**. A switch
 in Settings stops new copies.
 
 Settings are in `~/.config/brevier/settings.tsv`. The cache — the fonts, and week-old
@@ -359,8 +370,8 @@ The usual `XDG_*` variables move these folders, and `BREVIER_DATA_DIR` moves the
 On Windows all of it is in `%LOCALAPPDATA%\Brevier`; on Android, in the app's own storage.
 
 There is no database: delete a line to forget a page. **Forget everything** in Settings
-clears the history, the cache of pages and the archive, and keeps your bookmarks with their
-copies, and your tabs. Only the window writes these files; `brevier <url>` on the command
+clears the history, the cache of pages and the archive, and keeps your bookmarks and notes
+with their copies, and your tabs. Only the window writes these files; `brevier <url>` on the command
 line keeps no history.
 
 ## On the network

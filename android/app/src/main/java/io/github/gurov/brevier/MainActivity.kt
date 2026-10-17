@@ -254,6 +254,7 @@ class MainActivity : Activity(), ArticleHost {
 
         strip = ProgressStrip(this)
         strip.source = { stripSource() }
+        strip.notes = { currentTab()?.notes?.filter { it.placed }?.map { it.from } ?: emptyList() }
         column.addView(strip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(7f)))
 
         findBar = LinearLayout(this).apply {
@@ -706,6 +707,10 @@ class MainActivity : Activity(), ArticleHost {
         when {
             shown != null -> {
                 view.show(shown.page, metrics(), dark, eager = images && shown.ok, offer = shown.offer, ways = shown.ways)
+                // Заметки (#39) — у ядра, на каждый показ: их могли оставить
+                // в другой вкладке на той же странице.
+                tab.notes = if (readable(tab) != null) Core.notes(shown.address) else emptyList()
+                view.notes(tab.notes)
                 val resume = tab.resume
                 tab.resume = null
                 val anchor = if (tab.anchorPending) shown.anchor?.let { shown.page.anchor(it) } else null
@@ -875,9 +880,11 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
-     * Полка: проект, оглавление, ленты, сайт. Группы проекта, лент и сайта
-     * подписаны всегда — их строки уводят со страницы; оглавление подписывается
-     * только под проектом. Ленты выше меню: меню бывает в полсотни строк.
+     * Полка: проект, заметки, оглавление, ленты, сайт. Группы проекта, лент
+     * и сайта подписаны всегда — их строки уводят со страницы; оглавление
+     * подписывается, когда над ним есть другая группа. Заметки (#39) — выше
+     * оглавления: оно бывает длинным, и под ним они терялись бы. Ленты выше
+     * меню: меню бывает в полсотни строк.
      */
     private fun fillShelf(tab: Tab, shown: Loaded?) {
         val rows = mutableListOf<ShelfRow>()
@@ -887,7 +894,12 @@ class MainActivity : Activity(), ArticleHost {
             rows += ShelfRow.Header("In this repository")
             project.forEach { rows += ShelfRow.Open(it.title, it.address, dim = false) }
         }
-        if (project.isNotEmpty() && marks.isNotEmpty()) rows += ShelfRow.Header("On this page")
+        val notes = if (shown != null) tab.notes else emptyList()
+        if (notes.isNotEmpty()) {
+            rows += ShelfRow.Header("Your notes")
+            notes.forEach { rows += ShelfRow.Note(it) }
+        }
+        if ((project.isNotEmpty() || notes.isNotEmpty()) && marks.isNotEmpty()) rows += ShelfRow.Header("On this page")
         // Веха несёт своё место в подписи (#19): «40% · Начало абзаца…».
         val length = shown?.page?.text?.length ?: 0
         marks.forEach {
@@ -922,6 +934,10 @@ class MainActivity : Activity(), ArticleHost {
         when (row) {
             is ShelfRow.Jump -> currentTab()?.view?.settle(row.at, ANCHOR_ALIGN)
             is ShelfRow.Open -> currentTab()?.let { open(it, row.address, remember = true) }
+            // Цитаты на странице больше нет — прыгать некуда; меню скажет это
+            // и даст убрать заметку.
+            is ShelfRow.Note -> if (row.note.placed) currentTab()?.view?.settle(row.note.from, ANCHOR_ALIGN)
+                else noteMenu(row.note.id, touched.first, touched.second)
             is ShelfRow.Header -> {}
         }
     }
@@ -974,6 +990,81 @@ class MainActivity : Activity(), ArticleHost {
         }
         menu.item("Open in your browser") { openOutside(target) }
         menu.showAt(root, x, y)
+    }
+
+    // ── заметки (#39) ───────────────────────────────────────────────────────
+
+    override fun mark(from: Int, to: Int, write: Boolean) {
+        val tab = currentTab() ?: return
+        val shown = readable(tab) ?: return notice("Notes are kept for articles")
+        val keep = { text: String ->
+            val result = Core.addNote(shown.address, from, to, text)
+            if (result.optBoolean("ok")) {
+                refreshNotes(tab)
+                notice(if (text.isEmpty()) "Highlighted · it is on the shelf" else "Note kept · it is on the shelf")
+            } else {
+                notice(result.optString("headline", "Not kept"))
+            }
+        }
+        if (write) askNoteText("", "Note", keep) else keep("")
+    }
+
+    override fun noteMenu(id: Long, x: Int, y: Int) {
+        val tab = currentTab() ?: return
+        val note = tab.notes.firstOrNull { it.id == id } ?: return
+        val menu = Menu(this, fonts, palette)
+        val gone = if (note.placed) "" else "No longer on the page: "
+        menu.caption(gone + note.text.ifEmpty { "“${note.quote}”" })
+        menu.item(if (note.text.isEmpty()) "Add a note" else "Edit the note") {
+            askNoteText(note.text, if (note.text.isEmpty()) "Note" else "Edit the note") { text ->
+                Core.editNote(id, text)
+                refreshNotes(tab)
+            }
+        }
+        menu.item("Remove") {
+            Core.removeNote(id)
+            refreshNotes(tab)
+            notice("Note removed")
+        }
+        menu.showAt(root, x, y)
+    }
+
+    /** Заметки заново — после правки: подсветка, полка, полоса. */
+    private fun refreshNotes(tab: Tab) {
+        val shown = readable(tab)
+        tab.notes = if (shown != null) Core.notes(shown.address) else emptyList()
+        tab.view?.notes(tab.notes)
+        if (tab == currentTab()) {
+            fillShelf(tab, tab.shown)
+            contents.isEnabled = !shelf.empty
+            contents.alpha = if (shelf.empty) 0.35f else 1f
+            strip.invalidate()
+        }
+    }
+
+    /** Спросить слова к заметке. Пустые — тоже ответ: заметка станет отметкой. */
+    private fun askNoteText(initial: String, title: String, done: (String) -> Unit) {
+        val field = EditText(this).apply {
+            setText(initial)
+            setSelection(initial.length)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minLines = 2
+            maxLines = 8
+            hint = "A few words next to the passage"
+        }
+        val frame = FrameLayout(this).apply {
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(field)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(frame)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Keep") { _, _ -> done(field.text.toString()) }
+            .create()
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        field.requestFocus()
     }
 
     /**
@@ -1503,6 +1594,7 @@ class MainActivity : Activity(), ArticleHost {
         }
         menu.item("History") { newTab("brevier:history") }
         menu.item("Bookmarks") { newTab("brevier:bookmarks") }
+        menu.item("Your notes") { newTab("brevier:notes") }
         // Архива списком нет: он — история и закладки с текстом (13 октября 2026).
         menu.item("Search what you've read") { searchArchive() }
         menu.item("Settings") { showSettings() }
@@ -1586,7 +1678,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun forgetEverything() {
         AlertDialog.Builder(this)
             .setTitle("Forget everything you have read?")
-            .setMessage("The list of pages goes away, the address bar stops suggesting them, and the copies of what you read are deleted. Bookmarks, with their copies, and open tabs stay.")
+            .setMessage("The list of pages goes away, the address bar stops suggesting them, and the copies of what you read are deleted. Bookmarks and notes, with their copies, and open tabs stay.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Forget") { _, _ ->
                 Core.forget()

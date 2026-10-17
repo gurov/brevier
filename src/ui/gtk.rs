@@ -36,6 +36,7 @@ use gtk::{Application, ApplicationWindow};
 use brevier::address::{self, Address, Internal, Repo};
 use brevier::failure::{Failure, describe, describe_page};
 use brevier::media::{self, Raster, Source};
+use brevier::notes::{self, Notes};
 use brevier::outline::{
     self, ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, Face, HANG, HEADING_WEIGHTS, HEADINGS,
     INDENT, NOTE_HANG, NOTE_INDENT, NOTE_SIZE, NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE, TEXT_SIZE,
@@ -179,10 +180,9 @@ fn main() -> glib::ExitCode {
         std::thread::spawn(|| {
             brevier::cache::Cache::open().prune();
             // Архив (#8): копия живёт, пока на неё указывает журнал, а у
-            // закладки — последняя копия навсегда.
+            // закладки и у страницы с заметками (#39) — последняя навсегда.
             let kept = brevier::store::Store::open().copies();
-            let marked = brevier::store::Marks::open().addresses();
-            brevier::archive::Archive::open().prune(&kept, &marked);
+            brevier::archive::Archive::open().prune(&kept, &brevier::notes::lasting());
         });
     });
 
@@ -392,6 +392,19 @@ struct Tab {
     /// Это вкладка настроек, а не статья: `view` у неё заглушка, истории нет,
     /// в сессию она не едет и на масштаб не отзывается. Одна на окно.
     settings: bool,
+    /// Заметки показанной статьи (#39): места в буфере — для полки, полосы
+    /// и щелчка по отмеченному.
+    notes: Vec<Noted>,
+}
+
+/// Заметка на открытой странице (#39): номер, место в буфере (`None` —
+/// цитаты на странице больше нет), цитата строкой полки и приписанное.
+#[derive(Clone)]
+struct Noted {
+    id: u64,
+    place: Option<(i32, i32)>,
+    quote: String,
+    text: String,
 }
 
 /// Сколько байтов картинок держим на вкладке, прежде чем вытеснять старые.
@@ -460,6 +473,8 @@ struct State {
     marks: Marks,
     /// Запомненные долгие чтения (#19): `reading.tsv`.
     readings: Readings,
+    /// Заметки к страницам (#39): `notes.tsv`.
+    notes: Notes,
     /// Когда читатель последний раз что-то делал со страницей: листал,
     /// нажимал, водил мышью. Время чтения идёт, только пока это было
     /// недавно (`PRESENT`) и окно активно.
@@ -564,6 +579,8 @@ struct Entry {
 enum Row {
     Jump(i32),
     Open(Address),
+    /// Заметка (#39): её номер и место; без места — прыгать некуда.
+    Note(u64, Option<i32>),
     /// Подпись над группой, а не строка: нажать её нельзя.
     Header,
 }
@@ -789,6 +806,7 @@ fn build(app: &Application, start: Vec<String>) {
         store: Store::open(),
         marks: Marks::open(),
         readings: Readings::open(),
+        notes: Notes::open(),
         last_input: Instant::now(),
         bars: Vec::new(),
         offered: None,
@@ -1085,6 +1103,18 @@ fn build(app: &Application, start: Vec<String>) {
                     }
                 }
                 Some(Row::Open(address)) => open_current(&ui, &state, address, true),
+                Some(Row::Note(_, Some(offset))) => {
+                    if let Some(view) = current(&ui, &state) {
+                        settle(&view, offset, ANCHOR_ALIGN);
+                    }
+                }
+                // Цитаты на странице больше нет: меню скажет это и даст
+                // убрать заметку.
+                Some(Row::Note(note, None)) => {
+                    if let Some(id) = current_id(&ui, &state) {
+                        note_menu(&ui, &state, id, note, row.upcast_ref(), None);
+                    }
+                }
                 Some(Row::Header) | None => {}
             }
         });
@@ -1233,6 +1263,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: true,
+            notes: Vec::new(),
         });
         id
     };
@@ -1379,7 +1410,7 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         "Forget everything you have read",
         "The list at brevier:history goes away, the address bar stops \
          suggesting those pages, and the copies of what you read are deleted. \
-         Bookmarks, with their copies, and open tabs stay.",
+         Bookmarks and notes, with their copies, and open tabs stay.",
         &forget,
     ));
     page.append(&history_rows);
@@ -1797,6 +1828,17 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("bookmarks", &[], bookmarks);
 
+    // Заметки (#39) — тоже соседи истории: все, по страницам.
+    let notes = gio::SimpleAction::new("notes", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        notes.connect_activate(move |_, _| {
+            new_tab(&ui, &state, Some(Address::Internal(Internal::Notes)));
+        });
+    }
+    add("notes", &[], notes);
+
     // Поиск по архиву — адресом `brevier:archive?q=`: форм у Brevier нет,
     // а строка адреса уже умеет и набор, и подсказки, и Enter. Клавиша
     // ставит туда начало адреса и курсор за ним — остаётся набрать слова.
@@ -1867,6 +1909,7 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     places.append(Some("Settings"), Some("app.settings"));
     places.append(Some("History"), Some("app.history"));
     places.append(Some("Bookmarks"), Some("app.bookmarks"));
+    places.append(Some("Your notes"), Some("app.notes"));
     places.append(Some("Search what you've read"), Some("app.search-archive"));
     let menu = gio::Menu::new();
     menu.append_section(None, &page);
@@ -2051,6 +2094,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: false,
+            notes: Vec::new(),
         });
         id
     };
@@ -2140,16 +2184,55 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             let target = {
                 let mut borrowed = state.borrow_mut();
                 let Some(tab) = borrowed.find(id) else { return };
-                let Some(target) = link_at(&view, &tab.links, x, y).map(|link| link.target.clone())
-                else {
-                    return;
-                };
-                target
+                link_at(&view, &tab.links, x, y).map(|link| link.target.clone())
             };
-            follow_link(&ui, &state, id, &view, &target, ctrl || middle);
+            if let Some(target) = target {
+                follow_link(&ui, &state, id, &view, &target, ctrl || middle);
+                return;
+            }
+            // Нажали отмеченное (#39): что сделать с заметкой. Левой кнопкой
+            // и без выделения — по заметке можно и выделять.
+            if !primary || view.buffer().has_selection() {
+                return;
+            }
+            let note = {
+                let mut borrowed = state.borrow_mut();
+                let Some(tab) = borrowed.find(id) else { return };
+                note_at(&view, &tab.notes, x, y).map(|note| note.id)
+            };
+            if let Some(note) = note {
+                note_menu(&ui, &state, id, note, view.upcast_ref(), Some((x, y)));
+            }
         });
     }
     view.add_controller(click);
+
+    // Выделенное — в заметку (#39): два пункта в меню текста, рядом
+    // с «Копировать». Без выделения они серые.
+    let note_actions = gio::SimpleActionGroup::new();
+    for (name, write) in [("mark", false), ("write", true)] {
+        let action = gio::SimpleAction::new(name, None);
+        action.set_enabled(false);
+        let ui = ui.clone();
+        let state = state.clone();
+        action.connect_activate(move |_, _| mark_selection(&ui, &state, id, write));
+        note_actions.add_action(&action);
+    }
+    view.insert_action_group("note", Some(&note_actions));
+    view.buffer().connect_has_selection_notify(move |buffer| {
+        for name in ["mark", "write"] {
+            if let Some(action) = note_actions
+                .lookup_action(name)
+                .and_downcast::<gio::SimpleAction>()
+            {
+                action.set_enabled(buffer.has_selection());
+            }
+        }
+    });
+    let extra = gio::Menu::new();
+    extra.append(Some("Highlight"), Some("note.mark"));
+    extra.append(Some("Note…"), Some("note.write"));
+    view.set_extra_menu(Some(&extra));
 
     // Курсор над ссылкой — палец, как в любом браузере. `GtkTextView` ставит
     // себе курсор-текст сам, поэтому возвращаем его руками, когда ссылка
@@ -2187,10 +2270,17 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                 // мы держим `borrow_mut` в `show_document`. Поэтому `try_borrow`,
                 // а не `borrow`: занят — молча пропускаем, подсказка не срочная
                 // и покажется на следующем наведении.
+                // Нет ссылки — приписанное к заметке (#39): его видно
+                // наведением, не открывая меню.
                 let target = state.try_borrow().ok().and_then(|state| {
                     state.tabs.iter().find(|tab| tab.id == id).and_then(|tab| {
                         link_at(&view, &tab.links, x as f64, y as f64)
                             .map(|link| link.target.clone())
+                            .or_else(|| {
+                                note_at(&view, &tab.notes, x as f64, y as f64)
+                                    .filter(|note| !note.text.is_empty())
+                                    .map(|note| note.text.clone())
+                            })
                     })
                 });
                 match target {
@@ -2507,8 +2597,8 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         .message("Forget everything you have read?")
         .detail(
             "The list of pages goes away, the address bar stops suggesting them, \
-             and the copies of what you read are deleted. Bookmarks, with their \
-             copies, and open tabs stay.",
+             and the copies of what you read are deleted. Bookmarks and notes, \
+             with their copies, and open tabs stay.",
         )
         .buttons(["Cancel", "Forget"])
         .cancel_button(0)
@@ -2528,8 +2618,9 @@ fn forget_everything(ui: &Ui, state: &Rc<RefCell<State>>) {
         // вкладок не трогаем: открытые вкладки остаются, как и обещано.
         brevier::cache::Cache::open().forget();
         // Архив — тоже след прочитанного (#8): «забыть всё» значит всё,
-        // кроме копий закладок — их закладка обещает навсегда.
-        brevier::archive::Archive::open().forget(&brevier::store::Marks::open().addresses());
+        // кроме копий закладок и страниц с заметками — их обещано навсегда.
+        // Сами заметки читатель написал сам (#39): их не трогаем.
+        brevier::archive::Archive::open().forget(&brevier::notes::lasting());
         // И что прочитано на страницах (#19): файл и счёт в открытых вкладках.
         {
             let mut borrowed = state.borrow_mut();
@@ -3234,6 +3325,7 @@ fn show_document(
         tab.density_seen = density(ui);
     }
     drop(borrowed);
+    place_notes(state, id);
     sync(ui, state, None);
     resume_place(ui, state);
     remember_session(ui, state);
@@ -3366,6 +3458,10 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             .unwrap_or(0);
         (total, borrowed.dark)
     };
+    let noted = {
+        let borrowed = state.borrow();
+        index_notes(&borrowed, index)
+    };
     let (shelf, bars) = fill_contents(
         &ui.contents,
         &marks,
@@ -3373,6 +3469,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         dark,
         &entries,
         here.as_ref(),
+        &noted,
         &feeds,
         &site,
     );
@@ -3623,6 +3720,15 @@ fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
     paint("lit", "foreground", colors.literal);
     paint("num", "foreground", colors.number);
     paint("com", "foreground", colors.comment);
+    paint("note", "background", colors.note);
+    if let Some(tag) = table.lookup("noted") {
+        tag.set_property("underline-rgba", rgba(colors.note_rule));
+    }
+}
+
+/// Цвет `#rrggbb` для свойств GTK, которые хотят `RGBA`, а не строку.
+fn rgba(hex: &str) -> gtk::gdk::RGBA {
+    gtk::gdk::RGBA::parse(hex).unwrap_or(gtk::gdk::RGBA::BLACK)
 }
 
 thread_local! {
@@ -4705,6 +4811,19 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
         ],
     );
 
+    // Заметки читателя (#39): подложка отмеченного и черта под тем, к чему
+    // приписаны слова. До отметки клавиатуры и подсветки поиска: те важнее
+    // в ту минуту, когда они есть, и ложатся поверх.
+    style(buffer, "note", &[("background", &colors.note)]);
+    style(
+        buffer,
+        "noted",
+        &[
+            ("underline", &pango::Underline::Single),
+            ("underline-rgba", &rgba(colors.note_rule)),
+        ],
+    );
+
     // Ссылка под отметкой клавиатуры (#34): бледная подложка цвета ссылки —
     // видна, но текст не перекрикивает. До подсветки поиска: найденное
     // важнее, его и показываем поверх.
@@ -5062,8 +5181,8 @@ fn jump(view: &gtk::TextView, anchors: &[(String, usize)], want: &str) -> bool {
 /// Показать оглавление и связать строки с местами в тексте.
 /// Заполнить полку и сказать, что делает каждая её строка.
 ///
-/// Групп четыре: точки входа в документацию проекта, оглавление открытой
-/// страницы, ленты сайта и его навигация. Проект стоит выше — ради него
+/// Групп пять: точки входа в документацию проекта, заметки читателя (#39),
+/// оглавление открытой страницы, ленты сайта и его навигация. Проект стоит выше — ради него
 /// режим репозитория и затевался, а оглавление длинное и увело бы эти
 /// две-три строки под сгиб.
 ///
@@ -5083,6 +5202,7 @@ fn fill_contents(
     dark: bool,
     entries: &[Entry],
     here: Option<&Entry>,
+    noted: &[Noted],
     feeds: &[Entry],
     site: &[Entry],
 ) -> (Vec<Row>, Vec<ShareBar>) {
@@ -5104,7 +5224,70 @@ fn fill_contents(
         list.append(&row);
         shelf.push(Row::Open(entry.address.clone()));
     }
-    if !project.is_empty() && !marks.is_empty() {
+    // Заметки (#39) — выше оглавления: оно бывает длинным, и под ним они
+    // терялись бы. Цитата — краской, приписанное — приглушённо под ней.
+    if !noted.is_empty() {
+        list.append(&group("Your notes"));
+        shelf.push(Row::Header);
+    }
+    for note in noted {
+        let (row, label) = shelf_row(&note.quote, 0);
+        label.set_margin_start(8);
+        if note.place.is_none() {
+            label.add_css_class("dim-label");
+            label.set_tooltip_text(Some("No longer on the page"));
+        }
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        column.set_hexpand(true);
+        row.set_child(None::<&gtk::Widget>);
+        column.append(&label);
+        if !note.text.is_empty() {
+            let text = gtk::Label::builder()
+                .label(&note.text)
+                .xalign(0.0)
+                .wrap(true)
+                .wrap_mode(pango::WrapMode::WordChar)
+                .lines(3)
+                .ellipsize(pango::EllipsizeMode::End)
+                .margin_start(8)
+                .margin_end(10)
+                .margin_bottom(4)
+                .build();
+            text.add_css_class("dim-label");
+            label.set_margin_bottom(0);
+            column.append(&text);
+        }
+        // Слева — полоска цвета заметки: та же, что под текстом.
+        let placed = note.place.is_some();
+        let bar = gtk::DrawingArea::builder()
+            .content_width(3)
+            .margin_start(10)
+            .margin_top(5)
+            .margin_bottom(5)
+            .build();
+        bar.set_draw_func(move |_, cairo, width, height| {
+            let colors = colors(dark);
+            let [r, g, b] = rgb(if placed {
+                colors.note_rule
+            } else {
+                colors.rule
+            });
+            cairo.set_source_rgb(
+                f64::from(r) / 255.0,
+                f64::from(g) / 255.0,
+                f64::from(b) / 255.0,
+            );
+            cairo.rectangle(0.0, 0.0, f64::from(width), f64::from(height));
+            let _ = cairo.fill();
+        });
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        line.append(&bar);
+        line.append(&column);
+        row.set_child(Some(&line));
+        list.append(&row);
+        shelf.push(Row::Note(note.id, note.place.map(|(from, _)| from)));
+    }
+    if (!project.is_empty() || !noted.is_empty()) && !marks.is_empty() {
         list.append(&group("On this page"));
         shelf.push(Row::Header);
     }
@@ -5842,10 +6025,16 @@ fn fill(frame: &gtk::Box, child: &impl IsA<gtk::Widget>) {
 /// Имя предлагаем по документу: есть картинки — архив, нет — просто текст.
 /// Читатель волен переименовать, и расширение из диалога старше нашего.
 fn ask_where_to_save(ui: &Ui, state: &Rc<RefCell<State>>) {
-    let Some(document) = current_document(ui, state) else {
+    let Some(mut document) = current_document(ui, state) else {
         notice(ui, "Nothing to save yet");
         return;
     };
+    // Заметки едут в файл вместе со статьёй (#39): в конце, своим разделом.
+    {
+        let borrowed = state.borrow();
+        let notes = borrowed.notes.of(&document.address.display());
+        document.markdown = notes::appended(&document.markdown, &notes);
+    }
 
     let chooser = gtk::FileDialog::builder()
         .title("Save article")
@@ -6172,6 +6361,371 @@ fn draw_bar(
         cairo.arc(x_of(mark.offset), y, 1.8, 0.0, std::f64::consts::TAU);
         let _ = cairo.fill();
     }
+    // Заметки (#39) — квадратиками цвета заметки, крупнее точки раздела:
+    // их ищут глазами.
+    paint(colors.note_rule, 1.0);
+    for note in &tab.notes {
+        if let Some((from, _)) = note.place {
+            let x = x_of(from.max(0) as usize).round();
+            cairo.rectangle(x - 2.5, y.round() - 2.5, 5.0, 5.0);
+            let _ = cairo.fill();
+        }
+    }
+}
+
+// ── заметки (#39) ───────────────────────────────────────────────────────────
+
+/// Заметки вкладки для полки — только когда на ней страница, а не начальная.
+fn index_notes(state: &State, index: usize) -> Vec<Noted> {
+    state
+        .tabs
+        .get(index)
+        .filter(|tab| tab.history.current().is_some())
+        .map(|tab| tab.notes.clone())
+        .unwrap_or_default()
+}
+
+/// Найти заметки показанной статьи и закрасить их. Полка, полоса и щелчок
+/// по отмеченному берут места отсюда же. Зовётся после показа страницы
+/// и после каждой правки заметок. Заметки бывают там же, где прогресс
+/// чтения, — у статей.
+fn place_notes(state: &Rc<RefCell<State>>, id: u64) {
+    let Some(view) = view_of(state, id) else {
+        return;
+    };
+    let buffer = view.buffer();
+    let (start, end) = buffer.bounds();
+    buffer.remove_tag_by_name("note", &start, &end);
+    buffer.remove_tag_by_name("noted", &start, &end);
+    let list: Vec<notes::Note> = {
+        let mut borrowed = state.borrow_mut();
+        let address = borrowed.find(id).and_then(|tab| {
+            tab.progress
+                .as_ref()
+                .map(|progress| progress.address.clone())
+        });
+        match address {
+            Some(address) => borrowed.notes.of(&address).into_iter().cloned().collect(),
+            None => Vec::new(),
+        }
+    };
+    let mut noted: Vec<Noted> = Vec::new();
+    if !list.is_empty() {
+        // Текст буфера с объектами — ровно текст модели страницы.
+        let text = buffer.slice(&start, &end, true);
+        let notes: Vec<&notes::Note> = list.iter().collect();
+        for (spot, note) in notes::place(&text, &notes).into_iter().zip(&list) {
+            noted.push(Noted {
+                id: note.id,
+                place: spot.place.map(|(from, to)| (from as i32, to as i32)),
+                quote: notes::preview(&note.quote),
+                text: note.text.clone(),
+            });
+        }
+        noted.sort_by_key(|note| note.place.map_or(i32::MAX, |(from, _)| from));
+        for note in &noted {
+            let Some((from, to)) = note.place else {
+                continue;
+            };
+            let (from, to) = (buffer.iter_at_offset(from), buffer.iter_at_offset(to));
+            buffer.apply_tag_by_name("note", &from, &to);
+            if !note.text.is_empty() {
+                buffer.apply_tag_by_name("noted", &from, &to);
+            }
+        }
+    }
+    if let Some(tab) = state.borrow_mut().find(id) {
+        tab.notes = noted;
+    }
+}
+
+/// Заметки поменялись: закрасить заново, полка и полоса — следом.
+fn after_notes(ui: &Ui, state: &Rc<RefCell<State>>, id: u64) {
+    place_notes(state, id);
+    if current_id(ui, state) == Some(id) {
+        sync(ui, state, None);
+        ui.bar.queue_draw();
+    }
+}
+
+/// Заметка под точкой окна: нажатое отмеченное.
+fn note_at<'a>(view: &gtk::TextView, notes: &'a [Noted], x: f64, y: f64) -> Option<&'a Noted> {
+    let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+    let (iter, _) = view.iter_at_position(bx, by)?;
+    let offset = iter.offset();
+    notes.iter().find(|note| {
+        note.place
+            .is_some_and(|(from, to)| offset >= from && offset < to)
+    })
+}
+
+/// Выделенное — в заметку. `write` — спросить слова, иначе просто отметить.
+fn mark_selection(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, write: bool) {
+    let Some(view) = view_of(state, id) else {
+        return;
+    };
+    let buffer = view.buffer();
+    let Some((from, to)) = buffer.selection_bounds() else {
+        notice(ui, notes::Refusal::Empty.headline());
+        return;
+    };
+    let page = {
+        let mut borrowed = state.borrow_mut();
+        borrowed.find(id).and_then(|tab| {
+            let address = tab.progress.as_ref()?.address.clone();
+            let title = tab
+                .document
+                .as_ref()
+                .map(|document| document.title.clone())
+                .unwrap_or_default();
+            Some((address, title))
+        })
+    };
+    let Some((address, title)) = page else {
+        notice(ui, "Notes are kept for articles");
+        return;
+    };
+    let (start, end) = buffer.bounds();
+    let text = buffer.slice(&start, &end, true);
+    let (from, to) = (from.offset(), to.offset());
+    let selection = match notes::select(&text, from as usize, to as usize) {
+        Ok(selection) => selection,
+        Err(refusal) => {
+            notice(ui, refusal.headline());
+            return;
+        }
+    };
+    // Выделение снимаем: отмеченное видно своей подложкой.
+    buffer.place_cursor(&buffer.iter_at_offset(to));
+    let keep = {
+        let ui = ui.clone();
+        let state = state.clone();
+        move |words: String| {
+            state.borrow_mut().notes.add(
+                &address,
+                &title,
+                selection.clone(),
+                &words,
+                store::Stamp::now(local_offset()),
+            );
+            after_notes(&ui, &state, id);
+            notice(
+                &ui,
+                if words.trim().is_empty() {
+                    "Highlighted · it is on the shelf"
+                } else {
+                    "Note kept · it is on the shelf"
+                },
+            );
+        }
+    };
+    if write {
+        let place = range_rect(&view, to);
+        ask_note_text(view.upcast_ref(), place, "", "Note", keep);
+    } else {
+        keep(String::new());
+    }
+}
+
+/// Где в окне конец отмеченного: туда встаёт окно со словами.
+fn range_rect(view: &gtk::TextView, to: i32) -> gtk::gdk::Rectangle {
+    let place = view.iter_location(&view.buffer().iter_at_offset(to));
+    let (x, y) = view.buffer_to_window_coords(gtk::TextWindowType::Widget, place.x(), place.y());
+    gtk::gdk::Rectangle::new(x, y, 1, place.height().max(1))
+}
+
+/// Спросить слова к заметке. Пустые — тоже ответ: заметка станет отметкой.
+/// Окно — всплывающее у отмеченного, а не диалог посреди экрана: пишут
+/// о том, что рядом. Ctrl+Enter — то же, что «Keep»; щелчок мимо — отмена.
+fn ask_note_text(
+    parent: &gtk::Widget,
+    place: gtk::gdk::Rectangle,
+    initial: &str,
+    title: &str,
+    done: impl Fn(String) + 'static,
+) {
+    let popover = gtk::Popover::new();
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&place));
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    column.set_margin_top(4);
+    column.set_margin_bottom(4);
+    column.set_margin_start(4);
+    column.set_margin_end(4);
+    let heading = gtk::Label::builder().label(title).xalign(0.0).build();
+    heading.add_css_class("dim-label");
+    let field = gtk::TextView::builder()
+        .wrap_mode(gtk::WrapMode::WordChar)
+        .accepts_tab(false)
+        .top_margin(6)
+        .bottom_margin(6)
+        .left_margin(6)
+        .right_margin(6)
+        .build();
+    field.buffer().set_text(initial);
+    let scroller = gtk::ScrolledWindow::builder()
+        .child(&field)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_height(72)
+        .max_content_height(220)
+        .propagate_natural_height(true)
+        .build();
+    scroller.add_css_class("frame");
+    // Ширина — явно: без горизонтальной прокрутки `min_content_width`
+    // не действует, и поле сжималось до пары слов.
+    scroller.set_size_request(320, -1);
+    let cancel = gtk::Button::with_label("Cancel");
+    let keep = gtk::Button::with_label("Keep");
+    keep.add_css_class("suggested-action");
+    keep.set_tooltip_text(Some("Ctrl+Enter"));
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    buttons.set_halign(gtk::Align::End);
+    buttons.append(&cancel);
+    buttons.append(&keep);
+    column.append(&heading);
+    column.append(&scroller);
+    column.append(&buttons);
+    popover.set_child(Some(&column));
+
+    let done = Rc::new(done);
+    {
+        let popover = popover.clone();
+        let field = field.clone();
+        keep.connect_clicked(move |_| {
+            let buffer = field.buffer();
+            let words = buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string();
+            popover.popdown();
+            done(words);
+        });
+    }
+    {
+        let popover = popover.clone();
+        cancel.connect_clicked(move |_| popover.popdown());
+    }
+    let keys = gtk::EventControllerKey::new();
+    {
+        let keep = keep.clone();
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let enter = matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter);
+            if enter && modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                keep.emit_clicked();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    field.add_controller(keys);
+    popover.connect_closed(|popover| {
+        // Кнопка срабатывает после `closed`: снимаем на idle.
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || popover.unparent());
+    });
+    popover.popup();
+    field.grab_focus();
+}
+
+/// Что сделать с заметкой: переписать слова или убрать. `point` — где
+/// щёлкнули по тексту; со строки полки меню встаёт у самой строки.
+fn note_menu(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    note: u64,
+    parent: &gtk::Widget,
+    point: Option<(f64, f64)>,
+) {
+    let Some(found) = state
+        .borrow()
+        .tabs
+        .iter()
+        .find(|tab| tab.id == id)
+        .and_then(|tab| tab.notes.iter().find(|known| known.id == note).cloned())
+    else {
+        return;
+    };
+    let place = match point {
+        Some((x, y)) => gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1),
+        None => gtk::gdk::Rectangle::new(0, 0, parent.width().max(1), parent.height().max(1)),
+    };
+    let popover = gtk::Popover::new();
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&place));
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let mut said = if found.text.is_empty() {
+        format!("“{}”", found.quote)
+    } else {
+        found.text.clone()
+    };
+    if found.place.is_none() {
+        said = format!("No longer on the page: {said}");
+    }
+    let caption = gtk::Label::builder()
+        .label(&said)
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(pango::WrapMode::WordChar)
+        .max_width_chars(40)
+        .margin_top(4)
+        .margin_bottom(6)
+        .margin_start(8)
+        .margin_end(8)
+        .build();
+    if found.text.is_empty() {
+        caption.add_css_class("dim-label");
+    }
+    column.append(&caption);
+    let item = |label: &str| {
+        let text = gtk::Label::builder().label(label).xalign(0.0).build();
+        let button = gtk::Button::builder().child(&text).has_frame(false).build();
+        column.append(&button);
+        button
+    };
+    let edit = item(if found.text.is_empty() {
+        "Add a note…"
+    } else {
+        "Edit the note…"
+    });
+    let remove = item("Remove");
+    popover.set_child(Some(&column));
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let popover = popover.clone();
+        let parent = parent.clone();
+        let words = found.text.clone();
+        edit.connect_clicked(move |_| {
+            popover.popdown();
+            let ui = ui.clone();
+            let state = state.clone();
+            let title = if words.is_empty() {
+                "Note"
+            } else {
+                "Edit the note"
+            };
+            ask_note_text(&parent, place, &words, title, move |words| {
+                state.borrow_mut().notes.edit(note, &words);
+                after_notes(&ui, &state, id);
+            });
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let popover = popover.clone();
+        remove.connect_clicked(move |_| {
+            popover.popdown();
+            state.borrow_mut().notes.remove(note);
+            after_notes(&ui, &state, id);
+            notice(&ui, "Note removed");
+        });
+    }
+    popover.connect_closed(|popover| {
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || popover.unparent());
+    });
+    popover.popup();
 }
 
 // ── поиск по странице ───────────────────────────────────────────────────────

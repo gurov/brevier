@@ -102,6 +102,19 @@ object Core {
      */
     fun keepPicture(source: String, dir: String): JSONObject = obj("picture.keep", source, dir)
 
+    /** Заметки открытой статьи (#39): найденные — в порядке текста, потерявшие место — в конце. */
+    fun notes(address: String): List<NoteSpot> {
+        val found = list("notes.of", address)
+        return (0 until found.length()).map { NoteSpot.of(found.getJSONObject(it)) }
+    }
+
+    /** Заметка по выделению `[from, to)` в UTF-16. Ответ — `ok` и `id` или `headline`. */
+    fun addNote(address: String, from: Int, to: Int, text: String): JSONObject =
+        obj("notes.add", utcOffset(), address, from, to, text)
+
+    fun editNote(id: Long, text: String): Boolean = obj("notes.edit", id, text).optBoolean("ok")
+    fun removeNote(id: Long): Boolean = obj("notes.remove", id).optBoolean("ok")
+
     private fun utcOffset(): Int = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000
 }
 

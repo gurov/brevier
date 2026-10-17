@@ -19,8 +19,10 @@ import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.ReplacementSpan
+import android.view.ActionMode
 import android.view.Choreographer
 import android.view.Gravity
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -53,6 +55,15 @@ interface ArticleHost {
 
     /** Нажали картинку (#38): сохранить, поделиться, открыть в браузере. */
     fun pictureMenu(source: String)
+
+    /**
+     * Выделенное `[from, to)` — в заметку (#39). `write` — приписать слова,
+     * иначе просто отметить. Смещения — в тексте страницы, UTF-16.
+     */
+    fun mark(from: Int, to: Int, write: Boolean)
+
+    /** Нажали отмеченное: что сделать с заметкой. `x`, `y` — точка на экране. */
+    fun noteMenu(id: Long, x: Int, y: Int)
 
     /** Страницу прокрутили: полка отмечает, где читатель. */
     fun scrolled()
@@ -102,6 +113,8 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     /** Подсветка поиска — её получают и куски, досыпанные позже. */
     private var marks: IntArray? = null
     private var markHere = -1
+    /** Заметки страницы (#39) — их тоже получают и досыпанные куски. */
+    private var notes: List<NoteSpot> = emptyList()
 
     init {
         isFillViewport = true
@@ -142,6 +155,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         laid = 0
         marks = null
         markHere = -1
+        notes = emptyList()
         this.eager = eager
         this.offer = offer
         this.ways = ways
@@ -165,6 +179,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         when (val item = pending.removeFirst()) {
             is Piece -> {
                 addProse(page, item)
+                noteView(proses.last())
                 marks?.let { hits -> markView(proses.last(), hits, markHere) }
                 laid = item.end
             }
@@ -423,6 +438,30 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             index += 2
         }
     }
+
+    // ── заметки (#39) ───────────────────────────────────────────────────────
+
+    /** Закрасить заметки страницы. Зовётся после показа и после каждой правки. */
+    fun notes(list: List<NoteSpot>) {
+        notes = list
+        for (view in proses) noteView(view)
+    }
+
+    /** Заметки в одном куске: подложка, а у приписанного — ещё и черта. */
+    private fun noteView(view: ProseView) {
+        view.clearNotes()
+        val start = view.piece.start
+        val end = start + view.text.length
+        for (note in notes) {
+            if (!note.placed) continue
+            val a = max(note.from, start)
+            val b = min(note.to, end)
+            if (a < b) view.note(a - start, b - start, palette.note, if (note.text.isEmpty()) 0 else palette.noteRule)
+        }
+    }
+
+    /** Заметка под смещением страницы: нажатое отмеченное. */
+    private fun noteAt(offset: Int): NoteSpot? = notes.firstOrNull { it.placed && offset >= it.from && offset < it.to }
 
     // ── щипок ───────────────────────────────────────────────────────────────
 
@@ -765,6 +804,34 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 hyphenationFrequency = if (piece.justified) Layout.HYPHENATION_FREQUENCY_FULL else Layout.HYPHENATION_FREQUENCY_NORMAL
             }
             textLocale = Locale.ROOT
+            // Выделенное — в заметку (#39): два своих пункта в системном меню
+            // выделения, рядом с «Копировать» и «Поделиться».
+            customSelectionActionModeCallback = object : ActionMode.Callback {
+                override fun onCreateActionMode(mode: ActionMode, menu: android.view.Menu): Boolean {
+                    menu.add(android.view.Menu.NONE, MARK, 0, "Highlight")
+                    menu.add(android.view.Menu.NONE, NOTE, 1, "Note")
+                    return true
+                }
+
+                override fun onPrepareActionMode(mode: ActionMode, menu: android.view.Menu) = false
+
+                override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+                    val write = when (item.itemId) {
+                        MARK -> false
+                        NOTE -> true
+                        else -> return false
+                    }
+                    val from = selectionStart
+                    val to = selectionEnd
+                    if (from < 0 || to <= from) return false
+                    Selection.setSelection(text as Spannable, to)
+                    mode.finish()
+                    host.mark(piece.start + from, piece.start + to, write)
+                    return true
+                }
+
+                override fun onDestroyActionMode(mode: ActionMode) {}
+            }
             setOnLongClickListener {
                 val link = linkAt(downX, downY) ?: return@setOnLongClickListener false
                 host.linkMenu(link.target, rawX.toInt(), rawY.toInt())
@@ -788,13 +855,28 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     val tap = abs(event.x - downX) < slop && abs(event.y - downY) < slop &&
                         event.eventTime - downAt < ViewConfiguration.getLongPressTimeout()
                     if (tap && !hadSelection) {
-                        linkAt(event.x, event.y)?.let { link ->
+                        val link = linkAt(event.x, event.y)
+                        if (link != null) {
                             post { host.follow(link.target, false) }
+                        } else {
+                            // Ссылка главнее: отмеченная ссылка открывается,
+                            // а заметка к ней — с полки.
+                            val note = offsetAt(event.x, event.y)?.let { noteAt(it) }
+                            if (note != null) post { host.noteMenu(note.id, rawX.toInt(), rawY.toInt()) }
                         }
                     }
                 }
             }
             return super.onTouchEvent(event)
+        }
+
+        /** Смещение страницы под точкой — только если палец на тексте строки. */
+        private fun offsetAt(x: Float, y: Float): Int? {
+            val layout = layout ?: return null
+            val line = layout.getLineForVertical((y - totalPaddingTop + scrollY).toInt())
+            val lx = x - totalPaddingLeft + scrollX
+            if (lx < layout.getLineLeft(line) || lx > layout.getLineRight(line)) return null
+            return piece.start + layout.getOffsetForHorizontal(line, lx)
         }
 
         /** Ссылка под точкой — только если палец и правда на тексте строки. */
@@ -826,6 +908,33 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             return super.onTextContextMenuItem(id)
         }
 
+        private val noted = mutableListOf<Any>()
+
+        fun clearNotes() {
+            val text = text as? Spannable ?: return
+            if (noted.isEmpty()) return
+            noted.forEach { text.removeSpan(it) }
+            noted.clear()
+            invalidate()
+        }
+
+        /**
+         * Заметка — подложкой под найденным поиском: приоритет спана выше,
+         * значит `getSpans` отдаёт её первой, и рисуется она раньше, ниже.
+         *
+         * Перерисовку просим сами: `Wash` — не стиль текста, и `TextView`
+         * на него не перерисовывается. У поиска это делает соседний
+         * `ForegroundColorSpan`, а здесь без `invalidate` заметка, оставленная
+         * через диалог, появлялась только при следующем показе страницы.
+         */
+        fun note(from: Int, to: Int, background: Int, rule: Int) {
+            val text = text as? Spannable ?: return
+            val wash = Wash(background, rule)
+            text.setSpan(wash, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE or (1 shl Spanned.SPAN_PRIORITY_SHIFT))
+            noted += wash
+            invalidate()
+        }
+
         fun clearMarks() {
             val text = text as? Spannable ?: return
             found.forEach { text.removeSpan(it) }
@@ -849,6 +958,10 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
         /** Сколько знаков кладём в колонку сразу: первый экран с запасом. */
         const val FIRST_CHARS = 2 * CHUNK_CHARS
+
+        /** Пункты меню выделения (#39): отметить и приписать. */
+        private const val MARK = 0x4e01
+        private const val NOTE = 0x4e02
 
         /** Снять типографские знаки: в буфер обмена идёт чистый текст. */
         fun plain(text: String): String = buildString(text.length) {
@@ -913,6 +1026,14 @@ open class Washed(context: Context) : TextView(context) {
                 else layout.getPrimaryHorizontal(b)
                 val baseline = layout.getLineBaseline(line).toFloat()
                 canvas.drawRect(minOf(x1, x2) - pad, baseline + probe.ascent, maxOf(x1, x2) + pad, baseline + probe.descent, wash)
+                if (span.rule != 0) {
+                    // Черта — по нижнему краю подложки, в толщину волоса.
+                    wash.color = span.rule
+                    val thick = maxOf(1f, face.textSize * 0.07f)
+                    val y = baseline + probe.descent
+                    canvas.drawRect(minOf(x1, x2) - pad, y - thick, maxOf(x1, x2) + pad, y, wash)
+                    wash.color = span.color
+                }
             }
             line += 1
         }

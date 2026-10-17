@@ -42,6 +42,11 @@ pub struct Colors {
     /// бумаги, а не в синем ряду темы: полка стоит вплотную к странице.
     pub chosen: &'static str,
     pub touched: &'static str,
+    /// Заметка читателя (#39): подложка отмеченного и черта под тем, к чему
+    /// приписаны слова. Зелёный маркер, а не жёлтый: жёлтый — найденное
+    /// поиском, и одно не должно путаться с другим.
+    pub note: &'static str,
+    pub note_rule: &'static str,
 }
 
 pub fn colors(dark: bool) -> Colors {
@@ -57,6 +62,8 @@ pub fn colors(dark: bool) -> Colors {
             rule: "#3d3833",
             chosen: "#332e27",
             touched: "#252220",
+            note: "#33402a",
+            note_rule: "#8fae6a",
         }
     } else {
         Colors {
@@ -70,6 +77,8 @@ pub fn colors(dark: bool) -> Colors {
             rule: "#e2d9c6",
             chosen: "#e7dabc",
             touched: "#efe7d6",
+            note: "#dfeccb",
+            note_rule: "#6f8f45",
         }
     }
 }
