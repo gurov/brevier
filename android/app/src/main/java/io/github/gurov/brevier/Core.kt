@@ -22,7 +22,12 @@ object Core {
 
     external fun init(context: Context, home: String)
     private external fun call(method: String, arg: String): String
-    external fun image(source: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray
+    /**
+     * Картинка, разобранная ядром. `null` бывает, когда нативная сторона
+     * не смогла даже ответить (так ведёт себя arm64-ядро под трансляцией
+     * на x86_64-эмуляторе): это отказ одной картинки, а не повод падать.
+     */
+    external fun image(source: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray?
     external fun find(text: String, needle: String): IntArray
 
     private fun obj(method: String, vararg fields: Any): JSONObject =

@@ -511,10 +511,11 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     private fun fetch(source: String, look: Look, done: (Decoded) -> Unit) {
         val shown = generation
         App.work.execute {
+            val fell = byteArrayOf(1) + "The load fell through".toByteArray()
             val bytes = try {
-                Core.image(source, look.width, look.paper, look.fontSize, look.natural)
+                Core.image(source, look.width, look.paper, look.fontSize, look.natural) ?: fell
             } catch (failure: Throwable) {
-                byteArrayOf(1) + "The load fell through".toByteArray()
+                fell
             }
             val decoded = decode(bytes)
             post { if (shown == generation) done(decoded) }
