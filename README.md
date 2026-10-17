@@ -258,7 +258,8 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **Search.** Anything that is not an address goes to DuckDuckGo Lite, and the results
   come back as a list of links. A leading `?` forces a search.
 - **Images load right away, and one switch turns them off** — without JavaScript, the
-  image decoder is the main thing left to attack.
+  image decoder is the main thing left to attack. A click on a picture saves it as the
+  site sent it, byte for byte, or opens it in your browser; the phone can share it too.
 - **Pages read in the last week open without downloading**, from a cache on disk.
   `Ctrl+R` fetches a fresh one. Lists of links are always fetched, since what's new is the point.
 - **Sites that serve Markdown are read exactly as written**, with no extraction. Brevier

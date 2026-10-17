@@ -48,8 +48,11 @@ interface ArticleHost {
     /** Долгое нажатие на ссылку: что с ней сделать. `x`, `y` — точка на экране. */
     fun linkMenu(target: String, x: Int, y: Int)
 
-    /** Отдать адрес системному браузеру: картинку в полном размере, страницу. */
+    /** Отдать адрес системному браузеру: страницу, которую мы не показали. */
     fun openOutside(target: String)
+
+    /** Нажали картинку (#38): сохранить, поделиться, открыть в браузере. */
+    fun pictureMenu(source: String)
 
     /** Страницу прокрутили: полка отмечает, где читатель. */
     fun scrolled()
@@ -621,9 +624,9 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 adjustViewBounds = true
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 contentDescription = block.alt.ifEmpty { null }
-                // Полный размер — работа системного браузера: здесь картинка
-                // ужата до меры текста.
-                setOnClickListener { host.openOutside(block.source) }
+                // Читатель, нажавший картинку, хочет её саму (#38): сохранить
+                // или отправить дальше. Браузер — последним пунктом.
+                setOnClickListener { host.pictureMenu(block.source) }
             }
             // Ядро отдаёт картинку в её пикселях — пикселях монитора. На экране
             // телефона они втрое мельче, поэтому растим её тем же множителем,

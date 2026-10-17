@@ -95,6 +95,13 @@ object Core {
     fun saveName(address: String): String? = obj("savename", address).text("name")
     fun save(address: String, path: String): JSONObject = obj("save", address, path)
 
+    /**
+     * Картинку — себе (#38): ядро пишет её в `dir` под именем с расширением
+     * по содержимому. Ответ — `ok`, `path`, `name`, `mime` или `headline`.
+     * Может пойти в сеть: зовётся не из главного потока.
+     */
+    fun keepPicture(source: String, dir: String): JSONObject = obj("picture.keep", source, dir)
+
     private fun utcOffset(): Int = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000
 }
 

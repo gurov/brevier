@@ -188,6 +188,100 @@ fn extension(mime: &str) -> Option<&'static str> {
     }
 }
 
+/// Байты картинки, которую читатель сохраняет себе (#38): из памяти
+/// вкладки, если она там (`held`), из недельной копии, иначе из сети.
+/// Картинка на экране уже скачана, и второй раз за ней обычно не ходим.
+pub fn picture(
+    source: &Source,
+    held: Option<std::sync::Arc<Vec<u8>>>,
+    ua: UserAgent,
+) -> Result<Vec<u8>, Error> {
+    if let Some(bytes) = held {
+        return Ok(bytes.as_ref().clone());
+    }
+    if let Source::Web(url) = source
+        && let Some(bytes) = crate::cache::Cache::open().image(url)
+    {
+        return Ok(bytes);
+    }
+    let (bytes, _) = media::grab(source, ua)?;
+    if bytes.is_empty() {
+        return Err(Error::Media("the server sent nothing".to_owned()));
+    }
+    Ok(bytes)
+}
+
+/// Как назвать сохранённую картинку (#38): имя — из адреса, расширение —
+/// по самим байтам. CDN отдаёт webp по адресу `….jpg`, а галерея, поверив
+/// имени, такой файл не откроет.
+pub fn picture_name(source: &Source, bytes: &[u8]) -> String {
+    let tail = match source {
+        Source::Web(url) => {
+            let path = url.split(['?', '#']).next().unwrap_or(url);
+            crate::address::percent_decoded(path.rsplit('/').next().unwrap_or_default())
+        }
+        Source::File(path) => path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    };
+    // Своё расширение — короткое слово после последней точки: `photo.php`,
+    // `chart.jpg`. «v2.0-final» расширения не имеет, и имя остаётся целым.
+    let stem = match tail.rsplit_once('.') {
+        Some((stem, extension))
+            if !stem.is_empty()
+                && (1..=5).contains(&extension.len())
+                && extension.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            stem
+        }
+        _ => tail.as_str(),
+    };
+    let mut name = String::with_capacity(stem.len());
+    for ch in stem.chars() {
+        if ch.is_alphanumeric() || matches!(ch, '-' | '_') {
+            name.push(ch);
+        } else if !name.ends_with('-') {
+            name.push('-');
+        }
+    }
+    let name: String = name.trim_matches('-').chars().take(80).collect();
+    let name = if name.is_empty() {
+        "image".to_owned()
+    } else if device(&name) {
+        format!("{name}-image")
+    } else {
+        name
+    };
+    match picture_type(bytes) {
+        Some((extension, _)) => format!("{name}.{extension}"),
+        None => name,
+    }
+}
+
+/// Тип картинки по подписи в первых байтах: расширение и MIME. `None` —
+/// не узнали; сохранить можно и так, только без расширения.
+pub fn picture_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+    let starts = |magic: &[u8]| bytes.starts_with(magic);
+    if starts(b"\x89PNG\r\n\x1a\n") {
+        Some(("png", "image/png"))
+    } else if starts(b"\xff\xd8\xff") {
+        Some(("jpg", "image/jpeg"))
+    } else if starts(b"GIF87a") || starts(b"GIF89a") {
+        Some(("gif", "image/gif"))
+    } else if starts(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some(("webp", "image/webp"))
+    } else if bytes.get(4..8) == Some(b"ftyp")
+        && matches!(bytes.get(8..12), Some(b"avif") | Some(b"avis"))
+    {
+        Some(("avif", "image/avif"))
+    } else if media::is_svg(bytes, None) {
+        Some(("svg", "image/svg+xml"))
+    } else {
+        None
+    }
+}
+
 fn has_images(document: &Document) -> bool {
     markdown::images(&document.markdown)
         .iter()
@@ -266,6 +360,70 @@ mod tests {
             "12345.png"
         );
         assert_eq!(file_name("https://e.com/", "image/jpeg"), "image.jpg");
+    }
+
+    #[test]
+    fn a_saved_picture_takes_its_type_from_the_bytes() {
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+        let webp = b"RIFF\x10\0\0\0WEBPVP8 ";
+        let web = |url: &str| Source::Web(url.to_owned());
+        // CDN отдаёт webp по адресу `.jpg`: расширение — по байтам.
+        assert_eq!(
+            picture_name(&web("https://e.com/a/photo.jpg?w=800"), webp),
+            "photo.webp"
+        );
+        assert_eq!(
+            picture_name(&web("https://e.com/img/12345"), png),
+            "12345.png"
+        );
+        assert_eq!(
+            picture_name(&web("https://e.com/render.php?id=7"), png),
+            "render.png"
+        );
+        assert_eq!(
+            picture_name(&web("https://e.com/v2.0-final"), png),
+            "v2-0-final.png"
+        );
+        assert_eq!(picture_name(&web("https://e.com/"), png), "image.png");
+        assert_eq!(
+            picture_name(&web("https://e.com/con.png"), png),
+            "con-image.png"
+        );
+        assert_eq!(
+            picture_name(
+                &web("https://e.com/%D1%81%D1%85%D0%B5%D0%BC%D0%B0%201.png"),
+                png
+            ),
+            "схема-1.png"
+        );
+        assert_eq!(
+            picture_name(
+                &Source::File("/home/r/notes/chart.svg".into()),
+                b"<svg xmlns=\"\"/>"
+            ),
+            "chart.svg"
+        );
+        // Не узнали — имя без расширения, но не пустое.
+        assert_eq!(picture_name(&web("https://e.com/x.bin"), b"what"), "x");
+        assert_eq!(
+            picture_type(b"\xff\xd8\xff\xe0"),
+            Some(("jpg", "image/jpeg"))
+        );
+        assert_eq!(
+            picture_type(b"\0\0\0\x1cftypavif"),
+            Some(("avif", "image/avif"))
+        );
+    }
+
+    #[test]
+    fn a_held_picture_is_not_fetched_again() {
+        // Адрес никуда не ведёт: ответ пришёл бы ошибкой сети.
+        let source = Source::Web("http://127.0.0.1:9/never.png".to_owned());
+        let held = std::sync::Arc::new(b"bytes".to_vec());
+        assert_eq!(
+            picture(&source, Some(held), UserAgent::Honest).unwrap(),
+            b"bytes"
+        );
     }
 
     #[test]

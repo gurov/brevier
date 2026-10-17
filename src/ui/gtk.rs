@@ -513,7 +513,7 @@ struct Shot {
 /// Куда приедет картинка.
 ///
 /// Иллюстрация — в рамку-виджет на якоре: у неё своя строка, подпись
-/// и клик «открыть в полном размере». Формула — в холст прямо в буфере:
+/// и меню по щелчку (#38). Формула — в холст прямо в буфере:
 /// виджет посреди строки текста стоит прокрутки, и это замерено
 /// (см. шапку `formula.rs`). У холста помним его место в буфере — по нему
 /// формулу опускают под базовую линию (`sink`).
@@ -5587,7 +5587,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
                 // Картинка выше окна вырастет из заглушки в полный рост
                 // и толкнёт текст под глазами — держим место чтения.
                 let hold = hold_reading_place(&ui, &state, id, &shot);
-                show_shot(&shot, raster, view_of(&state, id).as_ref());
+                show_shot(&ui, &state, id, &shot, raster);
                 if let Some((view, place)) = hold {
                     settle(&view, place, 0.0);
                 }
@@ -5637,7 +5637,9 @@ fn sink(buffer: &gtk::TextBuffer, canvas: &Formula, at: i32, depth: i32) {
 }
 
 /// Показать разобранную картинку с подписью.
-fn show_shot(shot: &Shot, raster: Raster, view: Option<&gtk::TextView>) {
+fn show_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, raster: Raster) {
+    let view = view_of(state, id);
+    let view = view.as_ref();
     let bytes = glib::Bytes::from_owned(raster.rgba);
     let texture = gtk::gdk::MemoryTexture::new(
         raster.width as i32,
@@ -5677,6 +5679,21 @@ fn show_shot(shot: &Shot, raster: Raster, view: Option<&gtk::TextView>) {
         None => {
             let picture = gtk::Picture::for_paintable(&image);
             fill(frame, &picture);
+            // Щелчок — один на картинку, а не на каждый показ: холст в той же
+            // рамке меняется при смене плотности, и второй обработчик открыл
+            // бы меню дважды.
+            let click = gtk::GestureClick::new();
+            {
+                let ui = ui.clone();
+                let state = state.clone();
+                let source = shot.source.clone();
+                click.connect_released(move |gesture, _, x, y| {
+                    if let Some(picture) = gesture.widget() {
+                        picture_menu(&ui, &state, id, &source, &picture, x, y);
+                    }
+                });
+            }
+            picture.add_controller(click);
             picture
         }
     };
@@ -5685,15 +5702,6 @@ fn show_shot(shot: &Shot, raster: Raster, view: Option<&gtk::TextView>) {
     picture.set_cursor_from_name(Some("pointer"));
     picture.set_halign(gtk::Align::Center);
     picture.set_tooltip_text(Some(&shot.source.display()));
-
-    // Полный размер — работа системного браузера: у нас картинка ужата
-    // до меры текста.
-    let click = gtk::GestureClick::new();
-    let target = shot.source.display();
-    click.connect_released(move |_, _, _, _| {
-        open_in_system_browser(&target);
-    });
-    picture.add_controller(click);
 
     if !shot.alt.is_empty() {
         // Подпись стоит под картинкой, а не под колонкой: узкая картинка
@@ -5713,6 +5721,110 @@ fn show_shot(shot: &Shot, raster: Raster, view: Option<&gtk::TextView>) {
         caption.add_css_class("caption");
         frame.append(&caption);
     }
+}
+
+/// Что сделать с картинкой (#38): сохранить себе или открыть в браузере.
+/// Щелчок по картинке ждёт её саму, а не чужое окно с тем же файлом;
+/// браузер — вторым пунктом.
+///
+/// Меню собирается на щелчок и снимается, когда закрылось: всплывающее
+/// окно — ребёнок картинки, и оставленное висеть пережило бы её
+/// («still has children left» при стирании страницы).
+fn picture_menu(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    source: &Source,
+    picture: &gtk::Widget,
+    x: f64,
+    y: f64,
+) {
+    let actions = gio::SimpleActionGroup::new();
+    let save = gio::SimpleAction::new("save", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let source = source.clone();
+        save.connect_activate(move |_, _| ask_where_to_save_picture(&ui, &state, id, &source));
+    }
+    actions.add_action(&save);
+    let model = gio::Menu::new();
+    model.append(Some("Save image…"), Some("picture.save"));
+    if let Source::Web(url) = source {
+        let open = gio::SimpleAction::new("open", None);
+        let ui = ui.clone();
+        let url = url.clone();
+        open.connect_activate(move |_, _| {
+            if !open_in_system_browser(&url) {
+                notice(&ui, "No other browser is registered for links");
+            }
+        });
+        actions.add_action(&open);
+        model.append(Some("Open in your browser"), Some("picture.open"));
+    }
+    picture.insert_action_group("picture", Some(&actions));
+
+    let menu = gtk::PopoverMenu::from_model(Some(&model));
+    menu.set_parent(picture);
+    menu.set_has_arrow(false);
+    menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    menu.connect_closed(|menu| {
+        // Пункт меню срабатывает после `closed`: снимаем на idle, иначе
+        // действие ушло бы в уже отцепленное меню.
+        let menu = menu.clone();
+        glib::idle_add_local_once(move || menu.unparent());
+    });
+    menu.popup();
+}
+
+/// Спросить, куда положить картинку, и записать её байты как есть.
+/// Имя — по адресу, расширение — по содержимому (`save::picture_name`);
+/// байты — из памяти вкладки, в сеть только если их уже вытеснили.
+fn ask_where_to_save_picture(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, source: &Source) {
+    let held = match source {
+        Source::Web(url) => state
+            .borrow_mut()
+            .find(id)
+            .and_then(|tab| tab.blobs.get(url)),
+        Source::File(_) => None,
+    };
+    let ui = ui.clone();
+    let source = source.clone();
+    glib::spawn_future_local(async move {
+        let wanted = source.clone();
+        let bytes = match off_main(move || save::picture(&wanted, held, UserAgent::Honest)).await {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(error)) => {
+                notice(&ui, &format!("Not saved: {}", describe(&error).headline));
+                return;
+            }
+            Err(_) => {
+                notice(&ui, "Not saved: the load was interrupted");
+                return;
+            }
+        };
+        let chooser = gtk::FileDialog::builder()
+            .title("Save image")
+            .initial_name(save::picture_name(&source, &bytes))
+            .modal(true)
+            .build();
+        let window = ui.window.clone();
+        chooser.save(Some(&window), gio::Cancellable::NONE, move |answer| {
+            let Some(path) = answer.ok().and_then(|file| file.path()) else {
+                return;
+            };
+            match std::fs::write(&path, &bytes) {
+                Ok(()) => {
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string());
+                    notice(&ui, &format!("Saved as {name}"));
+                }
+                Err(_) => notice(&ui, "Not saved: the write was interrupted"),
+            }
+        });
+    });
 }
 
 /// Единственный ребёнок рамки — тот, что дали.

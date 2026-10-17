@@ -74,5 +74,13 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- Картинка в «Поделиться» (#38): файл из кэша на чтение по праву
+             на один адрес. Не экспортирован — без права его не прочесть. -->
+        <provider
+            android:name=".Shared"
+            android:authorities="${applicationId}.shared"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

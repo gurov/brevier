@@ -339,6 +339,7 @@ fn call(method: &str, arg: &str) -> String {
         "docs" => docs(arg),
         "savename" => savename(arg),
         "save" => save(field(0), field(1)),
+        "picture.keep" => keep_picture(field(0), field(1)),
         other => {
             let mut out = String::from("{\"error\":");
             json_string(&mut out, &format!("unknown call: {other}"));
@@ -958,13 +959,55 @@ fn save(key: &str, path: &str) -> String {
     }
 }
 
-/// Скачать или взять из кэша, затем разобрать.
-fn image(source: &str, look: Look) -> Vec<u8> {
-    let source = if source.starts_with("http://") || source.starts_with("https://") {
+/// Картинку — себе (#38): ядро кладёт её байты в папку `dir` под именем
+/// с расширением по содержимому, а в галерею, в выбранное место или
+/// в «Поделиться» её несёт Kotlin. Байты — из памяти, если картинка
+/// на экране; сеть — только если её уже вытеснили.
+fn keep_picture(source: &str, dir: &str) -> String {
+    let source = source_of(source);
+    let held = match &source {
+        Source::Web(url) => core().blobs.get(url),
+        Source::File(_) => None,
+    };
+    let kept = save::picture(&source, held, UserAgent::Honest).and_then(|bytes| {
+        let name = save::picture_name(&source, &bytes);
+        let path = std::path::Path::new(dir).join(&name);
+        std::fs::create_dir_all(dir).map_err(crate::error::Error::Convert)?;
+        std::fs::write(&path, &bytes).map_err(crate::error::Error::Convert)?;
+        let mime = save::picture_type(&bytes).map_or("application/octet-stream", |(_, mime)| mime);
+        Ok((path, name, mime))
+    });
+    match kept {
+        Ok((path, name, mime)) => {
+            let mut out = String::from("{\"ok\":true,\"path\":");
+            json_string(&mut out, &path.to_string_lossy());
+            out.push_str(",\"name\":");
+            json_string(&mut out, &name);
+            out.push_str(",\"mime\":");
+            json_string(&mut out, mime);
+            out.push('}');
+            out
+        }
+        Err(error) => {
+            let mut out = String::from("{\"ok\":false,\"headline\":");
+            json_string(&mut out, describe(&error).headline);
+            out.push('}');
+            out
+        }
+    }
+}
+
+fn source_of(source: &str) -> Source {
+    if source.starts_with("http://") || source.starts_with("https://") {
         Source::Web(source.to_owned())
     } else {
         Source::File(PathBuf::from(source))
-    };
+    }
+}
+
+/// Скачать или взять из кэша, затем разобрать.
+fn image(source: &str, look: Look) -> Vec<u8> {
+    let source = source_of(source);
     let cached = match &source {
         Source::Web(url) => core().blobs.get(url),
         Source::File(_) => None,

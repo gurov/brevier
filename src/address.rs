@@ -246,7 +246,7 @@ impl Repo {
 }
 
 /// Процентные коды в UTF-8: `%D0%BA` → «к». Битый код остаётся как был.
-fn percent_decoded(text: &str) -> String {
+pub(crate) fn percent_decoded(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

@@ -201,7 +201,7 @@ pub fn decode(bytes: &[u8], mime: Option<&str>, look: Look) -> Result<Raster, Er
     }
 }
 
-fn is_svg(bytes: &[u8], mime: Option<&str>) -> bool {
+pub(crate) fn is_svg(bytes: &[u8], mime: Option<&str>) -> bool {
     if mime.is_some_and(|mime| mime.contains("svg")) {
         return true;
     }

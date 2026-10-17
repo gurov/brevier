@@ -977,6 +977,132 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
+     * Что сделать с картинкой (#38). Меню, а не сохранение сразу: касание
+     * на ходу прокрутки иначе оставляло бы в галерее файлы, которых читатель
+     * не просил. Браузер — последним: он покажет то же самое, только чужим окном.
+     */
+    override fun pictureMenu(source: String) {
+        val menu = Menu(this, fonts, palette)
+        menu.caption(source)
+        menu.item("Save image") { keepPicture(source, share = false) }
+        menu.item("Share image") { keepPicture(source, share = true) }
+        if (source.startsWith("http://") || source.startsWith("https://")) {
+            menu.item("Open in your browser") { openOutside(source) }
+        }
+        menu.showAt(root, touched.first, touched.second)
+    }
+
+    /**
+     * Картинку — в галерею или в «Поделиться». Байты кладёт ядро (из памяти,
+     * если картинка на экране), дальше их несёт система: Android 10 и новее —
+     * `MediaStore`, в `Pictures/Brevier`, без разрешений; старше — диалог
+     * «куда сохранить», тоже без разрешений.
+     */
+    private fun keepPicture(source: String, share: Boolean) {
+        val dir = File(cacheDir, if (share) Shared.DIR else "pictures")
+        if (share) Shared.sweep(dir)
+        App.work.execute {
+            val kept = Core.keepPicture(source, dir.path)
+            main.post {
+                if (!kept.optBoolean("ok")) {
+                    notice("Not saved: ${kept.optString("headline")}")
+                    return@post
+                }
+                val file = File(kept.getString("path"))
+                val name = kept.getString("name")
+                val mime = kept.getString("mime")
+                when {
+                    share -> sharePicture(file, mime)
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> storePicture(file, name, mime)
+                    else -> askWhereToPut(file, name, mime)
+                }
+            }
+        }
+    }
+
+    private fun sharePicture(file: File, mime: String) {
+        val uri = Shared.uri(this, file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            // Право прочесть — через ClipData: без неё Android 10+ его
+            // не передаёт приложению, выбранному в окне выбора.
+            clipData = ClipData.newRawUri(null, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(send, null))
+        } catch (failure: ActivityNotFoundException) {
+            notice("No app takes pictures")
+        }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private fun storePicture(file: File, name: String, mime: String) {
+        // Вектор галерея не покажет, а `MediaStore.Images` его и не примет:
+        // svg — в загрузки.
+        val picture = mime.startsWith("image/") && mime != "image/svg+xml"
+        val collection = if (picture) android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            else android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val folder = (if (picture) android.os.Environment.DIRECTORY_PICTURES else android.os.Environment.DIRECTORY_DOWNLOADS) + "/Brevier"
+        App.work.execute {
+            val said = try {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, folder)
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(collection, values) ?: throw java.io.IOException("no row")
+                contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                values.clear()
+                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                contentResolver.update(uri, values, null, null)
+                // Имя могло смениться: «chart (1).png», если такое уже есть.
+                "Saved to $folder as ${displayName(uri) ?: name}"
+            } catch (failure: Throwable) {
+                "Not saved: the write was interrupted"
+            } finally {
+                file.delete()
+            }
+            main.post { notice(said) }
+        }
+    }
+
+    private fun askWhereToPut(file: File, name: String, mime: String) {
+        pendingPicture = file
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mime
+            putExtra(Intent.EXTRA_TITLE, name)
+        }
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, PICTURE)
+        } catch (failure: ActivityNotFoundException) {
+            file.delete()
+            pendingPicture = null
+            notice("Not saved: there is no place to save files")
+        }
+    }
+
+    private var pendingPicture: File? = null
+
+    private fun putPicture(uri: Uri, file: File) {
+        App.work.execute {
+            val said = try {
+                contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                "Saved as ${displayName(uri) ?: file.name}"
+            } catch (failure: Throwable) {
+                "Not saved: the write was interrupted"
+            } finally {
+                file.delete()
+            }
+            main.post { notice(said) }
+        }
+    }
+
+    /**
      * Отдать адрес браузеру системы — но не нам самим: если Brevier выбран
      * браузером по умолчанию, простой `VIEW` вернулся бы сюда же.
      *
@@ -1566,6 +1692,13 @@ class MainActivity : Activity(), ArticleHost {
             if (isBrowser()) notice("Links from other apps now open in Brevier")
             return
         }
+        if (requestCode == PICTURE) {
+            val file = pendingPicture ?: return
+            pendingPicture = null
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null) file.delete() else putPicture(uri, file)
+            return
+        }
         if (requestCode != SAVE) return
         val uri = data?.data
         val address = pendingSave
@@ -1738,6 +1871,7 @@ class MainActivity : Activity(), ArticleHost {
     companion object {
         private const val SAVE = 1
         private const val ROLE = 2
+        private const val PICTURE = 3
         private val NOTICE = Any()
         /** Докуда растёт «Loading…», прежде чем начать сначала. */
         private const val LOADING_DOTS = 10
