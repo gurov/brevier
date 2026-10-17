@@ -1,9 +1,29 @@
 [package]
 name = "brevier"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88"
+description = "A browser for reading: it turns a page into clean text on your own computer and sets it in the typography you chose, without JavaScript"
+repository = "https://github.com/gurov/brevier"
+homepage = "https://brevier.bizibah.com/"
+readme = "README.md"
+keywords = ["browser", "reader", "readability", "markdown", "gtk"]
+categories = ["command-line-utilities", "gui", "text-processing"]
+# В крейт — только то, из чего собираются cli и окно: исходники, шрифты,
+# словари переносов, знак. Корпус, телефон, сайт, упаковка и снимки
+# экрана живут в репозитории, а не в `cargo install`.
+exclude = [
+    "/corpus",
+    "/android",
+    "/site",
+    "/packaging",
+    "/fastlane",
+    "/.github",
+    "/action.yml",
+    "/assets/screenshot-*",
+    "/assets/brevier.jpeg",
+]
 
 # Ядро — библиотека, интерфейс и cli — потребители. Разделение записано
 # в архитектуре: тулкит должен сидеть на краю.
