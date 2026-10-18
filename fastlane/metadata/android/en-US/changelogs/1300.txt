@@ -1,0 +1,1 @@
+• A news site's front page now reads as its list of headlines, in the page's order, instead of one story picked out of it.

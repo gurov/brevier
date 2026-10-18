@@ -95,6 +95,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.13.0" date="2026-10-18" type="development">
+      <description>
+        <p>A news site's front page reads as its headlines, in the page's own
+          order, rather than as the one story an article extractor picked out
+          of it. Brevier is also on crates.io.</p>
+      </description>
+    </release>
     <release version="0.12.0" date="2026-10-17" type="development">
       <description>
         <p>Notes on a page: select a passage and highlight it, or write a few
