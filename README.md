@@ -354,8 +354,10 @@ Extraction breaks as sites change their markup. Keeping up with that never ends.
 - **Single-page apps** — they degrade honestly, and **Open in your browser** is one click
   away.
 - **Video, audio, extensions** — no.
-- **An AI model inside** — no. It would add hundreds of megabytes and seconds per page,
-  make the output unpredictable, and risk showing you words the author never wrote.
+- **AI by default** — no. Pages are read by plain rules: the same page always gives the same
+  text, and every word of the article is the author's. If models ever come — a small
+  specialised one for pages the rules can't read, say — they will be a separate module, off
+  until you turn it on, with whatever they produce marked as theirs.
 - **Screen readers outside Linux** — GTK's accessibility works only on Linux: on Windows a
   screen reader doesn't see the window, and that is one reason there is no macOS build yet.
   The Android app uses native text, which TalkBack should read, but that hasn't been tested.

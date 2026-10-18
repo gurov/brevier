@@ -5,7 +5,8 @@ repeat [CONTRIBUTING.md](CONTRIBUTING.md) — building, the corpus, packaging an
 are there; read it too. This file is what an agent needs on top: what must not be built,
 what is already decided, and what counts as having checked a change.
 
-Brevier is built with agents in the workshop and with no model in the product. A pull
+Brevier is built with agents in the workshop, and by default the product reads pages with
+no model at all. A pull
 request is welcome however it was written, as long as a person stands behind it: they
 read the change, checked it the way this file asks, and say how.
 
@@ -27,9 +28,12 @@ These are not open questions, and a patch that does any of them will not be merg
 
 - **Run JavaScript** — no engine, in any form, not "only for this site".
 - **Apply a site's CSS.** The reader sets the type.
-- **Put a model in the reading path.** Extraction and conversion are deterministic rules in
-  Rust, checked byte for byte against `corpus/expected/`. (Models in the workshop — to
-  mark the corpus, to find where rules cut living text — are fine.)
+- **Put a model in the default reading path.** Extraction and conversion are deterministic
+  rules in Rust, checked byte for byte against `corpus/expected/`. A model, if one ever
+  helps — a small specialised one for pages the rules can't read, say — is a separate
+  module that the reader turns on, with what it produces marked as its own; whether and
+  how is the maintainer's design decision, not a patch to start with. (Models in the
+  workshop — to mark the corpus, to find where rules cut living text — are fine.)
 - **Hold a credential**: no cookies kept, no logins, no forms. Authenticated reading is the
   companion extension's job.
 - **Work around TLS.** Trust is the operating system's (`rustls-platform-verifier`);

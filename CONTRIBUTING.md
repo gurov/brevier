@@ -8,8 +8,10 @@ Working with a coding agent? Give it [AGENTS.md](AGENTS.md) as well.
 What is planned is in the [roadmap](ROADMAP.md) and the issues labelled `roadmap`; smaller
 items carry `bug` or `enhancement`. What the program promises is in the
 [manifesto](MANIFESTO.md), and those promises decide more than code quality does: a patch
-that adds a JavaScript engine, applies a site's CSS, puts a model in the reading path or
-makes Brevier hold a credential will not be merged, however well it is written.
+that adds a JavaScript engine, applies a site's CSS, makes the default reading path depend
+on a model or makes Brevier hold a credential will not be merged, however well it is
+written. A model, if one ever helps, comes as a separate optional module; see
+[AGENTS.md](AGENTS.md).
 
 ## Languages
 
