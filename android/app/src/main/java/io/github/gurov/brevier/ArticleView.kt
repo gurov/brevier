@@ -644,17 +644,38 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             fetch(block.source, look(natural = false)) { decoded ->
                 busy = false
                 val bitmap = decoded.bitmap
-                if (bitmap == null) {
-                    idle(decoded.trouble ?: "The load fell through")
-                    return@fetch
+                hold {
+                    if (bitmap == null) idle(decoded.trouble ?: "The load fell through")
+                    else picture(bitmap)
                 }
-                // Картинка выше окна вырастет из заглушки в полный рост и толкнёт
-                // текст под глазами — держим место чтения.
-                val above = bottom <= scrollY
-                val place = if (above) place() else null
-                picture(bitmap)
-                place?.let { settle(it, 0f) }
             }
+        }
+
+        /**
+         * Сменить содержимое рамки, не сдвинув текст под глазами. Рамка выше
+         * окна вырастет из заглушки в полный рост и толкнула бы читаемое
+         * вниз — прокрутка сдвигается ровно на столько, на сколько рамка
+         * выросла. Пикселями, а не местом в тексте (`place` и `settle`):
+         * место округляется до строки, а пока один `settle` не дошёл до цели,
+         * следующая картинка брала за место промежуточное, — на статье
+         * Хабра с 29 картинками над комментарием читатель уползал на тысячу
+         * знаков вверх. Прокрутка — статьи: своя `scrollY` у рамки всегда 0,
+         * и до 18 октября 2026 место не держалось вовсе.
+         */
+        private fun hold(change: () -> Unit) {
+            val above = bottom <= this@ArticleView.scrollY
+            val before = height
+            change()
+            if (!above) return
+            addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+                override fun onLayoutChange(
+                    view: View, left: Int, top: Int, right: Int, bottom: Int,
+                    oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int,
+                ) {
+                    view.removeOnLayoutChangeListener(this)
+                    this@ArticleView.scrollBy(0, (bottom - top) - before)
+                }
+            })
         }
 
         private fun picture(bitmap: Bitmap) {
