@@ -7,8 +7,8 @@
 //!
 //! Сейчас в таблице reddit, Hacker News (`hacker_news`), Lobsters
 //! (`lobsters`), форумы Discourse (`discourse`) и документация rustdoc
-//! (`rustdoc`) — эти двое по программе, а не по хосту, — поисковик, читалка
-//! книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
+//! (`rustdoc`) — эти двое по программе, а не по хосту, — комментарии Хабра
+//! (`habr`), поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
 //! и полным текстом каждой реплики. Цена — вложенности ответов в ленте нет,
@@ -35,6 +35,7 @@ use dom_query::Document;
 use url::Url;
 
 pub mod discourse;
+pub mod habr;
 pub mod hacker_news;
 pub mod lobsters;
 pub mod rustdoc;
@@ -42,12 +43,14 @@ mod thread;
 
 pub use thread::Page;
 
-/// Площадка обсуждений, которую читает своё правило (#11): Hacker News
-/// и Lobsters — по хосту, форумы Discourse — по программе в шапке.
-/// Какая это страница, решает форма, и не той формы — `None`.
+/// Площадка обсуждений, которую читает своё правило (#11): Hacker News,
+/// Lobsters и страница комментариев Хабра (#40) — по хосту, форумы
+/// Discourse — по программе в шапке. Какая это страница, решает форма,
+/// и не той формы — `None`.
 pub fn discussion(doc: &Document, url: &str) -> Option<Page> {
     hacker_news::read(doc, url)
         .or_else(|| lobsters::read(doc, url))
+        .or_else(|| habr::read(doc, url))
         .or_else(|| discourse::read(doc, url))
 }
 
@@ -61,7 +64,10 @@ pub fn implied_anchor(url: &str) -> Option<String> {
 /// Discourse в сыром HTML. Дёшево и до разбора — общему тракту не нужно
 /// платить за второй разбор каждой страницы.
 pub fn may_be_discussion(url: &str, html: &str) -> bool {
-    hacker_news::is_hacker_news(url) || lobsters::is_lobsters(url) || discourse::may_be(html)
+    hacker_news::is_hacker_news(url)
+        || lobsters::is_lobsters(url)
+        || habr::is_comments_page(url)
+        || discourse::may_be(html)
 }
 
 /// Хосты reddit, чьи страницы читаются через ленту.

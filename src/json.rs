@@ -72,6 +72,18 @@ pub fn parse(text: &str) -> Option<Value> {
     (parser.at == parser.bytes.len()).then_some(value)
 }
 
+/// Значение в начале текста, что бы ни шло за ним. Состояние приложения,
+/// вписанное в скрипт страницы (`window.__PINIA_STATE__={…};(function…`),
+/// продолжается кодом, и конец JSON знает только разбор.
+pub fn parse_start(text: &str) -> Option<Value> {
+    let mut parser = Parser {
+        bytes: text.as_bytes(),
+        text,
+        at: 0,
+    };
+    parser.value(0)
+}
+
 struct Parser<'a> {
     bytes: &'a [u8],
     text: &'a str,
@@ -274,5 +286,13 @@ mod tests {
         let deep = "[".repeat(10_000) + &"]".repeat(10_000);
         assert_eq!(parse(&deep), None);
         assert_eq!(parse(&"[".repeat(3)), None);
+    }
+
+    #[test]
+    fn a_value_at_the_start_leaves_the_code_after_it() {
+        let value = parse_start(r#"{"a": {"b": "};"}};(function(){})()"#).unwrap();
+        assert_eq!(value.get("a").unwrap().text("b"), Some("};"));
+        assert_eq!(parse_start("(function(){})"), None);
+        assert_eq!(parse_start(r#"{"a": "#), None);
     }
 }

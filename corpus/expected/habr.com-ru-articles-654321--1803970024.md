@@ -95,3 +95,11 @@ United Airlines сказала, что сломанная гитара не их
 * * *
 
 > *Мы завели соцсети с новостями и анонсами Tech-команды. Если хотите узнать, что под капотом высоконагруженного e-commerce, следите за нами там, где вам удобнее всего:* [*Telegram*](https://bit.ly/38dwJ1v)*,* [*VK*](https://bit.ly/36Nndlt)*.*
+
+<a id="publication-comments"></a>
+
+## 1 comment
+
+<a id="comment_24425898"></a>**horon** · [9 June 2022](https://habr.com/ru/companies/kuper/articles/654321/#comment_24425898)
+
+расскажите пожалуйста как сбер потерял из за ошибки алгоритма миллиарды рублей в 19 году.

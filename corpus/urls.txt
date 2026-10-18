@@ -165,6 +165,9 @@ https://lobste.rs/s/iq5xtw/linus_torvalds_working_on_hefty_linux
 # Тема на Discourse без markdown (страница для роботов) — строка таблицы (#11).
 # Обновится форум — отдаст markdown сам, и эталон станет его текстом.
 https://forum.obsidian.md/t/open-with-does-not-open-the-file-if-obsidian-is-not-running/119080
+# Страница комментариев Хабра — строка таблицы (#40), добавлена 18 октября 2026.
+# Под статьями Хабра (их в корпусе пять) комментарии встают сами, вторым запросом.
+https://habr.com/ru/articles/723456/comments/
 
 ### 2. Технологические эссе и культура (Tech Thought Leadership)
 

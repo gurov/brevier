@@ -274,8 +274,24 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             archived: None,
             address,
         }),
-        ContentKind::Html => from_html(&page.body, &page.url),
+        ContentKind::Html => {
+            let mut document = from_html(&page.body, &page.url)?;
+            if document.kind == Kind::Article {
+                append_comments(&mut document.markdown, &page.body, &page.url, ua);
+            }
+            Ok(document)
+        }
         ContentKind::Feed => from_feed(&page.body, &page.url),
+    }
+}
+
+/// Комментарии, которые скрипт страницы приносит вторым запросом (#40,
+/// Хабр): тот же запрос делаем и мы и ставим их под статьёй. Ходит в сеть,
+/// поэтому зовётся из тракта сети, а не из `from_html`: HTML на руках сети
+/// не трогает.
+pub fn append_comments(markdown: &mut String, html: &str, url: &str, ua: UserAgent) {
+    if let Some(comments) = hosts::habr::comments(url, html, ua) {
+        *markdown = format!("{}\n\n{comments}", markdown.trim_end());
     }
 }
 

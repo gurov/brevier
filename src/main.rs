@@ -322,7 +322,15 @@ fn run(args: &Args) -> Result<String, Error> {
                     }
                     // Простой текст markdown-ом не является — отдаём как есть.
                     ContentKind::Text => page.body,
-                    ContentKind::Html => page_text(&page.body, &page.url, args)?,
+                    ContentKind::Html => {
+                        let mut text = page_text(&page.body, &page.url, args)?;
+                        // Комментарии, что страница приносит скриптом (#40), —
+                        // как в окне; про сам HTML спрашивают без них.
+                        if !(args.raw || args.html || args.nav) {
+                            brevier::append_comments(&mut text, &page.body, &page.url, args.ua);
+                        }
+                        text
+                    }
                     // Лента — список ссылок, и `--raw`, `--html`, `--nav`
                     // про неё спросить нечего: отдаём её как читателю.
                     ContentKind::Feed => feed_text(&page.body, &page.url)?,
