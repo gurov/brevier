@@ -260,6 +260,8 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 
 - **A list of links** — a blog's front page, a section of a site — is shown as a list, and
   the status line says so.
+- **A news site's front page reads as its headlines**, in the page's order, rather than as
+  the one story an article extractor would pick out of it.
 - **Feeds** open as lists of entries with date, author and a short summary — from an
   address, a `feed://` link or a file. A feed of comments on one page (a reddit thread,
   WordPress comments) reads as a thread.
@@ -338,6 +340,9 @@ On an outside benchmark (`scrapinghub/article-extraction-benchmark`, 181 pages) 
 pipeline scores **F1 0.929**, and extraction alone 0.951 — next to 0.947 for Readability.js
 and 0.958 for trafilatura in the same table. That set is news; Brevier is aimed at long
 reads, documentation and threads.
+
+On 211 news front pages (copies saved on 9 October 2026), 95% of the newest headlines from
+each site's feed that are in the page's HTML reach the reader; before 0.13.0 it was 42%.
 
 Extraction breaks as sites change their markup. Keeping up with that never ends.
 

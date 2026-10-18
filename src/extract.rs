@@ -83,6 +83,26 @@ const MIN_CARDS: usize = 8;
 /// у stratechery — 75%, у alistapart — 400%. Порог посередине пустоты.
 const CARD_SHARE: f32 = 0.4;
 
+/// Сколько заголовков делают корень сайта главной, а не страницей с парой
+/// анонсов: столько же, сколько карточек — ленту.
+const MIN_HEADLINES: usize = 8;
+
+/// Заголовок — не короче этого, в знаках и в словах: «Weather», «Sport»,
+/// «Read more», «Все новости» — пункты меню и кнопки, а не заголовки.
+const HEADLINE_CHARS: usize = 20;
+const HEADLINE_WORDS: usize = 4;
+
+/// Путь статьи длиннее этого: `/news/`, `/world/europe` — разделы, а не статьи.
+const ARTICLE_PATH: usize = 12;
+
+/// Столько цифр подряд — уже номер статьи, а не год, и короткий путь
+/// (`/news/298077` у The Insider) статьёй быть не мешает.
+const ARTICLE_NUMBER: usize = 5;
+
+/// Сегмент такой длины из букв вперемешку с цифрами — идентификатор
+/// статьи: `/news/articles/cm2d6x11l6pko` у BBC, `/article/846619b2879d`.
+const ARTICLE_ID: usize = 8;
+
 /// До этого размера картинка — значок, а не изображение. Где именно
 /// это значит «выбросить», решает место: см. [`deicon`].
 const ICON_PX: u32 = 48;
@@ -206,6 +226,11 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let feeds = crate::feed::advertised(&doc, url);
     let next = next_page(&doc, url);
     let listing = listing(&doc, url);
+    let headlines = if is_front(url) {
+        headlines(&doc, url)
+    } else {
+        Vec::new()
+    };
     let chrome = chrome(&doc, url);
     // Язык страницы — до того, как `Readability` заберёт документ себе.
     let lang = html_lang(&doc);
@@ -261,6 +286,9 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let listing_html = listing
         .filter(|listing| (!claims_article || fragment) && listing.holds(&content_html))
         .map(|listing| listing.html);
+    // Главная: заголовки, которых извлечение не донесло, — списком.
+    let listing_html =
+        front_page(&headlines, listing_html.as_deref().unwrap_or(&content_html)).or(listing_html);
 
     // Сироты возвращаем только в статью: в ленте абзацев статьи нет,
     // а решение «лента или статья» принято по строгому содержимому.
@@ -1958,6 +1986,287 @@ fn squeeze(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Главная сайта — список его заголовков, а не одна статья.
+///
+/// Readability ищет на странице одну статью и находит её и на главной
+/// новостного сайта: самую текстовую заметку, блок «главное» или колонку
+/// мнений. Ленту карточек ([`listing`]) это не спасает: заголовки главной
+/// редко лежат в `<h2>` под одним предком — они в `<span>`, `<div>`
+/// и самих ссылках, разбросаны по десятку блоков. Замер 9 октября 2026,
+/// 211 главных с лентой: из свежих заголовков ленты, которые есть в HTML,
+/// до читателя доходило 42%, у половины главных — меньше половины, у многих
+/// ни одного (elmundo, interfax, foxnews, huffpost).
+///
+/// Поэтому на корне сайта заголовки снимаются по форме ссылки — см.
+/// [`headlines`], — и если извлечение донесло меньше двух третей, читатель
+/// получает их списком, в порядке страницы. Донесло больше — оставляем
+/// его: там лента с подводками, миниатюрами и рубриками, это богаче.
+/// Половины мало: у TRT Arabi, «Медиазоны» и Express извлечение брало
+/// 53–66% заголовков и теряло как раз свежую ленту. Итог на тех же
+/// главных — 95% (2432 из 2561), хуже стал один «Коммерсантъ» (из 8
+/// заголовков ленты — 0 вместо 1: свежая лента у него во врезке, а вместо
+/// фотоблока теперь главные заметки дня).
+///
+/// Только корень (и корень языковой версии, `/ru/`): у страницы глубже
+/// бывает статья с колонкой ссылок рядом, и отличить её по одной форме
+/// ссылок нельзя. Разделы (`/politics/`) — следующий шаг.
+fn front_page(headlines: &[Link], shown_html: &str) -> Option<String> {
+    if headlines.len() < MIN_HEADLINES {
+        return None;
+    }
+    let shown: HashSet<String> = Document::from(shown_html)
+        .select("a[href]")
+        .nodes()
+        .iter()
+        .filter_map(|link| link.attr("href"))
+        .filter_map(|href| bare_address(&href))
+        .collect();
+    let reached = headlines
+        .iter()
+        .filter(|link| bare_address(&link.address).is_some_and(|address| shown.contains(&address)))
+        .count();
+    if reached * 3 >= headlines.len() * 2 {
+        return None;
+    }
+    let mut html = String::from("<ul>");
+    for link in headlines {
+        html.push_str(&format!(
+            "<li><a href=\"{}\">{}</a></li>",
+            escape(&link.address),
+            escape(&link.title)
+        ));
+    }
+    html.push_str("</ul>");
+    Some(html)
+}
+
+/// Корень сайта или его языковой версии: `/`, `/ru/`, `/en-us/`, `/index.html`.
+fn is_front(url: &str) -> bool {
+    let Ok(url) = Url::parse(url) else {
+        return false;
+    };
+    let segments: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
+    match segments.as_slice() {
+        [] => true,
+        [one] => is_locale(one) || one.starts_with("index."),
+        _ => false,
+    }
+}
+
+/// Код языка в пути: `ru`, `en-us`, `pt_BR`.
+fn is_locale(segment: &str) -> bool {
+    let letters = |part: &str| part.len() == 2 && part.chars().all(|c| c.is_ascii_alphabetic());
+    let mut parts = segment.split(['-', '_']);
+    let lang = parts.next().unwrap_or_default();
+    let region = parts.next();
+    parts.next().is_none() && letters(lang) && region.is_none_or(letters)
+}
+
+/// Заголовки страницы: ссылки, которые по форме ведут на статью своего сайта.
+///
+/// Заголовок — ссылка с текстом длиной в заголовок ([`HEADLINE_CHARS`],
+/// [`HEADLINE_WORDS`]) на свой сайт ([`site_key`]), на адрес, похожий
+/// на статью ([`looks_like_article`]), и не из меню, шапки, подвала или
+/// врезки. Один адрес — одна строка: на главной одна заметка стоит дважды,
+/// картинкой и заголовком, а то и в двух блоках сразу. Прототип того же
+/// правила на 211 главных донёс 84% заголовков против 42%.
+///
+/// Снимать надо до извлечения: `Readability` забирает документ себе.
+fn headlines(doc: &Document, url: &str) -> Vec<Link> {
+    let Ok(base) = Url::parse(url) else {
+        return Vec::new();
+    };
+    let Some(home) = base.host_str().map(site_key) else {
+        return Vec::new();
+    };
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for link in doc.select("a[href]").nodes() {
+        if in_chrome(link) {
+            continue;
+        }
+        let Some(address) = link
+            .attr("href")
+            .and_then(|href| absolute(Some(&base), &href))
+        else {
+            continue;
+        };
+        let Ok(parsed) = Url::parse(&address) else {
+            continue;
+        };
+        if !matches!(parsed.scheme(), "http" | "https")
+            || parsed.host_str().map(site_key).as_deref() != Some(home.as_str())
+        {
+            continue;
+        }
+        let heading = heading_of(link);
+        // Пустая ссылка поверх карточки называет заметку в `aria-label`
+        // (The Guardian): для скринридера это и есть её заголовок.
+        let title = heading.clone().unwrap_or_else(|| {
+            let text = spaced_text(link);
+            match link.attr("aria-label") {
+                Some(label) if text.is_empty() => squeeze(&label),
+                _ => text,
+            }
+        });
+        let words = title.split_whitespace().count();
+        let shaped = looks_like_article(&parsed)
+            && title.chars().count() >= HEADLINE_CHARS
+            && words >= HEADLINE_WORDS;
+        // Заголовок карточки — заголовок, какой бы короткий он ни был
+        // («Hardy times» у The Critic). Но не рубрика: «Sport» ведёт
+        // в раздел, а в адресе раздела нет ни слага, ни номера.
+        let slug = parsed.path().contains('-') || looks_like_article(&parsed);
+        let card = heading.is_some() && words >= 2 && slug;
+        if !shaped && !card {
+            continue;
+        }
+        let Some(key) = bare_address(&address) else {
+            continue;
+        };
+        if seen.insert(key) {
+            out.push(Link { title, address });
+        }
+    }
+    out
+}
+
+/// Заголовок, которым ссылка является: `<h3><a>…</a></h3>` — целиком,
+/// или `<a><h3>…</h3><p>…</p></a>` — тогда заголовок без подводки.
+fn heading_of(link: &NodeRef) -> Option<String> {
+    let is_heading =
+        |node: &NodeRef| matches!(node.node_name().as_deref(), Some("h1" | "h2" | "h3" | "h4"));
+    if let Some(up) = link.ancestors_it(Some(3)).find(is_heading) {
+        let text = squeeze(&up.text());
+        return (text == squeeze(&link.text())).then_some(text);
+    }
+    link.descendants()
+        .into_iter()
+        .find(is_heading)
+        .map(|heading| squeeze(&heading.text()))
+        .filter(|text| !text.is_empty())
+}
+
+/// Текст узла с пробелом на границах блоков: у карточки
+/// `<div>Алиса Литовка</div><div>микробиолог</div><p>Пока…</p>` — три куска,
+/// а не «Алиса ЛитовкамикробиологПока…», как склеивает `text()`.
+fn spaced_text(node: &NodeRef) -> String {
+    fn walk(node: &NodeRef, out: &mut String) {
+        for child in node.children_it(false) {
+            if child.is_text() {
+                out.push_str(&child.text());
+                continue;
+            }
+            if !child.is_element() {
+                continue;
+            }
+            let name = child.node_name();
+            let name = name.as_deref().unwrap_or_default();
+            if matches!(name, "script" | "style" | "noscript" | "template") {
+                continue;
+            }
+            let inline = matches!(
+                name,
+                "a" | "span"
+                    | "b"
+                    | "i"
+                    | "em"
+                    | "strong"
+                    | "small"
+                    | "sup"
+                    | "sub"
+                    | "mark"
+                    | "abbr"
+                    | "time"
+                    | "q"
+                    | "s"
+                    | "u"
+                    | "code"
+                    | "cite"
+                    | "bdi"
+                    | "font"
+            );
+            if !inline {
+                out.push(' ');
+            }
+            walk(&child, out);
+            if !inline {
+                out.push(' ');
+            }
+        }
+    }
+    let mut out = String::new();
+    walk(node, &mut out);
+    squeeze(&out)
+}
+
+/// Ссылка из обвязки страницы: меню, врезка, шапка или подвал сайта.
+///
+/// Шапка и подвал внутри `<article>` — свои у карточки, а не у сайта:
+/// в `<header>` карточки заголовок и стоит (Expansión, Caracol).
+fn in_chrome(link: &NodeRef) -> bool {
+    let mut edge = false;
+    for up in link.ancestors_it(None) {
+        match up.node_name().as_deref() {
+            Some("nav" | "aside") => return true,
+            Some("header" | "footer") => edge = true,
+            Some("article") => edge = false,
+            _ => {}
+        }
+    }
+    edge
+}
+
+/// Адрес похож на статью: путь длиннее раздела, и в нём номер (три цифры
+/// подряд — id или год), слаг через дефисы или идентификатор; номер
+/// подлиннее ([`ARTICLE_NUMBER`]) — при любой длине пути.
+fn looks_like_article(url: &Url) -> bool {
+    let path = url.path();
+    let digits = |run: usize| {
+        path.as_bytes()
+            .windows(run)
+            .any(|window| window.iter().all(u8::is_ascii_digit))
+    };
+    if digits(ARTICLE_NUMBER) {
+        return true;
+    }
+    if path.chars().count() <= ARTICLE_PATH {
+        return false;
+    }
+    let id = path.split('/').any(|segment| {
+        segment.len() >= ARTICLE_ID
+            && segment.chars().all(|c| c.is_ascii_alphanumeric())
+            && segment.chars().any(|c| c.is_ascii_digit())
+            && segment.chars().any(|c| c.is_ascii_alphabetic())
+    });
+    digits(3) || id || path.matches('-').count() >= 2
+}
+
+/// Сайт по хосту: без `www.` и без поддомена — `edition.cnn.com` и `cnn.com`
+/// один сайт. Списка публичных суффиксов у нас нет, поэтому грубо: два
+/// последних имени, а при двухбуквенной зоне с коротким вторым именем
+/// (`bbc.co.uk`, `abc.net.au`) — три.
+fn site_key(host: &str) -> String {
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    let labels: Vec<&str> = host.split('.').collect();
+    let n = labels.len();
+    let take = if n > 2 && labels[n - 1].len() == 2 && labels[n - 2].len() <= 3 {
+        3
+    } else {
+        2
+    };
+    labels[n.saturating_sub(take)..].join(".")
+}
+
+/// Адрес без запроса и решётки: так одна заметка узнаётся под разными
+/// метками (`?utm_source=…`, `#comments`).
+fn bare_address(address: &str) -> Option<String> {
+    let mut url = Url::parse(address.trim()).ok()?;
+    url.set_query(None);
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
 /// Картинки, спрятанные за ссылками: адрес ссылки → адрес картинки.
 ///
 /// Лента состоит из карточек «миниатюра плюс заголовок», и миниатюру сайт
@@ -3140,6 +3449,137 @@ mod tests {
             !listing.holds(&format!("<article><p>{body}</p></article>")),
             "статью приняли за запись ленты"
         );
+    }
+
+    /// Главная новостного сайта: заголовки разбросаны по блокам без `<h2>`,
+    /// Readability берёт одну заметку — читатель получает все заголовки.
+    fn front_page_html() -> String {
+        let mut blocks = String::new();
+        for i in 1..=10 {
+            blocks.push_str(&format!(
+                "<div class=\"unit\"><span><a href=\"/news/2026/10/0{}/story-number-{i}\">\
+                 Заметка номер {i} о том, что случилось сегодня</a></span></div>",
+                i % 9 + 1
+            ));
+        }
+        format!(
+            "<html><body><header><nav><a href=\"/news/\">Новости</a></nav>\
+             <a href=\"/about/who-we-are-and-why\">Кто мы такие и зачем всё это</a></header>\
+             <main><div class=\"lead\"><p>{TEXT}</p><p>{TEXT}</p></div>\
+             <div class=\"grid\">{blocks}</div></main></body></html>"
+        )
+    }
+
+    #[test]
+    fn a_front_page_reads_as_its_headlines() {
+        let article = extract(&front_page_html(), "https://example.org/").unwrap();
+        let listing = article.listing_html.expect("главная не стала списком");
+        for i in 1..=10 {
+            assert!(
+                listing.contains(&format!("Заметка номер {i} о том")),
+                "{listing}"
+            );
+        }
+        assert!(listing.contains("https://example.org/news/2026/10/02/story-number-1"));
+        // Шапка сайта — не заголовки, даже если ссылка длинная и похожа на статью.
+        assert!(!listing.contains("Кто мы такие"), "{listing}");
+    }
+
+    /// Глубже корня — не главная: там бывает статья с колонкой ссылок рядом.
+    #[test]
+    fn only_the_root_is_read_as_headlines() {
+        let article = extract(&front_page_html(), "https://example.org/world/").unwrap();
+        assert!(article.listing_html.is_none());
+    }
+
+    /// Извлечение уже донесло две трети заголовков — его и оставляем:
+    /// у ленты подводки, миниатюры и рубрики.
+    #[test]
+    fn a_front_page_already_shown_stays_as_it_is() {
+        let headlines: Vec<Link> = (1..=10)
+            .map(|i| Link {
+                title: format!("Заметка номер {i}"),
+                address: format!("https://example.org/news/2026/story-number-{i}"),
+            })
+            .collect();
+        let shown: String = (1..=7)
+            .map(|i| {
+                format!("<a href=\"https://example.org/news/2026/story-number-{i}?ref=home\">x</a>")
+            })
+            .collect();
+        assert!(front_page(&headlines, &shown).is_none());
+        let shown: String = (1..=6)
+            .map(|i| format!("<a href=\"https://example.org/news/2026/story-number-{i}\">x</a>"))
+            .collect();
+        let list = front_page(&headlines, &shown).expect("заголовки не дошли");
+        assert!(list.contains("story-number-10"));
+    }
+
+    /// Заголовок карточки — в её собственной шапке, короткий заголовок в `<h3>`
+    /// целиком ссылкой, пустая ссылка поверх карточки с `aria-label`.
+    #[test]
+    fn headlines_come_in_several_shapes() {
+        let html = "<html><body>\
+            <header><a href=\"/2026/10/09/site-wide-banner-story\">Баннер шапки сайта на всю ширину</a></header>\
+            <article><header><a href=\"/2026/10/09/card-in-its-header\">Заметка в шапке своей карточки</a></header></article>\
+            <div><h3><a href=\"/hardy-times/\">Hardy times</a></h3></div>\
+            <div><h3><a href=\"/sport/\">Sport</a></h3></div>\
+            <div><a href=\"/world/2026/oct/09/overlay\" aria-label=\"Заголовок только в подписи для скринридера\"></a></div>\
+            <a href=\"/opinions/a-long-card-link\"><div>Алиса Литовка</div><div>микробиолог</div><p>Пока мы обсуждаем</p></a>\
+            <aside><a href=\"/2026/10/09/most-read-in-the-aside\">Самое читаемое во врезке сбоку</a></aside>\
+            <a href=\"https://other.example.com/2026/10/09/elsewhere-story\">Чужой сайт со своей длинной заметкой</a>\
+            </body></html>";
+        let titles: Vec<String> = headlines(&Document::from(html), "https://www.example.org/")
+            .into_iter()
+            .map(|link| link.title)
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                "Заметка в шапке своей карточки",
+                "Hardy times",
+                "Заголовок только в подписи для скринридера",
+                "Алиса Литовка микробиолог Пока мы обсуждаем",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_shape_of_a_front_page_address() {
+        for front in [
+            "https://example.org",
+            "https://example.org/",
+            "https://habr.com/ru/",
+            "https://example.org/en-us",
+            "https://example.org/index.html",
+            "https://example.org/?page=1",
+        ] {
+            assert!(is_front(front), "{front}");
+        }
+        for deeper in [
+            "https://example.org/news/",
+            "https://example.org/ru/news/",
+            "https://example.org/about",
+        ] {
+            assert!(!is_front(deeper), "{deeper}");
+        }
+    }
+
+    #[test]
+    fn the_shape_of_an_article_address() {
+        let article = |url: &str| looks_like_article(&Url::parse(url).unwrap());
+        assert!(article("https://example.org/news/2026/10/09/x"));
+        assert!(article("https://example.org/a/story-with-a-slug"));
+        assert!(!article("https://example.org/world/europe"));
+        assert!(!article("https://example.org/a-b-c"));
+        assert!(article("https://theins.ru/news/298077"));
+        assert!(article("https://www.bbc.co.uk/news/articles/cm2d6x11l6pko"));
+        assert!(!article("https://example.org/news/2026"));
+        assert!(!article("https://example.org/news/livestream"));
+        assert_eq!(site_key("edition.cnn.com"), "cnn.com");
+        assert_eq!(site_key("www.bbc.co.uk"), "bbc.co.uk");
+        assert_eq!(site_key("news.bbc.co.uk"), "bbc.co.uk");
+        assert_eq!(site_key("lenta.ru"), "lenta.ru");
     }
 
     /// Меню и подвал внутри вырезанного означают, что общим предком карточек
