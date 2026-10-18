@@ -206,11 +206,13 @@ published, the Windows job installs the installer on a clean Windows, starts the
 uninstalls it again; a manual run of the workflow keeps a screenshot of that window. A published tag is never moved: something newer is a new
 version.
 
-The same tag then goes to [crates.io](https://crates.io/crates/brevier): `cargo publish`
-from a clean checkout of it, with the maintainer's token (`cargo login`). The `exclude` list
-in `Cargo.toml` keeps the corpus, the Android app, the site and the packaging out of the
-crate; `cargo package --list` shows what goes in. A published version can be yanked but
-never replaced.
+After the GitHub release, the same workflow publishes the crate to
+[crates.io](https://crates.io/crates/brevier) with trusted publishing: crates.io accepts
+GitHub's token for `release.yml` in this repository, so no crates.io token is kept in the
+secrets. A manual run only packages the crate (`cargo publish --dry-run`). The `exclude`
+list in `Cargo.toml` keeps the corpus, the Android app, the site and the packaging out of
+the crate; `cargo package --list` shows what goes in. A published version can be yanked
+but never replaced.
 
 ## License
 
