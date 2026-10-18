@@ -450,7 +450,10 @@
   <h2><span class="chapter">Chapter eleven</span>Choose your mount</h2>
   <h3>Linux</h3>
   <p>A <a href="https://github.com/gurov/brevier/releases/latest/download/brevier.flatpak">Flatpak</a>
-    that works on any distribution, or a tarball for systems that already have GTK 4.</p>
+    that works on any distribution, or a tarball for systems that already have GTK 4.
+    Those who keep a forge at home can build it from
+    <a href="https://crates.io/crates/brevier">crates.io</a> with Rust and GTK 4:
+    <code>cargo install --locked brevier --features ui</code>.</p>
   <h3>Windows 10 and 11</h3>
   <p>An installer that sets Brevier up for you alone, with no administrator rights, or a zip
     that runs from any folder. The installer is not signed yet, so Windows first says
@@ -463,7 +466,8 @@
     it up to date, or download the same APK from the releases.</p>
   <h3>The command line</h3>
   <p><code>brevier https://example.com/article</code> prints the article as Markdown.
-    Scrolls for scripts.</p>
+    Scrolls for scripts. On its own it needs no GTK:
+    <code>cargo install --locked brevier --features save</code>.</p>
   <ul class="downloads">
     <li><a href="https://github.com/gurov/brevier/releases/latest">Download the latest release<small>Linux · Windows · Android</small></a></li>
   </ul>

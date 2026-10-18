@@ -76,6 +76,10 @@ install -Dm644 assets/brevier.svg \
 update-desktop-database ~/.local/share/applications
 ```
 
+From crates.io, without a checkout, the first line is
+`cargo install --locked brevier --features ui`; the desktop entry and the icon still come
+from the repository.
+
 The icon ships inside the binary, so on X11 the window wears it with nothing installed; a
 launcher menu and a Wayland compositor take it from the desktop entry and the app id
 instead.
@@ -201,6 +205,12 @@ Windows installer and zip, and publishes them with `SHA256SUMS`. Before the file
 published, the Windows job installs the installer on a clean Windows, starts the window and
 uninstalls it again; a manual run of the workflow keeps a screenshot of that window. A published tag is never moved: something newer is a new
 version.
+
+The same tag then goes to [crates.io](https://crates.io/crates/brevier): `cargo publish`
+from a clean checkout of it, with the maintainer's token (`cargo login`). The `exclude` list
+in `Cargo.toml` keeps the corpus, the Android app, the site and the packaging out of the
+crate; `cargo package --list` shows what goes in. A published version can be yanked but
+never replaced.
 
 ## License
 

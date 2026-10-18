@@ -24,7 +24,8 @@ Why it is built this way is in the [manifesto](MANIFESTO.md); what comes next is
 **Status: early.** Brevier runs on Linux and Windows, as a GTK window, and on Android, as a
 native app over the same core. Builds are in
 [Releases](https://github.com/gurov/brevier/releases/latest); the Android app is also on
-[F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/).
+[F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/), and the source on
+[crates.io](https://crates.io/crates/brevier).
 Screen readers are known to work on Linux only (see
 [What it does not do](#what-it-does-not-do)).
 
@@ -57,6 +58,19 @@ cd brevier-0.12.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` installs into `~/.local`, needs no root, and `--uninstall` removes it again.
+
+**Linux, crates.io.** With Rust 1.88 or newer and GTK 4.10 or newer with its development
+files (`libgtk-4-dev` on Debian and Ubuntu):
+
+```sh
+cargo install --locked brevier --features ui
+```
+
+This builds the window, `brevier-ui`, and the command line, `brevier`, into `~/.cargo/bin`;
+the same command updates them. `--locked` keeps the dependency versions the release was
+tested with. No desktop entry or icon is installed this way;
+[CONTRIBUTING.md](CONTRIBUTING.md#building) shows how to add them. The command line alone
+needs no GTK: `cargo install --locked brevier --features save`.
 
 **Windows** 10 or 11, 64-bit. Download
 [`brevier-0.12.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.12.0/brevier-0.12.0-windows-x86_64-setup.exe)

@@ -229,8 +229,8 @@ in `packaging/`. After that Brevier is one search away instead of one wget away,
 updates arrive with the store — the bundle in Releases has none. The window has been
 run on Wayland, as a native client (#12), which the submission waited for.
 
-Two cheaper doors alongside: crates.io (`cargo install brevier --features ui`, once
-`Cargo.toml` has its metadata and an `exclude` for the corpus), and the cli as one
+Two cheaper doors alongside: crates.io (`cargo install brevier --features ui`, published
+since 0.12.0), and the cli as one
 file per tag for Linux, macOS and Windows — `brevier` links neither GTK nor OpenSSL.
 Published on tags, not on pushes.
 
