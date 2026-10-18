@@ -39,7 +39,7 @@ a thin line along the bottom shows how far into the page the reader is](assets/s
 **Linux, Flatpak.** One file. The runtime brings GTK, so any distribution will do:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.13.0/brevier.flatpak
+wget https://github.com/gurov/brevier/releases/download/v0.14.0/brevier.flatpak
 flatpak install --user ./brevier.flatpak
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
@@ -53,8 +53,8 @@ local files (a `.md`, a saved feed) can't be opened.
 Ubuntu) and no wish for a sandbox:
 
 ```sh
-tar xf brevier-0.13.0-x86_64-linux.tar.gz
-cd brevier-0.13.0-x86_64-linux && ./install.sh
+tar xf brevier-0.14.0-x86_64-linux.tar.gz
+cd brevier-0.14.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` installs into `~/.local`, needs no root, and `--uninstall` removes it again.
@@ -73,18 +73,18 @@ tested with. No desktop entry or icon is installed this way;
 needs no GTK: `cargo install --locked brevier --features save`.
 
 **Windows** 10 or 11, 64-bit. Download
-[`brevier-0.13.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.13.0/brevier-0.13.0-windows-x86_64-setup.exe)
+[`brevier-0.14.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.14.0/brevier-0.14.0-windows-x86_64-setup.exe)
 and run it. It installs for you alone, with no administrator rights, and puts Brevier in the
 Start menu; remove it under Installed apps. The installer is not signed yet, so Windows
 shows "Windows protected your PC" first: choose **More info**, then **Run anyway**. To run
 Brevier without installing it, unpack
-[`brevier-0.13.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.13.0/brevier-0.13.0-windows-x86_64.zip)
+[`brevier-0.14.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.14.0/brevier-0.14.0-windows-x86_64.zip)
 anywhere and start `bin\brevier-ui.exe`; `bin\brevier.exe` is the command line.
 
 **Android** 7.0 or later, 64-bit ARM. Install it from
 [F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/), which keeps it up to
 date. Or download
-[`brevier-0.13.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.13.0/brevier-0.13.0-arm64.apk)
+[`brevier-0.14.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.14.0/brevier-0.14.0-arm64.apk)
 on the phone and open it; Android asks once to allow installs from the app you opened it
 with. Updates install over it as long as they are signed with the same release key:
 
@@ -174,7 +174,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action:
 
 ```yaml
-- uses: gurov/brevier@v0.13.0  # a release tag, or @main
+- uses: gurov/brevier@v0.14.0  # a release tag, or @main
   with:
     urls: |
       https://example.com/

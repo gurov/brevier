@@ -1,0 +1,2 @@
+• Habr articles now come with their comments, under the article as a thread; a link to a comment opens at it.
+• An image that loads above the screen no longer pushes the text you are reading down.

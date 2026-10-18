@@ -95,6 +95,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.14.0" date="2026-10-18" type="development">
+      <description>
+        <p>Habr articles come with their comments, set under the article as a
+          thread, and a link to a comment opens at it. On the phone, an image
+          that loads above the screen no longer moves the text being read.</p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-10-18" type="development">
       <description>
         <p>A news site's front page reads as its headlines, in the page's own
