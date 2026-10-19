@@ -1,11 +1,15 @@
 # Сайт на GitHub Pages: `site/` как есть плюс `index.md`, собранный самим
 # Brevier из той же страницы. Ниже 100 в `--check` страница не выходит.
+# В `flatpak/repo/` — репозиторий flatpak из бандла последнего релиза
+# (packaging/flatpak-repo.sh): Pages заменяет сайт целиком, поэтому
+# репозиторий собирается при каждой выкладке, а после релиза выкладку
+# запускает release.yml.
 name: pages
 
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'packaging/flatpak-repo.sh', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -18,6 +22,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Ключ подписи — секрет окружения `flatpak`: только `main` и теги `v*`.
+    environment: flatpak
     steps:
       - uses: actions/checkout@v4
       - run: cargo build --release --bin brevier
@@ -26,6 +32,25 @@ jobs:
           cp -r site _site
           target/release/brevier --stdin https://brevier.bizibah.com/ < site/index.html > _site/index.md
           target/release/brevier --check --min 100 --stdin https://brevier.bizibah.com/ < site/index.html
+      # Подписывает тот ключ, чья открытая половина лежит на сайте: секрет
+      # с другим ключом роняет выкладку, а не тихо ломает обновления у всех.
+      # Бандла нет — выкладка падает тоже: сайт без репозитория отвечал бы
+      # установленным 404.
+      - name: The Flatpak repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLATPAK_GPG_KEY: ${{ secrets.FLATPAK_GPG_KEY }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends flatpak ostree
+          gh release download --pattern brevier.flatpak --dir "$RUNNER_TEMP"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' "$FLATPAK_GPG_KEY" | gpg --batch --quiet --import
+          FLATPAK_GPG_KEY_ID=$(gpg --show-keys --with-colons site/flatpak/brevier.gpg | awk -F: '/^fpr/ { print $10; exit }')
+          export FLATPAK_GPG_KEY_ID
+          packaging/flatpak-repo.sh "$RUNNER_TEMP/brevier.flatpak" _site/flatpak/repo
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site

@@ -222,7 +222,7 @@
     and sets it in calm, readable type — not the type the site chose. No JavaScript,
     no pop-ups, no site styles. For Linux, Windows and Android.</p>
   <ul class="downloads">
-    <li><a href="https://github.com/gurov/brevier/releases/latest/download/brevier.flatpak">Linux<small>Flatpak</small></a></li>
+    <li><a href="flatpak/brevier.flatpakref">Linux<small>Flatpak</small></a></li>
     <li><a href="https://github.com/gurov/brevier/releases/latest">Windows<small>installer or zip</small></a></li>
     <li><a href="https://f-droid.org/packages/io.github.gurov.brevier/">Android<small>F-Droid</small></a></li>
     <li><a href="https://github.com/gurov/brevier">Source<small>on GitHub</small></a></li>
@@ -452,8 +452,11 @@
 <section class="column" id="mounts">
   <h2><span class="chapter">Chapter eleven</span>Choose your mount</h2>
   <h3>Linux</h3>
-  <p>A <a href="https://github.com/gurov/brevier/releases/latest/download/brevier.flatpak">Flatpak</a>
-    that works on any distribution, or a tarball for systems that already have GTK 4.
+  <p>A <a href="flatpak/brevier.flatpakref">Flatpak</a> that works on any distribution,
+    from Brevier's own signed repository: GNOME Software or Discover opens it with a click,
+    or <code>flatpak install --user https://brevier.bizibah.com/flatpak/brevier.flatpakref</code>,
+    and new versions arrive with <code>flatpak update</code>. Or a tarball for systems that
+    already have GTK 4.
     Those who keep a forge at home can build it from
     <a href="https://crates.io/crates/brevier">crates.io</a> with Rust and GTK 4:
     <code>cargo install --locked brevier --features ui</code>.</p>

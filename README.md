@@ -36,13 +36,25 @@ a thin line along the bottom shows how far into the page the reader is](assets/s
 
 ## Install
 
-**Linux, Flatpak.** One file. The runtime brings GTK, so any distribution will do:
+**Linux, Flatpak.** The runtime brings GTK, so any distribution will do. Brevier keeps a
+Flatpak repository of its own, and installing from it brings the updates too:
 
 ```sh
-wget https://github.com/gurov/brevier/releases/download/v0.14.0/brevier.flatpak
-flatpak install --user ./brevier.flatpak
+flatpak install --user https://brevier.bizibah.com/flatpak/brevier.flatpakref
 flatpak run io.github.gurov.brevier https://example.com/article
 ```
+
+GNOME Software and Discover open the same
+[`brevier.flatpakref`](https://brevier.bizibah.com/flatpak/brevier.flatpakref) with a
+click. After that `flatpak update` (or the store app) brings each new version. The
+repository is signed, and the key comes with the `.flatpakref`: an update signed by
+anyone else, or older than what you have, is refused. Each release also has the
+same app as one file,
+[`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.14.0/brevier.flatpak)
+(`flatpak install --user ./brevier.flatpak`). Files released after 0.14.0 update from the
+repository as well; Brevier installed from an older one does not — run
+`flatpak uninstall --user io.github.gurov.brevier` (your data stays) and install it again
+from the repository.
 
 The first install also downloads `org.gnome.Platform//49` from Flathub if you don't have
 it — about 400 MB, shared with other Flatpak apps. In the sandbox your data lives in

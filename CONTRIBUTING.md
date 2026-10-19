@@ -191,6 +191,19 @@ packaging/tarball.sh              # the tarball and its install.sh
 The Flatpak builds offline, the way Flathub builds: every crate is declared with its
 checksum in `packaging/cargo-sources.json`.
 
+Installs update from Brevier's own Flatpak repository on the site,
+`https://brevier.bizibah.com/flatpak/repo/`, not from Flathub. The release job signs the
+commit and builds the bundle with that repository's address and key, so an installed
+bundle updates too. Pages replaces the whole site on each deploy, so `pages.yml` rebuilds
+the repository every time from the latest release's `brevier.flatpak`
+(`packaging/flatpak-repo.sh`): one signed commit, a signed summary, a static delta. After
+publishing a release, `release.yml` starts `pages.yml` itself. The signing key is the
+secret `FLATPAK_GPG_KEY` of the `flatpak` environment, which only `main` and `v*` tags may
+use; its public half is `site/flatpak/brevier.gpg`, and `brevier.flatpakref` and
+`brevier.flatpakrepo` beside it carry the same key. Clients refuse anything not signed by
+it and any commit older than the one installed. Losing the key means no more updates
+until everyone installs again with a new one, so a copy lives off the machine.
+
 The mark is `assets/brevier.svg`, and every raster icon is drawn from it: after changing
 the mark, run `packaging/icons.py` (Inkscape and Pillow), which redraws the Android
 launcher icons at every density, the store icon in `fastlane/` and the Windows icon
