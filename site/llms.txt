@@ -9,7 +9,7 @@
 ## Project
 
 - [Source and README](https://github.com/gurov/brevier): what it does, how to install it
-- [Releases](https://github.com/gurov/brevier/releases): Linux (Flatpak, tar.gz), Windows (installer, zip), Android (APK)
+- [Releases](https://github.com/gurov/brevier/releases): Linux (Flatpak, tar.gz), Windows (installer, zip), Android (APK), and the command line alone as one file for Linux, macOS and Windows (`releases/latest/download/brevier-cli-x86_64-linux.tar.gz`, `-aarch64-linux.tar.gz`, `-macos.tar.gz`, `-windows-x86_64.zip`)
 - [Flatpak repository](https://brevier.bizibah.com/flatpak/brevier.flatpakref): `flatpak install --user https://brevier.bizibah.com/flatpak/brevier.flatpakref`, signed, updates with `flatpak update`
 - [crates.io](https://crates.io/crates/brevier): `cargo install --locked brevier --features ui` builds the window and the command line from source
 - [F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/): the Android app, the same APK as in the releases

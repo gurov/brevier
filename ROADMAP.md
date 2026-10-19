@@ -227,7 +227,7 @@ Work items:
 
 ### 11. Updates on Linux (#1)
 
-The Flatpak updates now, from Brevier's own repository rather than from a store:
+Done. The Flatpak updates from Brevier's own repository rather than from a store:
 `flatpak install --user https://brevier.bizibah.com/flatpak/brevier.flatpakref` once,
 then `flatpak update`, GNOME Software or Discover bring every release. The site rebuilds
 the repository from each release's bundle; its commits and summary are signed, and the
@@ -244,8 +244,8 @@ age changes.
 
 Two cheaper doors alongside: crates.io (`cargo install brevier --features ui`, published
 since 0.12.0), and the cli as one
-file per tag for Linux, macOS and Windows — `brevier` links neither GTK nor OpenSSL.
-Published on tags, not on pushes.
+file per release for Linux, macOS and Windows, since 0.15.0 — `brevier` links neither
+GTK nor OpenSSL. Published on tags, not on pushes.
 
 ### 12. Reading progress (#19)
 

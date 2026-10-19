@@ -1,0 +1,3 @@
+• Find on page now finds words inside tables too, and a copied table pastes as rows of tab-separated cells.
+• On the shelf, a waypoint's place stands at the right, like a page number.
+• A site's menu on the shelf no longer repeats a card button such as "Comments".

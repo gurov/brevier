@@ -95,6 +95,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.15.0" date="2026-10-19" type="development">
+      <description>
+        <p>Flatpak installs update from Brevier's own signed repository. Find
+          on page finds words in tables too, and a copied table pastes as rows
+          of tab-separated cells. A site's menu on the shelf no longer repeats
+          a card button such as "Comments".</p>
+      </description>
+    </release>
     <release version="0.14.0" date="2026-10-18" type="development">
       <description>
         <p>Habr articles come with their comments, set under the article as a
