@@ -253,7 +253,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   serif or sans), the size, the line length and the line spacing, once for every site;
   zoom stays on top, for the run.
 - **Hyphenation by the page's language** (English and Russian are built in); in Russian
-  and Czech no line ends on a one-letter word. Copy and find-on-page see the plain text.
+  and Czech no line ends on a one-letter word. Copy and find-on-page see the plain text,
+  tables included: find goes through their cells, and a copied table pastes as rows of
+  tab-separated cells.
 - **Justified text** as a setting: paragraphs get a straight right edge; headings, lists
   and code stay ragged.
 - **Ivory paper** instead of glaring white, and a warm dark theme.
@@ -398,8 +400,6 @@ Extraction breaks as sites change their markup. Keeping up with that never ends.
   screen reader doesn't see the window, and that is one reason there is no macOS build yet.
   The Android app uses native text, which TalkBack should read, but that hasn't been tested.
 - **Privacy** — not promised. Sites can track you as they always could.
-- **Tables in find and copy** — a table is drawn as a grid of widgets, so find-on-page and
-  "copy all" don't see it. The saved Markdown has it in full.
 
 ## Your data
 

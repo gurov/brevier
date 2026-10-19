@@ -108,7 +108,7 @@ class MainActivity : Activity(), ArticleHost {
     private var hintRows: List<Pair<String, String>> = emptyList()
 
     /** Поиск: совпадения на открытой странице и на котором стоим. */
-    private var hits = IntArray(0)
+    private var hits: List<Hit> = emptyList()
     private var hit = 0
 
     private val palette: Palette get() = type.palette(dark)
@@ -1706,7 +1706,7 @@ class MainActivity : Activity(), ArticleHost {
         // адрес — после смены вкладки в ней оставался прежний.
         currentTab()?.view?.requestFocus()
         findBar.visibility = View.GONE
-        hits = IntArray(0)
+        hits = emptyList()
         currentTab()?.view?.highlight(hits, -1)
         hideKeyboard()
     }
@@ -1715,19 +1715,41 @@ class MainActivity : Activity(), ArticleHost {
     private fun find(text: String, restart: Boolean) {
         val view = currentTab()?.view ?: return
         val page = view.page ?: return
-        hits = if (text.isEmpty()) IntArray(0) else Core.find(page.text, text)
-        val total = hits.size / 2
+        hits = if (text.isEmpty()) emptyList() else hitsOf(page, text)
+        val total = hits.size
         if (restart) {
             val top = view.place()
-            hit = (0 until total).firstOrNull { hits[it * 2] >= top } ?: 0
+            hit = (0 until total).firstOrNull { hits[it].at >= top } ?: 0
         } else {
             hit = hit.coerceIn(0, maxOf(0, total - 1))
         }
         showHit()
     }
 
+    /**
+     * Совпадения по порядку документа: в тексте и в ячейках таблиц (#10) —
+     * ячейки там, где знак их таблицы. Ищет ядро, по тексту каждой ячейки
+     * так же, как по тексту страницы; сортировка устойчивая, и порядок
+     * внутри таблицы — порядок чтения.
+     */
+    private fun hitsOf(page: Page, text: String): List<Hit> {
+        val found = mutableListOf<Hit>()
+        val flat = Core.find(page.text, text)
+        for (index in 0 until flat.size / 2) found += Hit.Text(flat[index * 2], flat[index * 2 + 1])
+        for (block in page.blocks) {
+            if (block !is Block.Table) continue
+            var number = 0
+            for (row in block.rows) for (cell in row.cells) {
+                val pairs = Core.find(cell.text, text)
+                for (index in 0 until pairs.size / 2) found += Hit.Cell(block, number, pairs[index * 2], pairs[index * 2 + 1])
+                number += 1
+            }
+        }
+        return found.sortedBy { it.at }
+    }
+
     private fun stepHit(forward: Boolean) {
-        val total = hits.size / 2
+        val total = hits.size
         if (total == 0) return
         hit = if (forward) (hit + 1) % total else (hit + total - 1) % total
         showHit()
@@ -1735,7 +1757,7 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun showHit() {
         val view = currentTab()?.view ?: return
-        val total = hits.size / 2
+        val total = hits.size
         tally.text = when {
             total == 0 && needle.text.isNotEmpty() -> "no matches"
             total == 0 -> ""

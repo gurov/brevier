@@ -196,10 +196,13 @@ link-density rule (7 of 91) — a threshold the corpus has pinned for articles.
 
 ### 9. Tables in the buffer (#10)
 
-The known limitation: a table is a grid of widgets, so find-on-page and "copy
-everything" do not see it. Either render tables as text in the buffer, or teach the
-find and the copy to descend into the widgets. The saved Markdown already has the
-table in full; the window should not know less than the file.
+Done, the second way: the table stays a grid of widgets — text in the buffer would
+have needed tab stops per table and lost the wrapping inside cells — and find and copy
+go into it. Find-on-page searches every cell the way it searches the text and steps
+through the matches in reading order, a table's cells where the table stands; copying
+a selection that holds a table puts the table in its place as rows of tab-separated
+cells, which pastes as text or into a spreadsheet. Android finds in tables the same
+way. The window no longer knows less than the saved file.
 
 ### 10. The companion extension (#5)
 

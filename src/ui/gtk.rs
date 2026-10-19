@@ -330,6 +330,8 @@ struct Tab {
     anchors: Vec<(String, usize)>,
     /// Места картинок в тексте.
     shots: Vec<Shot>,
+    /// Таблицы страницы — для поиска и копирования (#10).
+    tables: Vec<TableCells>,
     /// Навигация сайта: его меню и подвал. Свойство страницы, а не вкладки,
     /// — у каждого сайта своё.
     site: Vec<Entry>,
@@ -503,8 +505,46 @@ struct State {
 /// Что нашёл поиск и на котором совпадении стоим.
 #[derive(Default)]
 struct Search {
-    hits: Vec<(i32, i32)>,
+    hits: Vec<Hit>,
     at: usize,
+}
+
+/// Совпадение поиска: в тексте буфера или в ячейке таблицы (#10) — текст
+/// таблицы живёт в виджетах, а не в буфере.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hit {
+    /// Смещения в буфере.
+    Text(i32, i32),
+    /// Номер таблицы на странице, номер ячейки в ней по порядку чтения
+    /// и смещения в тексте ячейки — в символах.
+    Cell {
+        table: usize,
+        cell: usize,
+        from: usize,
+        to: usize,
+    },
+}
+
+/// Таблица на странице: где её знак в буфере, её текст для буфера обмена
+/// (`page::Table::text`), ячейки по порядку чтения и разметка каждой —
+/// с неё подсветка поиска начинается заново (`mark_cells`).
+#[derive(Clone)]
+struct TableCells {
+    at: i32,
+    text: String,
+    cells: Vec<gtk::Label>,
+    markup: Vec<String>,
+}
+
+impl Hit {
+    /// Место в документе — для порядка и для «ближайшего к видимому».
+    /// Ячейка стоит там, где знак её таблицы.
+    fn at(&self, tables: &[TableCells]) -> i32 {
+        match *self {
+            Hit::Text(from, _) => from,
+            Hit::Cell { table, .. } => tables.get(table).map_or(0, |table| table.at),
+        }
+    }
 }
 
 /// Место картинки в тексте.
@@ -1245,6 +1285,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             marks: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
+            tables: Vec::new(),
             site: Vec::new(),
             feeds: Vec::new(),
             entries: Vec::new(),
@@ -2076,6 +2117,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             marks: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
+            tables: Vec::new(),
             site: Vec::new(),
             feeds: Vec::new(),
             entries: Vec::new(),
@@ -2417,21 +2459,53 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     // и неразрывные пробелы, а читателю в буфер обмена нужен чистый текст.
     // После штатного копирования переписываем буфер обмена очищенным текстом
     // (`copy-clipboard`, обработчик — после умолчания). Ctrl+C и «Копировать»
-    // из контекстного меню идут через тот же сигнал.
-    view.connect_closure(
-        "copy-clipboard",
-        true,
-        glib::closure_local!(move |view: gtk::TextView| {
-            let buffer = view.buffer();
-            if let Some((start, end)) = buffer.selection_bounds() {
-                let selected = buffer.text(&start, &end, false).to_string();
-                if brevier::typeset::marked(&selected) {
+    // из контекстного меню идут через тот же сигнал. Таблица в выделении
+    // встаёт своим текстом на место своего знака (#10): штатное копирование
+    // знак объекта просто роняет, и таблица пропадала из скопированного.
+    {
+        let state = state.clone();
+        view.connect_closure(
+            "copy-clipboard",
+            true,
+            glib::closure_local!(move |view: gtk::TextView| {
+                let buffer = view.buffer();
+                let Some((start, end)) = buffer.selection_bounds() else {
+                    return;
+                };
+                // Обработчик зовётся изнутри GTK — состояние может быть занято.
+                let tables: Vec<(i32, String)> = state
+                    .try_borrow()
+                    .ok()
+                    .and_then(|borrowed| {
+                        borrowed.tabs.iter().find(|tab| tab.view == view).map(|tab| {
+                            tab.tables
+                                .iter()
+                                .filter(|table| (start.offset()..end.offset()).contains(&table.at))
+                                .map(|table| (table.at, table.text.clone()))
+                                .collect()
+                        })
+                    })
+                    .unwrap_or_default();
+                let mut selected = String::new();
+                let mut from = start;
+                for (at, text) in &tables {
+                    let object = buffer.iter_at_offset(*at);
+                    selected.push_str(&buffer.text(&from, &object, false));
+                    if !selected.is_empty() && !selected.ends_with('\n') {
+                        selected.push('\n');
+                    }
+                    selected.push_str(text);
+                    selected.push('\n');
+                    from = buffer.iter_at_offset(at + 1);
+                }
+                selected.push_str(&buffer.text(&from, &end, false));
+                if !tables.is_empty() || brevier::typeset::marked(&selected) {
                     view.clipboard()
                         .set_text(&brevier::typeset::plain(&selected));
                 }
-            }
-        }),
-    );
+            }),
+        );
+    }
 
     if let Some(address) = address {
         open(ui, state, id, address, true);
@@ -3317,6 +3391,7 @@ fn show_document(
         tab.marks = page.marks;
         tab.anchors = page.anchors;
         tab.shots = page.shots.clone();
+        tab.tables = page.tables;
         tab.site = site_rows(&document.site);
         tab.feeds = site_rows(&document.feeds);
         tab.document = Some(document.clone());
@@ -3859,6 +3934,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.marks = page.marks;
             tab.anchors = page.anchors;
             tab.shots = page.shots.clone();
+            tab.tables = page.tables;
             tab.zoom_seen = seen;
             tab.type_seen = typography;
             tab.density_seen = density(ui);
@@ -4547,6 +4623,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         tab.focus = None;
         tab.marks = page.marks;
         tab.anchors = page.anchors;
+        tab.tables = page.tables;
         tab.zoom_seen = seen;
         tab.type_seen = typography;
         tab.density_seen = density(ui);
@@ -4854,6 +4931,7 @@ struct Drawn {
     anchors: Vec<(String, usize)>,
     shots: Vec<Shot>,
     cells: Vec<gtk::Label>,
+    tables: Vec<TableCells>,
 }
 
 /// Разложить статью по буферу.
@@ -4871,6 +4949,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
 
     let mut shots = Vec::new();
     let mut cells = Vec::new();
+    let mut tables = Vec::new();
     let mut end = buffer.end_iter();
     let mut rest = page.text.as_str();
     let mut at = 0;
@@ -4901,7 +4980,20 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
             Block::Table(table) => {
                 let frame = frame_at(view, &mut end);
                 frame.add_css_class("table");
-                frame.append(&grid(table, &mut cells));
+                let mut own = Vec::new();
+                frame.append(&grid(table, &mut own));
+                tables.push(TableCells {
+                    at: placed.at as i32,
+                    text: table.text(),
+                    cells: own.clone(),
+                    // Тот же порядок, в каком `grid` ставит ячейки.
+                    markup: table
+                        .rows
+                        .iter()
+                        .flat_map(|row| row.cells.iter().map(markup_of))
+                        .collect(),
+                });
+                cells.extend(own);
             }
         }
         rest = after.strip_prefix(page::OBJECT).unwrap_or(after);
@@ -4945,6 +5037,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
         anchors: page.anchors,
         shots,
         cells,
+        tables,
     }
 }
 
@@ -4976,10 +5069,10 @@ fn frame_at(view: &gtk::TextView, end: &mut gtk::TextIter) -> gtk::Box {
 /// Таблица — сетка виджетов на якоре.
 ///
 /// Текстом её не набрать: в буфере нет колонок, и раньше строки
-/// склеивались палками в моноширинном — читать это нельзя. Цена решения
-/// записана честно: текст таблицы лежит в виджетах, а не в буфере,
-/// поэтому поиск по странице и «скопировать всё» её не видят. В markdown
-/// при сохранении таблица цела.
+/// склеивались палками в моноширинном — читать это нельзя. Текст таблицы
+/// поэтому лежит в виджетах, а не в буфере, и поиск по странице и
+/// копирование заходят в них сами (#10): `find` ищет и по ячейкам,
+/// а `copy-clipboard` кладёт на место знака таблицы её текст.
 fn grid(table: &page::Table, cells: &mut Vec<gtk::Label>) -> gtk::Grid {
     let columns = table
         .rows
@@ -6763,21 +6856,25 @@ fn find(ui: &Ui, state: &Rc<RefCell<State>>, needle: &str, restart: bool) {
     buffer.remove_tag_by_name("found", &start, &end);
     buffer.remove_tag_by_name("here", &start, &end);
 
+    let tables = current_tables(ui, state);
     let hits = if needle.is_empty() {
         Vec::new()
     } else {
-        hits_of(&buffer, needle)
+        hits_of(&buffer, &tables, needle)
     };
-    for (from, to) in &hits {
-        buffer.apply_tag_by_name(
-            "found",
-            &buffer.iter_at_offset(*from),
-            &buffer.iter_at_offset(*to),
-        );
+    for hit in &hits {
+        if let Hit::Text(from, to) = *hit {
+            buffer.apply_tag_by_name(
+                "found",
+                &buffer.iter_at_offset(from),
+                &buffer.iter_at_offset(to),
+            );
+        }
     }
+    mark_cells(&tables, &hits, None);
 
     let at = if restart {
-        first_visible(&view, &hits)
+        first_visible(&view, &tables, &hits)
     } else {
         state.borrow().search.at.min(hits.len().saturating_sub(1))
     };
@@ -6833,37 +6930,179 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
             borrowed.search.hits.get(borrowed.search.at).copied(),
         )
     };
-    let Some((from, to)) = hit else { return };
+    let Some(hit) = hit else { return };
 
     ui.tally.set_text(&format!("{} of {total}", at + 1));
-    buffer.apply_tag_by_name(
-        "here",
-        &buffer.iter_at_offset(from),
-        &buffer.iter_at_offset(to),
-    );
+    let hits = state.borrow().search.hits.clone();
+    let tables = current_tables(ui, state);
+    mark_cells(&tables, &hits, Some(hit));
     // Треть экрана сверху: совпадение нужно видеть в контексте, а не в самом
     // верху окна.
-    scroll_to(view, from, 0.3);
+    match hit {
+        Hit::Text(from, to) => {
+            buffer.apply_tag_by_name(
+                "here",
+                &buffer.iter_at_offset(from),
+                &buffer.iter_at_offset(to),
+            );
+            scroll_to(view, from, 0.3);
+        }
+        Hit::Cell { table, cell, .. } => {
+            let Some(table) = tables.get(table) else {
+                return;
+            };
+            match table.cells.get(cell) {
+                Some(label) => scroll_to_widget(view, label, table.at, 0.3),
+                None => scroll_to(view, table.at, 0.3),
+            }
+        }
+    }
 }
 
-fn hits_of(buffer: &gtk::TextBuffer, needle: &str) -> Vec<(i32, i32)> {
+/// Совпадения по порядку документа: в тексте буфера и в ячейках таблиц —
+/// ячейки там, где знак их таблицы. Знак объекта в поиске по тексту
+/// не участвует, поэтому с совпадением в тексте ячейка место не делит.
+fn hits_of(buffer: &gtk::TextBuffer, tables: &[TableCells], needle: &str) -> Vec<Hit> {
     let (start, end) = buffer.bounds();
-    let full = buffer.text(&start, &end, true);
-    page::hits(&full, needle)
+    // `slice`, а не `text`: `text` выкидывает знаки объектов, и после каждой
+    // картинки или таблицы подсветка съезжала на знак влево. В срезе знак
+    // остаётся, смещения совпадают с буфером, а `page::hits` его пропускает.
+    let full = buffer.slice(&start, &end, true);
+    let mut hits: Vec<Hit> = page::hits(&full, needle)
         .into_iter()
-        .map(|(from, to)| (from as i32, to as i32))
-        .collect()
+        .map(|(from, to)| Hit::Text(from as i32, to as i32))
+        .collect();
+    for (index, table) in tables.iter().enumerate() {
+        for (number, label) in table.cells.iter().enumerate() {
+            for (from, to) in page::hits(&label.text(), needle) {
+                hits.push(Hit::Cell {
+                    table: index,
+                    cell: number,
+                    from,
+                    to,
+                });
+            }
+        }
+    }
+    // Порядок внутри одной таблицы — порядок, в котором ячейки добавлены:
+    // сортировка устойчивая.
+    hits.sort_by_key(|hit| hit.at(tables));
+    hits
+}
+
+/// Таблицы открытой вкладки.
+fn current_tables(ui: &Ui, state: &Rc<RefCell<State>>) -> Vec<TableCells> {
+    let Some(id) = current_id(ui, state) else {
+        return Vec::new();
+    };
+    state
+        .borrow_mut()
+        .find(id)
+        .map(|tab| tab.tables.clone())
+        .unwrap_or_default()
+}
+
+/// Подсветить найденное в ячейках таблиц — атрибутами Pango, теми же
+/// цветами, что тег `found` и `here` в тексте. Атрибуты ложатся поверх
+/// разметки ячейки, не вместо неё.
+fn mark_cells(tables: &[TableCells], hits: &[Hit], here: Option<Hit>) {
+    let mut lists: HashMap<(usize, usize), pango::AttrList> = HashMap::new();
+    for hit in hits {
+        let Hit::Cell {
+            table,
+            cell,
+            from,
+            to,
+        } = *hit
+        else {
+            continue;
+        };
+        let Some(label) = tables.get(table).and_then(|table| table.cells.get(cell)) else {
+            continue;
+        };
+        let text = label.text();
+        let byte = |at: usize| {
+            text.char_indices()
+                .nth(at)
+                .map_or(text.len(), |(byte, _)| byte) as u32
+        };
+        let (start, end) = (byte(from), byte(to));
+        let background = if here == Some(*hit) { FOUND_HERE } else { FOUND };
+        let list = lists.entry((table, cell)).or_default();
+        for (hex, back) in [(background, true), (FOUND_INK, false)] {
+            let [r, g, b] = rgb(hex);
+            let (r, g, b) = (u16::from(r) * 257, u16::from(g) * 257, u16::from(b) * 257);
+            let mut attribute = if back {
+                pango::AttrColor::new_background(r, g, b)
+            } else {
+                pango::AttrColor::new_foreground(r, g, b)
+            };
+            attribute.set_start_index(start);
+            attribute.set_end_index(end);
+            list.insert(attribute);
+        }
+    }
+    // Каждый раз — с исходной разметки. GTK 4.22, раскладывая метку,
+    // вливает её атрибуты в список, разобранный из разметки, и снять их потом
+    // нечем: ни `None`, ни пустой список, ни та же разметка ещё раз (её GTK
+    // сравнивает со старой и не разбирает) — подсветка первой набранной буквы
+    // висела до смены страницы. Пустая строка, а за ней разметка, разбирают
+    // ячейку заново; ссылки живы — обработчик висит на самой метке.
+    for (index, table) in tables.iter().enumerate() {
+        for (number, label) in table.cells.iter().enumerate() {
+            let list = lists.get(&(index, number));
+            if list.is_none() && label.attributes().is_none() {
+                continue;
+            }
+            if let Some(markup) = table.markup.get(number) {
+                label.set_markup("");
+                label.set_markup(markup);
+            }
+            label.set_attributes(list);
+        }
+    }
+}
+
+/// Подвести ячейку на долю высоты окна. Сначала — к самой таблице, меткой:
+/// дальняя часть страницы ещё не разложена, и у ячейки там нет места, а
+/// метка дождётся раскладки. Потом, кадр за кадром, — пока ячейка
+/// не получит своё место: тогда к ней точно, если таблица выше экрана.
+fn scroll_to_widget(view: &gtk::TextView, widget: &gtk::Label, table: i32, align: f64) {
+    scroll_to(view, table, align);
+    let widget = widget.clone();
+    let left = Cell::new(SETTLE_FRAMES);
+    view.add_tick_callback(move |view, _| {
+        left.set(left.get().saturating_sub(1));
+        let point = (widget.width() > 0)
+            .then(|| widget.compute_point(view, &gtk::graphene::Point::new(0.0, 0.0)))
+            .flatten();
+        let (Some(point), Some(vertical)) = (point, view.vadjustment()) else {
+            return if left.get() == 0 {
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            };
+        };
+        let (_, y) = view.window_to_buffer_coords(
+            gtk::TextWindowType::Widget,
+            point.x() as i32,
+            point.y() as i32,
+        );
+        let top = f64::from(y) - vertical.page_size() * align;
+        vertical.set_value(top.clamp(vertical.lower(), vertical.upper() - vertical.page_size()));
+        glib::ControlFlow::Break
+    });
 }
 
 /// Первое совпадение, которое читатель уже видит или увидит ниже.
-fn first_visible(view: &gtk::TextView, hits: &[(i32, i32)]) -> usize {
+fn first_visible(view: &gtk::TextView, tables: &[TableCells], hits: &[Hit]) -> usize {
     let top = view.visible_rect();
     let offset = view
         .iter_at_location(top.x(), top.y())
         .map(|iter| iter.offset())
         .unwrap_or(0);
     hits.iter()
-        .position(|(from, _)| *from >= offset)
+        .position(|hit| hit.at(tables) >= offset)
         .unwrap_or(0)
 }
 

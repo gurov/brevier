@@ -7,6 +7,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.text.Layout
@@ -94,6 +95,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     private val proses = mutableListOf<ProseView>()
     private val images = mutableListOf<ImageFrame>()
+    private val tables = mutableListOf<TableFrame>()
     private val formulas = mutableListOf<Pair<FormulaSpan, ProseView>>()
 
     /** Номер показа: ответ картинки для прошлой страницы уже никому не нужен. */
@@ -111,7 +113,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     private var offer: String? = null
     private var ways: List<Entry> = emptyList()
     /** Подсветка поиска — её получают и куски, досыпанные позже. */
-    private var marks: IntArray? = null
+    private var marks: List<Hit>? = null
     private var markHere = -1
     /** Заметки страницы (#39) — их тоже получают и досыпанные куски. */
     private var notes: List<NoteSpot> = emptyList()
@@ -150,6 +152,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         column.removeAllViews()
         proses.clear()
         images.clear()
+        tables.clear()
         formulas.clear()
         pending.clear()
         laid = 0
@@ -190,6 +193,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             }
             is Block.Table -> {
                 addTable(item)
+                marks?.let { hits -> tables.last().mark(hits, markHere) }
                 laid = item.at + 1
             }
         }
@@ -261,6 +265,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     private fun addTable(block: Block.Table) {
         val table = TableFrame(context, block)
+        tables += table
         column.addView(table, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = metrics.px(10f).toInt()
             bottomMargin = metrics.px(14f).toInt() + metrics.extra.toInt()
@@ -415,27 +420,50 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     // ── поиск ───────────────────────────────────────────────────────────────
 
-    /** Подсветить совпадения; `here` — то, на котором стоим. Смещения — пары подряд. */
-    fun highlight(hits: IntArray, here: Int) {
+    /** Подсветить совпадения; `here` — то, на котором стоим. */
+    fun highlight(hits: List<Hit>, here: Int) {
         marks = hits.takeIf { it.isNotEmpty() }
         markHere = here
         for (view in proses) markView(view, hits, here)
-        if (here >= 0 && here * 2 < hits.size) scrollToOffset(hits[here * 2], 0.3f)
+        for (table in tables) table.mark(hits, here)
+        when (val current = hits.getOrNull(here)) {
+            is Hit.Text -> scrollToOffset(current.from, 0.3f)
+            is Hit.Cell -> scrollToCell(current, 0.3f)
+            null -> {}
+        }
     }
 
     /** Подсветка совпадений в одном куске. */
-    private fun markView(view: ProseView, hits: IntArray, here: Int) {
+    private fun markView(view: ProseView, hits: List<Hit>, here: Int) {
         view.clearMarks()
         val type = metrics.type
         val start = view.piece.start
         val end = start + view.text.length
-        var index = 0
-        while (index + 1 < hits.size) {
-            val a = max(hits[index], start)
-            val b = min(hits[index + 1], end)
-            val current = index / 2 == here
-            if (a < b) view.mark(a - start, b - start, if (current) type.foundHere else type.found, type.foundInk)
-            index += 2
+        hits.forEachIndexed { index, hit ->
+            if (hit !is Hit.Text) return@forEachIndexed
+            val a = max(hit.from, start)
+            val b = min(hit.to, end)
+            if (a < b) view.mark(a - start, b - start, if (index == here) type.foundHere else type.found, type.foundInk)
+        }
+    }
+
+    /**
+     * Подвести ячейку на долю высоты окна (#10). Таблица могла ещё не лечь
+     * в колонку — сначала докладываем до неё; место ячейки — после раскладки.
+     * Широкая таблица листается вбок и к ячейке.
+     */
+    private fun scrollToCell(hit: Hit.Cell, align: Float) {
+        ensure(hit.at + 1)
+        post {
+            val frame = tables.firstOrNull { it.block === hit.table } ?: return@post
+            val cell = frame.cells.getOrNull(hit.cell) ?: return@post
+            val box = Rect()
+            cell.getDrawingRect(box)
+            frame.offsetDescendantRectToMyCoords(cell, box)
+            scrollTo(0, max(0, frame.top + box.top - (height * align).toInt()))
+            if (box.left < frame.scrollX || box.right > frame.scrollX + frame.width) {
+                frame.scrollTo(max(0, box.left - metrics.px(16f).toInt()), 0)
+            }
         }
     }
 
@@ -721,6 +749,9 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
      */
     @SuppressLint("ViewConstructor")
     inner class TableFrame(context: Context, val block: Block.Table) : HorizontalScrollView(context) {
+        /** Ячейки по порядку чтения — для поиска (#10). */
+        val cells = mutableListOf<Washed>()
+
         init {
             isHorizontalScrollBarEnabled = true
             val grid = TableLayout(context)
@@ -750,6 +781,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                         highlightColor = palette.chosen
                     }
                     line.addView(view)
+                    cells += view
                 }
                 grid.addView(line)
                 if (row.header) {
@@ -763,6 +795,18 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             grid.setColumnShrinkable(columns - 1, false)
             grid.minimumWidth = columnWidth()
             addView(grid, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        }
+
+        /** Подсветить найденное в своих ячейках; `here` — на котором стоим. */
+        fun mark(hits: List<Hit>, here: Int) {
+            val type = metrics.type
+            for (cell in cells) cell.clearMarks()
+            hits.forEachIndexed { index, hit ->
+                if (hit !is Hit.Cell || hit.table !== block) return@forEachIndexed
+                val cell = cells.getOrNull(hit.cell) ?: return@forEachIndexed
+                val end = min(hit.to, cell.text.length)
+                if (hit.from < end) cell.mark(hit.from, end, if (index == here) type.foundHere else type.found, type.foundInk)
+            }
         }
 
         private fun cellText(cell: Cell, header: Boolean): CharSequence {
@@ -801,7 +845,6 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         private var rawY = 0f
         private var downAt = 0L
         private var hadSelection = false
-        private val found = mutableListOf<Any>()
 
         fun setup(metrics: Metrics, palette: Palette, fonts: Fonts) {
             setTextIsSelectable(true)
@@ -957,21 +1000,6 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             invalidate()
         }
 
-        fun clearMarks() {
-            val text = text as? Spannable ?: return
-            found.forEach { text.removeSpan(it) }
-            found.clear()
-        }
-
-        fun mark(from: Int, to: Int, background: Int, ink: Int) {
-            val text = text as? Spannable ?: return
-            val back = Wash(background)
-            val fore = ForegroundColorSpan(ink)
-            text.setSpan(back, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            text.setSpan(fore, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            found += back
-            found += fore
-        }
     }
 
     companion object {
@@ -1008,6 +1036,24 @@ open class Washed(context: Context) : TextView(context) {
     private val wash = Paint()
     private val face = android.text.TextPaint()
     private val probe = Paint.FontMetricsInt()
+    private val found = mutableListOf<Any>()
+
+    /** Снять подсветку поиска. Здесь, а не в куске текста: ячейки таблиц — тоже `Washed` (#10). */
+    fun clearMarks() {
+        val text = text as? Spannable ?: return
+        found.forEach { text.removeSpan(it) }
+        found.clear()
+    }
+
+    fun mark(from: Int, to: Int, background: Int, ink: Int) {
+        val text = text as? Spannable ?: return
+        val back = Wash(background)
+        val fore = ForegroundColorSpan(ink)
+        text.setSpan(back, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        text.setSpan(fore, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        found += back
+        found += fore
+    }
 
     override fun onDraw(canvas: Canvas) {
         val layout = layout

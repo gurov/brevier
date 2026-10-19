@@ -25,6 +25,16 @@ sealed class Block(val at: Int) {
 
 class Row(val header: Boolean, val cells: List<Cell>)
 
+/**
+ * Совпадение поиска: в тексте страницы или в ячейке таблицы (#10) — текст
+ * таблицы живёт в её ячейках, а не в тексте. `at` — место в документе:
+ * у ячейки это знак её таблицы. `cell` — номер ячейки по порядку чтения.
+ */
+sealed class Hit(val at: Int, val from: Int, val to: Int) {
+    class Text(from: Int, to: Int) : Hit(from, from, to)
+    class Cell(val table: Block.Table, val cell: Int, from: Int, to: Int) : Hit(table.at, from, to)
+}
+
 class Cell(val text: String, val runs: List<Run>, val links: List<Link>)
 
 class Page(

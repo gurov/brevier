@@ -180,12 +180,33 @@ pub enum Block {
 }
 
 /// Таблица. Текст её живёт в ячейках, а не в тексте страницы: колонок
-/// в тексте нет. Цена та же, что в окне, — поиск по странице её не видит.
+/// в тексте нет. Поэтому поиск по странице ищет и по ячейкам ([`hits`]
+/// по тексту каждой), а копирование кладёт на место знака таблицы
+/// её [`Table::text`] (#10).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     /// Выравнивание столбцов, как его объявила сама таблица.
     pub alignments: Vec<Align>,
     pub rows: Vec<Row>,
+}
+
+impl Table {
+    /// Таблица простым текстом — для буфера обмена: ячейки через табуляцию,
+    /// строки через перевод строки. Так её понимает и редактор, и таблица,
+    /// куда её вставят, а типографские знаки сняты, как у прочего текста.
+    pub fn text(&self) -> String {
+        self.rows
+            .iter()
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .map(|cell| typeset::plain(&cell.text).replace(['\t', '\n'], " "))
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1698,6 +1719,24 @@ mod tests {
         assert_eq!(cell.runs[0].styles, vec![Style::Strong]);
         let link = &table.rows[1].cells[1];
         assert_eq!(link.links[0].target, "https://e.com");
+    }
+
+    /// Таблица в буфер обмена — ячейки через табуляцию, строки через перевод
+    /// строки; поиск находит в ячейке то же, что в тексте (#10).
+    #[test]
+    fn a_table_copies_as_tab_separated_text_and_its_cells_are_searchable() {
+        let page = Page::of(&doc(
+            "| Город | Население |\n|:--|--:|\n| Нижний\u{a0}Новгород | 1\u{a0}200\u{a0}000 |\n| Тверь | 400\u{a0}000 |\n",
+        ));
+        let Block::Table(table) = &page.blocks[0].block else {
+            panic!("{:?}", page.blocks)
+        };
+        assert_eq!(
+            table.text(),
+            "Город\tНаселение\nНижний Новгород\t1 200 000\nТверь\t400 000"
+        );
+        assert_eq!(hits(&table.rows[1].cells[0].text, "нижний новгород"), vec![(0, 15)]);
+        assert!(hits(&page.text, "Тверь").is_empty());
     }
 
     #[test]
