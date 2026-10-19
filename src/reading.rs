@@ -301,14 +301,13 @@ pub fn offer(progress: &Progress, saved: &Saved) -> Option<(usize, u32)> {
 
 /// Вехи внутри длинного раздела — на уровень ниже, для того раздела, где
 /// читатель сейчас. Раздел длиннее [`LONG_SECTION_SCREENS`] экранов делится
-/// началами абзацев (`leads`) примерно по экрану; подпись — доля документа
-/// и начало абзаца: «40% · Beginning of the paragraph…».
+/// началами абзацев (`leads`) примерно по экрану; подпись — начало абзаца,
+/// место рядом ставит интерфейс ([`place`]).
 pub fn inner_waypoints(
     leads: &[Mark],
     from: usize,
     to: usize,
     screen: usize,
-    total: usize,
     level: u8,
 ) -> Vec<Mark> {
     if screen == 0 || to <= from || to - from < screen * LONG_SECTION_SCREENS {
@@ -327,7 +326,7 @@ pub fn inner_waypoints(
         }
         out.push(Mark {
             level: level + 1,
-            title: waypoint_label(lead, total),
+            title: lead.title.clone(),
             offset: lead.offset,
             heading: false,
         });
@@ -336,9 +335,11 @@ pub fn inner_waypoints(
     out
 }
 
-/// Подпись вехи с её местом: «40% · Начало абзаца…».
-pub fn waypoint_label(mark: &Mark, total: usize) -> String {
-    format!("{}% · {}", percent(mark.offset, total), mark.title)
+/// Место вехи в тексте — «40%» (#24). На полке оно стоит справа, как номер
+/// страницы в оглавлении книги: где это, а не сколько прочитано, — прочитанное
+/// показывает полоска. Только у вех: у заголовка есть имя, число рядом — шум.
+pub fn place(offset: usize, total: usize) -> String {
+    format!("{}%", percent(offset, total))
 }
 
 fn percent(at: usize, total: usize) -> u32 {
@@ -650,13 +651,14 @@ mod tests {
             })
             .collect();
         // Раздел 2000..12000, экран — 2000 знаков, документ — 20000.
-        let inner = inner_waypoints(&leads, 2000, 12000, 2000, 20000, 2);
+        let inner = inner_waypoints(&leads, 2000, 12000, 2000, 2);
         let offsets: Vec<usize> = inner.iter().map(|mark| mark.offset).collect();
         assert_eq!(offsets, vec![4000, 6000, 8000, 10000]);
-        assert_eq!(inner[0].title, "20% · Paragraph 8…");
+        assert_eq!(inner[0].title, "Paragraph 8…");
+        assert_eq!(place(inner[0].offset, 20000), "20%");
         assert_eq!(inner[0].level, 3);
         // Короткий раздел не делится.
-        assert!(inner_waypoints(&leads, 2000, 6000, 2000, 20000, 2).is_empty());
+        assert!(inner_waypoints(&leads, 2000, 6000, 2000, 2).is_empty());
     }
 
     #[test]

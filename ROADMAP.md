@@ -264,7 +264,9 @@ the history, a bookmark, another tab — does too.
   the last section does not read the article.
 - **On the shelf**, a thin bar under every row: the share of its section read.
   Waypoints — the paragraph starts that stand in for headings when a page has none —
-  are rows like the others.
+  are rows like the others, with their place in the text at the right, "40%", the way
+  a book's contents gives page numbers (#24): where the row is, while the bar says how
+  much of it is read. Headings carry no number; their name says where they are.
 - **A file you own:** `reading.tsv`, one line per page — address, a fingerprint of the
   text, the place, the stretches read. A thousand pages at most, the oldest leaving
   first; "forget everything" empties it. The core does the counting, so the window and
@@ -276,9 +278,6 @@ read starts over.
 
 Still open:
 
-- Every row of the shelf is labelled "40% · …", but the number is the row's place in
-  the text, not the share read, which the bar shows. Which of the two belongs in the
-  label is #24.
 - A section several screens long is to be split by waypoints of its own, shown for the
   current section only. The core computes them; neither front-end shows them yet.
 

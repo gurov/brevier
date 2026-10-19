@@ -903,8 +903,9 @@ class MainActivity : Activity(), ArticleHost {
         // Веха несёт своё место в подписи (#19): «40% · Начало абзаца…».
         val length = shown?.page?.text?.length ?: 0
         marks.forEach {
-            val title = if (it.heading || length == 0) it.title else "${Math.round(it.at * 100f / length)}% · ${it.title}"
-            rows += ShelfRow.Jump(title, it.level, it.at, it.heading)
+            // У вехи — её место в тексте, справа (#24); у заголовка есть имя.
+            val place = if (it.heading || length == 0) null else "${Math.round(it.at * 100f / length)}%"
+            rows += ShelfRow.Jump(it.title, it.level, it.at, it.heading, place)
         }
         val feeds = shown?.feeds ?: emptyList()
         if (feeds.isNotEmpty()) {

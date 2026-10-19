@@ -67,7 +67,7 @@ fun Context.label(text: String, fonts: Fonts, color: Int, sp: Float = 15f, mediu
 /** Строка полки: оглавление прокручивает, строка проекта и сайта уводит. */
 sealed class ShelfRow {
     class Header(val title: String) : ShelfRow()
-    class Jump(val title: String, val level: Int, val at: Int, val heading: Boolean) : ShelfRow()
+    class Jump(val title: String, val level: Int, val at: Int, val heading: Boolean, val place: String? = null) : ShelfRow()
     class Open(val title: String, val address: String, val dim: Boolean) : ShelfRow()
     /** Заметка (#39): начало цитаты и приписанное; нажатие — к месту в тексте. */
     class Note(val note: NoteSpot) : ShelfRow()
@@ -201,15 +201,20 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
                     view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                     // Веха — не структура автора, а наша выжимка. Пусть это видно.
                     view.setTextColor(if (row.heading) palette.ink else palette.dim)
-                    view.setPadding(side + context.dp(12f) * (row.level - 1).coerceAtLeast(0), context.dp(7f), side, context.dp(7f))
+                    // Место вехи (#24) стоит справа, как номер страницы в оглавлении,
+                    // — столбцом шириной «100%», чтобы текст под него не заходил.
+                    val place = row.place?.let { PlaceMark(view, it, palette.dim, side) }
+                    val right = side + (place?.let { it.room() + context.dp(8f) } ?: 0)
+                    view.setPadding(side + context.dp(12f) * (row.level - 1).coerceAtLeast(0), context.dp(7f), right, context.dp(7f))
                     val base = if (position == here) GradientDrawable().apply { setColor(palette.chosen) } else pressable(palette.touched, 0f)
                     // Справа — тонкая полоска: сколько раздела прочитано (#19).
                     val share = shares.getOrNull(jumps.getOrElse(position) { -1 }) ?: 0f
-                    view.background = if (share > 0f) {
-                        android.graphics.drawable.LayerDrawable(arrayOf(base, ShareMark(share, palette.rule, palette.dim, context.dp(3f), context.dp(7f))))
-                    } else {
-                        base
-                    }
+                    val layers = listOfNotNull(
+                        base,
+                        place,
+                        if (share > 0f) ShareMark(share, palette.rule, palette.dim, context.dp(3f), context.dp(7f)) else null,
+                    )
+                    view.background = if (layers.size == 1) base else android.graphics.drawable.LayerDrawable(layers.toTypedArray())
                 }
                 is ShelfRow.Open -> {
                     view.text = row.title
@@ -245,6 +250,40 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
             return view
         }
     }
+}
+
+/**
+ * Место вехи в тексте — «40%» (#24) — у правого края строки полки, на линии
+ * первой строки: тем же кеглем и гарнитурой, что подпись, цифрами одной
+ * ширины. Рисует фон, а не второй `TextView`: строка полки — один вид.
+ */
+class PlaceMark(
+    private val view: TextView,
+    private val text: String,
+    color: Int,
+    private val right: Int,
+) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        textSize = view.textSize
+        typeface = view.typeface
+        fontFeatureSettings = "tnum"
+        textAlign = android.graphics.Paint.Align.RIGHT
+    }
+
+    /** Ширина столбца: самое длинное, что бывает, — «100%». */
+    fun room() = kotlin.math.ceil(paint.measureText("100%")).toInt()
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        val baseline = view.baseline
+        if (baseline < 0) return
+        canvas.drawText(text, (bounds.right - right).toFloat(), (bounds.top + baseline).toFloat(), paint)
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
 
 /** Полоска цвета заметки у левого края строки полки (#39). */

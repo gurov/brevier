@@ -5294,15 +5294,15 @@ fn fill_contents(
 
     let mut bars: Vec<ShareBar> = Vec::new();
     for mark in marks {
-        // Веха несёт своё место в подписи (#19): «40% · Начало абзаца…» —
-        // заголовка у неё нет, и где она, иначе не понять.
-        let title = if mark.heading || total == 0 {
-            mark.title.clone()
-        } else {
-            reading::waypoint_label(mark, total)
-        };
-        let (row, label, area, share) =
-            shelf_row_with_share(&title, i32::from(mark.level.saturating_sub(1)) * 12, dark);
+        // У вехи справа — её место в тексте (#24): заголовка у неё нет,
+        // и где она, иначе не понять.
+        let place = (!mark.heading && total > 0).then(|| reading::place(mark.offset, total));
+        let (row, label, area, share) = shelf_row_with_share(
+            &mark.title,
+            i32::from(mark.level.saturating_sub(1)) * 12,
+            place.as_deref(),
+            dark,
+        );
         if !mark.heading {
             // Веха — не структура автора, а наша выжимка. Пусть это видно.
             label.add_css_class("dim-label");
@@ -5416,14 +5416,31 @@ fn shelf_row(title: &str, indent: i32) -> (gtk::ListBoxRow, gtk::Label) {
 
 /// Строка оглавления с полоской справа: доля прочитанного в её разделе
 /// (#19). Тонкая и молчит, пока раздел не начат: полка — для того, что на
-/// странице, а не отчёт о чтении.
+/// странице, а не отчёт о чтении. У вехи перед полоской — её место, «40%»
+/// (#24), как номер страницы в оглавлении книги: приглушённо, на линии первой
+/// строки, цифрами одной ширины, чтобы столбец стоял ровно.
 fn shelf_row_with_share(
     title: &str,
     indent: i32,
+    place: Option<&str>,
     dark: bool,
 ) -> (gtk::ListBoxRow, gtk::Label, gtk::DrawingArea, Rc<Cell<f32>>) {
     let (row, label) = shelf_row(title, indent);
     label.set_hexpand(true);
+    let place = place.map(|place| {
+        let numbers = pango::AttrList::new();
+        numbers.insert(pango::AttrFontFeatures::new("tnum 1"));
+        let label = gtk::Label::builder()
+            .label(place)
+            .xalign(1.0)
+            .valign(gtk::Align::Start)
+            .margin_top(4)
+            .margin_end(6)
+            .attributes(&numbers)
+            .build();
+        label.add_css_class("dim-label");
+        label
+    });
     let share = Rc::new(Cell::new(0.0_f32));
     let area = gtk::DrawingArea::builder()
         .content_width(3)
@@ -5461,6 +5478,9 @@ fn shelf_row_with_share(
     let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     row.set_child(None::<&gtk::Widget>);
     line.append(&label);
+    if let Some(place) = &place {
+        line.append(place);
+    }
     line.append(&area);
     row.set_child(Some(&line));
     (row, label, area, share)
