@@ -48,7 +48,13 @@ GNOME Software and Discover open the same
 [`brevier.flatpakref`](https://brevier.bizibah.com/flatpak/brevier.flatpakref) with a
 click. After that `flatpak update` (or the store app) brings each new version. The
 repository is signed, and the key comes with the `.flatpakref`: an update signed by
-anyone else, or older than what you have, is refused. Each release also has the
+anyone else, or older than what you have, is refused. The key's fingerprint:
+
+```
+6B4E DDB5 9942 1591 7552  C75F CE2B EBF8 1389 1B3B
+```
+
+Each release also has the
 same app as one file,
 [`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.14.0/brevier.flatpak)
 (`flatpak install --user ./brevier.flatpak`). Files released after 0.14.0 update from the

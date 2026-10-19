@@ -222,12 +222,22 @@ Work items:
 - the same path from the command line, so `--stdin` and the extension are one code
   path with two front doors
 
-### 11. Flathub (#1)
+### 11. Updates on Linux (#1)
 
-Submit `io.github.gurov.brevier`: metainfo, screenshots, the offline build already
-in `packaging/`. After that Brevier is one search away instead of one wget away, and
-updates arrive with the store — the bundle in Releases has none. The window has been
-run on Wayland, as a native client (#12), which the submission waited for.
+The Flatpak updates now, from Brevier's own repository rather than from a store:
+`flatpak install --user https://brevier.bizibah.com/flatpak/brevier.flatpakref` once,
+then `flatpak update`, GNOME Software or Discover bring every release. The site rebuilds
+the repository from each release's bundle; its commits and summary are signed, and the
+key travels in the `.flatpakref` and in the bundle, so a bundle from Releases updates
+too. An update signed by another key, or older than the installed one, is refused.
+
+Flathub was the plan, and it is set aside. Its policy on generative AI wants the
+manifest, the submission and every reply to the reviewers written without AI, and the
+AI-written code disclosed — nearly all of Brevier's — with no promise of acceptance; a
+project only weeks old is "generally not accepted" either. What that costs is the
+search: Brevier is not one search away in the store apps. The submission waited for
+Wayland (#12), which is done; it can be taken up again if the policy or the project's
+age changes.
 
 Two cheaper doors alongside: crates.io (`cargo install brevier --features ui`, published
 since 0.12.0), and the cli as one
@@ -369,8 +379,8 @@ the operating system — and the third costs a promise, so it is not a way.
 
 ### macOS and Windows
 
-Builds for both, once Linux is in a store. GTK 4 runs on both and the fonts ship
-inside the binary, so the typography holds. What does not hold is accessibility: GTK
+Windows has a build since 0.8.0, an installer and a zip; macOS not yet. GTK 4 runs on
+both and the fonts ship inside the binary, so the typography holds. What does not hold is accessibility: GTK
 speaks AT-SPI, and VoiceOver and NVDA do not listen. The builds ship with that stated
 in the README, the way the Linux-only note is stated today. Whether the gap is later
 closed with a second front-end is a question for when there are readers on those
@@ -409,7 +419,8 @@ Recorded so that nobody rediscovers them in six months.
 
 - **Authenticated reading** goes through the companion extension. Brevier never
   holds a cookie or any other credential.
-- **Platforms:** Linux first and in a store; then Android, as a second front-end over
+- **Platforms:** Linux first, updated from Brevier's own Flatpak repository (item 11);
+  then Android, as a second front-end over
   the same core rather than another build of the same window — readers read on phones,
   and it is the one platform where accessibility improves rather than degrades; macOS
   and Windows builds after that, with their accessibility gap stated rather than hidden.
