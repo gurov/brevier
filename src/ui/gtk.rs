@@ -2477,13 +2477,19 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                     .try_borrow()
                     .ok()
                     .and_then(|borrowed| {
-                        borrowed.tabs.iter().find(|tab| tab.view == view).map(|tab| {
-                            tab.tables
-                                .iter()
-                                .filter(|table| (start.offset()..end.offset()).contains(&table.at))
-                                .map(|table| (table.at, table.text.clone()))
-                                .collect()
-                        })
+                        borrowed
+                            .tabs
+                            .iter()
+                            .find(|tab| tab.view == view)
+                            .map(|tab| {
+                                tab.tables
+                                    .iter()
+                                    .filter(|table| {
+                                        (start.offset()..end.offset()).contains(&table.at)
+                                    })
+                                    .map(|table| (table.at, table.text.clone()))
+                                    .collect()
+                            })
                     })
                     .unwrap_or_default();
                 let mut selected = String::new();
@@ -7027,7 +7033,11 @@ fn mark_cells(tables: &[TableCells], hits: &[Hit], here: Option<Hit>) {
                 .map_or(text.len(), |(byte, _)| byte) as u32
         };
         let (start, end) = (byte(from), byte(to));
-        let background = if here == Some(*hit) { FOUND_HERE } else { FOUND };
+        let background = if here == Some(*hit) {
+            FOUND_HERE
+        } else {
+            FOUND
+        };
         let list = lists.entry((table, cell)).or_default();
         for (hex, back) in [(background, true), (FOUND_INK, false)] {
             let [r, g, b] = rgb(hex);

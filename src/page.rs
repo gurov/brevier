@@ -1735,7 +1735,10 @@ mod tests {
             table.text(),
             "Город\tНаселение\nНижний Новгород\t1 200 000\nТверь\t400 000"
         );
-        assert_eq!(hits(&table.rows[1].cells[0].text, "нижний новгород"), vec![(0, 15)]);
+        assert_eq!(
+            hits(&table.rows[1].cells[0].text, "нижний новгород"),
+            vec![(0, 15)]
+        );
         assert!(hits(&page.text, "Тверь").is_empty());
     }
 
