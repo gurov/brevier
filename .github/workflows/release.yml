@@ -1,7 +1,8 @@
 name: Release
 
 # Выпуск: по тегу vX.Y.Z собрать то, что люди скачивают и ставят, — архив
-# для Linux, пакет Flatpak, APK для Android, установщик и zip для Windows —
+# для Linux, пакет Flatpak, APK для Android, установщик и zip для Windows,
+# cli одним файлом для Linux, macOS и Windows —
 # и выложить релизом на GitHub, а исходники — крейтом на crates.io; затем
 # пересобрать сайт — с ним репозиторий flatpak, откуда приходят обновления.
 # Ручной запуск (Run workflow) собирает всё то же без выкладки: так проверяют,
@@ -61,6 +62,55 @@ jobs:
         with:
           name: tarball
           path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # cli одним файлом на платформу (packaging/cli.sh): без GTK и OpenSSL,
+  # Linux статически под musl, macOS — универсальный. Каждый архив проверяется
+  # там же, где собран: распаковать и открыть страницу по HTTPS — это и TLS
+  # с доверием ОС, которое на musl легко потерять.
+  cli:
+    name: cli — ${{ matrix.platform }}
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - platform: x86_64-linux
+            runner: ubuntu-latest
+          - platform: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - platform: macos
+            runner: macos-latest
+          - platform: windows-x86_64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install musl
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - run: packaging/cli.sh ${{ matrix.platform }} "$PWD/dist"
+      - name: Open a page with what was packed
+        run: |
+          mkdir unpacked
+          if [ -f dist/brevier-cli-${{ matrix.platform }}.zip ]; then
+            7z x -ounpacked dist/brevier-cli-${{ matrix.platform }}.zip >/dev/null
+          else
+            tar -xzf dist/brevier-cli-${{ matrix.platform }}.tar.gz -C unpacked
+          fi
+          unpacked/brevier-cli-${{ matrix.platform }}/brevier https://example.com/ | grep -q 'Example Domain'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: dist/brevier-cli-*
           if-no-files-found: error
 
   flatpak:
@@ -280,7 +330,7 @@ jobs:
 
   publish:
     name: publish the release
-    needs: [version, tarball, flatpak, android, windows]
+    needs: [version, tarball, cli, flatpak, android, windows]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:

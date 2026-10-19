@@ -217,8 +217,10 @@ notes in `packaging/notes/vX.Y.Z.md`, a store changelog in
 `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` (`X·10000 + Y·100 + Z`), the
 same number as `versionCode` in `android/app/build.gradle.kts` (F-Droid reads it there; the
 build checks it against the version), and the version in the README's download links; CI
-checks the tag against `Cargo.toml`, builds the tarball, the Flatpak, the signed APK and the
-Windows installer and zip, and publishes them with `SHA256SUMS`. Before the files are
+checks the tag against `Cargo.toml`, builds the tarball, the Flatpak, the signed APK, the
+Windows installer and zip, and the command line alone for Linux, macOS and Windows
+(`packaging/cli.sh`, each archive opening a page where it was built), and publishes them
+with `SHA256SUMS`. Before the files are
 published, the Windows job installs the installer on a clean Windows, starts the window and
 uninstalls it again; a manual run of the workflow keeps a screenshot of that window. A published tag is never moved: something newer is a new
 version.

@@ -114,6 +114,20 @@ F-Droid builds Brevier from source and publishes this same APK, signed with this
 when its build matches ours byte for byte. So an install from either place updates from the
 other. A new version reaches F-Droid a few days after it appears in Releases.
 
+**The command line alone**, one file with nothing to install beside it: no GTK, no OpenSSL,
+on Linux statically linked, so any distribution will do. From 0.15.0 on, every release has
+an archive for Linux on x86_64 and on 64-bit ARM, for macOS (one file for Apple silicon and
+Intel) and for Windows, always at the same address:
+
+```sh
+curl -L https://github.com/gurov/brevier/releases/latest/download/brevier-cli-x86_64-linux.tar.gz | tar xz
+./brevier-cli-x86_64-linux/brevier https://example.com/article
+```
+
+The others are `brevier-cli-aarch64-linux.tar.gz`, `brevier-cli-macos.tar.gz` and
+`brevier-cli-windows-x86_64.zip`. The macOS file is not signed: downloaded with a browser,
+it needs `xattr -d com.apple.quarantine brevier` once; with `curl` it does not.
+
 Every release is built by CI from its tag, and `SHA256SUMS` lists the checksum of each
 file. To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building).
 
