@@ -565,10 +565,20 @@ fn label(link: &NodeRef) -> String {
 ///   а ссылка в абзац длиной — это не пункт меню, а текст, случайно
 ///   оказавшийся в подвале;
 /// - **один адрес — одна строка**: меню на странице лежит дважды, для
-///   широкого экрана и для узкого, и оба раза целиком.
+///   широкого экрана и для узкого, и оба раза целиком;
+/// - **одна подпись — одна строка**: раздел стоит в шапке, в подвале
+///   и в меню для узкого экрана, бывает — по немного разным адресам; две
+///   строки «Politik» читатель не различит, остаётся первая. А подпись
+///   у четырёх адресов и больше — «Комментарии» у каждой карточки ленты
+///   (у Хабра — двадцать строк подряд), «Подробности», «weiter», «Por»
+///   перед именем автора — это действия записей, а не пункты меню, и уходит
+///   целиком. Порог — по сохранённым главным 211 сайтов: у пунктов меню
+///   повторов два-три, у действий — от четырёх (19 октября 2026).
 pub(crate) fn site(doc: &Document, url: &str) -> Vec<Link> {
     const MAX_TITLE: usize = 40;
     const MAX_ROWS: usize = 60;
+    // Сколько раз один пункт меню бывает на странице: шапка, подвал, узкий экран.
+    const MENU_COPIES: usize = 3;
 
     let base = Url::parse(url).ok();
     let host = base
@@ -585,9 +595,6 @@ pub(crate) fn site(doc: &Document, url: &str) -> Vec<Link> {
     let mut rows: Vec<Link> = Vec::new();
 
     for link in doc.select(NAV_TAGS).nodes() {
-        if rows.len() >= MAX_ROWS {
-            break;
-        }
         let Some(href) = link.attr("href") else {
             continue;
         };
@@ -621,6 +628,18 @@ pub(crate) fn site(doc: &Document, url: &str) -> Vec<Link> {
         rows.push(Link { title, address });
     }
 
+    // Предел — после отсева: двадцать «Комментариев» иначе съели бы место
+    // настоящих пунктов, стоящих ниже.
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    for row in &rows {
+        *uses.entry(row.title.to_lowercase()).or_default() += 1;
+    }
+    let mut named: HashSet<String> = HashSet::new();
+    rows.retain(|row| {
+        let title = row.title.to_lowercase();
+        uses[&title] <= MENU_COPIES && named.insert(title)
+    });
+    rows.truncate(MAX_ROWS);
     rows
 }
 
@@ -3739,6 +3758,33 @@ mod tests {
         let titles: Vec<&str> = rows.iter().map(|link| link.title.as_str()).collect();
         assert_eq!(titles, vec!["Новости", "О проекте"]);
         assert_eq!(rows[0].address, "https://example.org/news/");
+    }
+
+    /// Подпись у многих адресов — действие у записей ленты, а не меню;
+    /// у двух-трёх — пункт меню в шапке и подвале, и он остаётся один.
+    #[test]
+    fn a_label_repeated_for_different_addresses_is_not_navigation() {
+        let cards: String = (1..=20)
+            .map(|n| format!("<div class=\"tm-article-snippet__footer\"><a href=\"/ru/articles/{n}/comments/\">Комментарии</a></div>"))
+            .collect();
+        let menu: String = (1..=60)
+            .map(|n| format!("<a href=\"/ru/section/{n}/\">Раздел {n}</a>"))
+            .collect();
+        // «Новости» в шапке и подвале по разным адресам — пункт меню, первый.
+        let page = format!(
+            "<html><body><nav><a href=\"/ru/articles/\">Статьи</a><a href=\"/ru/news/\">Новости</a></nav>\
+             <main>{cards}</main><footer><a href=\"/ru/news/?from=footer\">Новости</a>{menu}\
+             <a href=\"/ru/about/\">О сайте</a><a href=\"/ru/about/\">о сайте</a></footer></body></html>"
+        );
+        let doc = Document::from(page);
+        let rows = site(&doc, "https://habr.com/ru/");
+        let titles: Vec<&str> = rows.iter().map(|link| link.title.as_str()).collect();
+        assert!(!titles.contains(&"Комментарии"), "{titles:?}");
+        assert_eq!(&titles[..3], ["Статьи", "Новости", "Раздел 1"]);
+        assert_eq!(rows[1].address, "https://habr.com/ru/news/");
+        // Предел считается после отсева: «Комментарии» места не съели.
+        assert_eq!(rows.len(), 60);
+        assert_eq!(titles[59], "Раздел 58");
     }
 
     /// Ссылка на страницу, на которой читатель и стоит, никуда не ведёт.
