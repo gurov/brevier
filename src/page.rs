@@ -695,7 +695,25 @@ struct Writer<'a> {
 }
 
 impl Writer<'_> {
+    /// Текст страницы. Знак объекта в нём самом (остаётся от вставки
+    /// из редактора) — не объект, а модель держит правило «знак — место
+    /// объекта»: по нему сверяет `faults`, знак пропускают поиск и заметки
+    /// (фаззинг, 21 октября 2026). Своего смысла у такого знака в тексте
+    /// нет — долой; сам объект ставит `sign`.
     fn put(&mut self, text: &str, styles: &[Style]) {
+        if text.contains(OBJECT) {
+            self.push(&without_objects(text), styles);
+        } else {
+            self.push(text, styles);
+        }
+    }
+
+    /// Знак объекта на месте картинки или таблицы.
+    fn sign(&mut self) {
+        self.push(&OBJECT.to_string(), &[]);
+    }
+
+    fn push(&mut self, text: &str, styles: &[Style]) {
         if text.is_empty() {
             return;
         }
@@ -774,7 +792,7 @@ impl Writer<'_> {
             self.put("\n", &[]);
         }
         let at = self.chars;
-        self.put(&OBJECT.to_string(), &[]);
+        self.sign();
         self.page.blocks.push(Placed { at, block });
         self.put("\n", &[Style::Body]);
     }
@@ -783,7 +801,7 @@ impl Writer<'_> {
     fn image(&mut self, source: Source, alt: String, inline: bool) {
         if inline {
             let at = self.chars;
-            self.put(&OBJECT.to_string(), &[]);
+            self.sign();
             self.page.blocks.push(Placed {
                 at,
                 block: Block::Image {
@@ -1246,6 +1264,8 @@ fn cell_of<'n>(node: &'n AstNode<'n>) -> Cell {
 
 fn fill_cell<'n>(node: &'n AstNode<'n>, cell: &mut Cell, chars: &mut usize, styles: &[Style]) {
     let put = |cell: &mut Cell, chars: &mut usize, text: &str, styles: &[Style]| {
+        // Знак объекта в ячейке — то же, что в тексте (`Writer::put`).
+        let text = &without_objects(text);
         if text.is_empty() {
             return;
         }
@@ -1525,6 +1545,22 @@ mod tests {
         page.links[0].end = page.text.chars().count() + 1;
         page.blocks[0].at += 1;
         assert_eq!(page.faults().len(), 2, "{:?}", page.faults());
+    }
+
+    /// Знак объекта в тексте самой страницы — не объект: знаков в тексте
+    /// ровно столько, сколько объектов, и в ячейке их нет.
+    #[test]
+    fn an_object_sign_in_the_page_text_is_not_an_object() {
+        let page = Page::of(&doc(
+            "Pasted \u{FFFC} here.\n\n| A |\n|---|\n| x\u{FFFC}y |\n\n![alone](https://e.com/a.png)\n",
+        ));
+        assert_eq!(page.faults(), Vec::<String>::new());
+        assert_eq!(page.text.matches(OBJECT).count(), page.blocks.len());
+        assert!(page.text.starts_with("Pasted  here."), "{:?}", page.text);
+        let Block::Table(table) = &page.blocks[0].block else {
+            panic!("{:?}", page.blocks[0].block);
+        };
+        assert_eq!(table.rows[1].cells[0].text, "xy");
     }
 
     /// Страница, что раскладывается, под защитой та же; замена упавшей —
