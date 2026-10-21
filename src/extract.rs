@@ -219,6 +219,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     unprint(&doc);
     unbutton(&doc);
     unpermalink(&doc);
+    drop_broken_ld(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.
     let thumbs = thumbs(&doc, url);
@@ -736,6 +737,30 @@ fn deicon(doc: &Document) {
 /// загрузки стилей, `$RS` — кусок встаёт на место заглушки `P:…`. `$RX`
 /// («рисовать на клиенте») не трогаем: на его месте остаётся запасное.
 const STREAM_CALLS: [&str; 3] = ["$RC(", "$RR(", "$RS("];
+
+/// Убрать JSON-LD, который не разбирается как JSON, — до `Readability`.
+///
+/// `dom_smoothie` читает JSON-LD крейтом `gjson`, а тот битый JSON не
+/// отвергает, а читает дальше без проверки: после `\u` берёт четыре байта,
+/// даже если среди них не цифры, а половина русской буквы (`"\u044ж"`),
+/// и из остатка буквы собирает `String` с испорченным UTF-8. Это
+/// неопределённое поведение: первый же проход по такой строке читал
+/// за концом памяти, и процесс падал с SIGSEGV (фаззинг, 21 октября 2026).
+/// Целый JSON до этой ветки не доходит, поэтому `gjson` получает только
+/// то, что принял наш строгий разбор (`json::parse`). Оболочку CDATA
+/// снимаем так же, как `dom_smoothie`, иначе выбросили бы целое объявление.
+fn drop_broken_ld(doc: &Document) {
+    for script in doc.select(r#"script[type="application/ld+json"]"#).nodes() {
+        let text = script.text();
+        let content = match text.trim_start().strip_prefix("<![CDATA[") {
+            Some(rest) => rest.split("]]>").next().unwrap_or(rest),
+            None => &text,
+        };
+        if crate::json::parse(content.trim()).is_none() {
+            script.remove_from_parent();
+        }
+    }
+}
 
 /// Собрать страницу, которую React отдал потоком (потоковый SSR).
 ///
@@ -3952,6 +3977,29 @@ mod tests {
 
     fn ld(json: &str) -> String {
         format!("<script type=\"application/ld+json\">{json}</script>")
+    }
+
+    /// До `gjson` доходит только целый JSON-LD: обрезанный `\u` перед
+    /// русской буквой ронял процесс. Целое объявление и объявление
+    /// в CDATA остаются.
+    #[test]
+    fn broken_json_ld_never_reaches_readability() {
+        let whole = r#"{"@type":"NewsArticle","headline":"\u041f\u043e\u0434"}"#;
+        let broken = r#"{"@type":"NewsArticle","headline":"\u041f\u044ж"}"#;
+        let doc = Document::from(format!(
+            "<head>{}{}<script type=\"application/ld+json\"><![CDATA[{whole}]]></script></head>",
+            ld(whole),
+            ld(broken),
+        ));
+        drop_broken_ld(&doc);
+        let left: Vec<String> = doc
+            .select("script")
+            .nodes()
+            .iter()
+            .map(|node| node.text().to_string())
+            .collect();
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert!(left.iter().all(|text| !text.contains('ж')), "{left:?}");
     }
 
     /// Страница объявила себя статьёй — одной, с тем же заголовком и не
