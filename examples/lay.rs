@@ -55,8 +55,7 @@ fn main() -> ExitCode {
     };
     // Не `guarded`: паника здесь — то, что прогон ищет.
     let page = Page::of(&document);
-    let mut broken = Vec::new();
-    check_model(&page, &mut broken);
+    let mut broken = page.faults();
     let waypoints = waypoints(&page);
     exercise_reading(url, &page);
     check_find(&page, &mut broken);
@@ -76,62 +75,6 @@ fn main() -> ExitCode {
         eprintln!("{problem}");
     }
     ExitCode::from(70)
-}
-
-/// Смещения модели — внутри текста, участки не вывернуты, на месте каждого
-/// объекта — знак объекта. Окно кладёт текст в буфер как есть и ставит
-/// виджеты по этим смещениям: разойдись они — GTK упадёт или нарисует
-/// не там.
-fn check_model(page: &Page, broken: &mut Vec<String>) {
-    let chars: Vec<char> = page.text.chars().collect();
-    let total = chars.len();
-    for run in &page.runs {
-        if run.start > run.end || run.end > total {
-            broken.push(format!("run {}..{} of {total}", run.start, run.end));
-        }
-    }
-    for link in &page.links {
-        if link.start > link.end || link.end > total {
-            broken.push(format!("link {}..{} of {total}", link.start, link.end));
-        }
-    }
-    for (name, at) in &page.anchors {
-        if *at > total {
-            broken.push(format!("anchor {name} at {at} of {total}"));
-        }
-    }
-    for mark in page.contents.iter().chain(&page.leads) {
-        if mark.offset > total {
-            broken.push(format!(
-                "mark {:?} at {} of {total}",
-                mark.title, mark.offset
-            ));
-        }
-    }
-    let objects = chars.iter().filter(|&&ch| ch == page::OBJECT).count();
-    if objects != page.blocks.len() {
-        broken.push(format!(
-            "{objects} object signs for {} blocks",
-            page.blocks.len()
-        ));
-    }
-    for placed in &page.blocks {
-        if chars.get(placed.at) != Some(&page::OBJECT) {
-            broken.push(format!("block at {} is not on an object sign", placed.at));
-        }
-        if let Block::Table(table) = &placed.block {
-            for cell in table.rows.iter().flat_map(|row| &row.cells) {
-                let length = cell.text.chars().count();
-                let spans = cell.runs.iter().map(|run| (run.start, run.end));
-                let spans = spans.chain(cell.links.iter().map(|link| (link.start, link.end)));
-                for (start, end) in spans {
-                    if start > end || end > length {
-                        broken.push(format!("cell span {start}..{end} of {length}"));
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Вехи внутри длинных разделов — как их делит полка (#19, #24).

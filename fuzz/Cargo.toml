@@ -1,0 +1,77 @@
+# Фаззинг ядра: cargo-fuzz (libFuzzer), нужен nightly. Как гонять — в
+# шапке `fuzz_targets/html.rs` и в CONTRIBUTING. Свой крейт и своё
+# рабочее пространство: в сборку и в крейт `brevier` не входит.
+[package]
+name = "brevier-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+brevier = { path = "..", features = ["typeset", "images"] }
+
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "html"
+path = "fuzz_targets/html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markdown"
+path = "fuzz_targets/markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "feed"
+path = "fuzz_targets/feed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "json"
+path = "fuzz_targets/json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "address"
+path = "fuzz_targets/address.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "find"
+path = "fuzz_targets/find.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "notes"
+path = "fuzz_targets/notes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "typeset"
+path = "fuzz_targets/typeset.rs"
+test = false
+doc = false
+bench = false

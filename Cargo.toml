@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "gui", "text-processing"]
 # экрана живут в репозитории, а не в `cargo install`.
 exclude = [
     "/corpus",
+    "/fuzz",
     "/android",
     "/site",
     "/packaging",

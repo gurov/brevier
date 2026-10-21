@@ -187,6 +187,21 @@ Four jobs is the default; eight bring 403s from some hosts, and a page marked re
 slides into a refusal. `corpus/out/` is not in git — only the expected outputs are; the
 saved pages stay there too, since other people's pages do not go into a public repository.
 
+### Fuzzing
+
+Each target in `fuzz/fuzz_targets/` takes one part of the core from raw bytes to its end:
+HTML to the page model, Markdown, feeds, JSON, the address bar, find, notes and
+typesetting. It checks what must always hold: no panic, a page model that adds up
+(`Page::faults`), a note found where it was left, typesetting that adds only what `plain`
+takes away. It needs nightly and `cargo install cargo-fuzz`:
+
+```sh
+cargo +nightly fuzz run html -- -max_total_time=600 -max_len=65536 -timeout=10
+```
+
+Seed `fuzz/corpus/<target>/` with saved pages. The corpus stays out of git, and so do the
+findings in `fuzz/artifacts/`. Each finding becomes a unit test next to the code it broke.
+
 ## Packaging and releases
 
 ```sh

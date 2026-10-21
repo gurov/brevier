@@ -360,6 +360,68 @@ impl Page {
         page
     }
 
+    /// Где модель не сходится сама с собой: смещение за концом текста,
+    /// вывернутый участок, объект не на своём знаке. Окно кладёт текст
+    /// в буфер как есть и ставит теги и виджеты по этим смещениям —
+    /// разойдись они, GTK упадёт или нарисует не там. Пусто — сходится.
+    /// Для проверок: замороженного набора (`examples/lay.rs`), фаззинга
+    /// (`fuzz/`) и тестов.
+    pub fn faults(&self) -> Vec<String> {
+        let mut faults = Vec::new();
+        let chars: Vec<char> = self.text.chars().collect();
+        let total = chars.len();
+        let mut span = |what: &str, start: usize, end: usize, length: usize| {
+            if start > end || end > length {
+                faults.push(format!("{what} {start}..{end} of {length}"));
+            }
+        };
+        for run in &self.runs {
+            span("run", run.start, run.end, total);
+        }
+        for link in &self.links {
+            span("link", link.start, link.end, total);
+        }
+        for placed in &self.blocks {
+            if let Block::Table(table) = &placed.block {
+                for cell in table.rows.iter().flat_map(|row| &row.cells) {
+                    let length = cell.text.chars().count();
+                    for run in &cell.runs {
+                        span("cell run", run.start, run.end, length);
+                    }
+                    for link in &cell.links {
+                        span("cell link", link.start, link.end, length);
+                    }
+                }
+            }
+        }
+        for (name, at) in &self.anchors {
+            if *at > total {
+                faults.push(format!("anchor {name} at {at} of {total}"));
+            }
+        }
+        for mark in self.contents.iter().chain(&self.leads) {
+            if mark.offset > total {
+                faults.push(format!(
+                    "mark {:?} at {} of {total}",
+                    mark.title, mark.offset
+                ));
+            }
+        }
+        let objects = chars.iter().filter(|&&ch| ch == OBJECT).count();
+        if objects != self.blocks.len() {
+            faults.push(format!(
+                "{objects} object signs for {} blocks",
+                self.blocks.len()
+            ));
+        }
+        for placed in &self.blocks {
+            if chars.get(placed.at) != Some(&OBJECT) {
+                faults.push(format!("block at {} is not on an object sign", placed.at));
+            }
+        }
+        faults
+    }
+
     /// Страница в JSON для интерфейса на другой платформе.
     ///
     /// Смещения переведены в единицы UTF-16 — так считают строки Java
@@ -1445,6 +1507,24 @@ mod tests {
             next: None,
             archived: None,
         }
+    }
+
+    /// Модель сходится сама с собой на странице, где есть всё: заголовки,
+    /// списки, цитата, код, таблица со ссылкой в ячейке, картинки в строке
+    /// и отдельно, сноска. И проверка видит, когда не сходится.
+    #[test]
+    fn a_page_with_everything_adds_up_and_a_broken_one_does_not() {
+        let markdown = "# Title\n\nIntro with *emphasis* and [a link](https://example.com/).\n\n\
+            ## Part\n\n- one\n  - two\n\n> quoted\n> > deeper\n\n```rust\nfn main() {}\n```\n\n\
+            | A | B |\n|---|:-:|\n| [x](https://e.com/) | **y** |\n\n\
+            Text ![f](https://e.com/f.png) inline.\n\n![alone](https://e.com/a.png)\n\n\
+            A note.[^1]\n\n[^1]: The note.\n";
+        let mut page = Page::of(&doc(markdown));
+        assert!(page.blocks.len() >= 2);
+        assert_eq!(page.faults(), Vec::<String>::new());
+        page.links[0].end = page.text.chars().count() + 1;
+        page.blocks[0].at += 1;
+        assert_eq!(page.faults().len(), 2, "{:?}", page.faults());
     }
 
     /// Страница, что раскладывается, под защитой та же; замена упавшей —
