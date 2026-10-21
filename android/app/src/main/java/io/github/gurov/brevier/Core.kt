@@ -1,6 +1,7 @@
 package io.github.gurov.brevier
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -28,12 +29,37 @@ object Core {
      * на x86_64-эмуляторе): это отказ одной картинки, а не повод падать.
      */
     external fun image(source: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray?
-    external fun find(text: String, needle: String): IntArray
+    private external fun find(text: String, needle: String): IntArray
+
+    /**
+     * Вызов ядра, который не роняет приложение. Паника в ядре приходит сюда
+     * исключением Java (`with_env` в `src/android.rs`); не пойманное, оно
+     * закрыло бы приложение со всеми вкладками из-за одной страницы. Ответ
+     * тогда — `fallback`: поля `opt*` берут умолчания, `headline` объясняет,
+     * а `open` без `page` уходит в «The load fell through», как и прежде.
+     */
+    private fun ask(method: String, arg: String, fallback: String = BROKE): String = try {
+        call(method, arg)
+    } catch (failure: RuntimeException) {
+        Log.w(TAG, "core call $method failed", failure)
+        fallback
+    }
+
+    /** Совпадения поиска (`find`); упало ядро — совпадений нет. */
+    fun search(text: String, needle: String): IntArray = try {
+        find(text, needle)
+    } catch (failure: RuntimeException) {
+        Log.w(TAG, "core find failed", failure)
+        IntArray(0)
+    }
+
+    private const val TAG = "Brevier"
+    private const val BROKE = "{\"error\":\"panic\",\"headline\":\"Brevier ran into a bug\"}"
 
     private fun obj(method: String, vararg fields: Any): JSONObject =
-        JSONObject(call(method, fields.joinToString(FIELD.toString())))
+        JSONObject(ask(method, fields.joinToString(FIELD.toString())))
 
-    private fun list(method: String, arg: String): JSONArray = JSONArray(call(method, arg))
+    private fun list(method: String, arg: String): JSONArray = JSONArray(ask(method, arg, "[]"))
 
     fun typography(): JSONObject = obj("typography")
     fun intro(): JSONObject = obj("intro")
@@ -59,7 +85,7 @@ object Core {
 
     /** Уход со страницы (#19): запомненная записывается с местом у верха экрана. */
     fun readingLeave(address: String, top: Int) {
-        call("reading.leave", listOf(address, top.toString(), utcOffset().toString()).joinToString(FIELD.toString()))
+        ask("reading.leave", listOf(address, top.toString(), utcOffset().toString()).joinToString(FIELD.toString()))
     }
     fun suggest(typed: String): JSONArray = list("suggest", typed)
     fun titleOf(address: String): String? = obj("title", address).text("title")
@@ -70,13 +96,13 @@ object Core {
     fun settings(): JSONObject = obj("settings")
     fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean) {
         val flags = listOf(dark, images, archive).map { if (it) "1" else "0" }
-        call("settings.save", flags.joinToString(FIELD.toString()))
+        ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 
     /** Набор читателя (#4) — в `settings.tsv` рядом с темой. */
     fun saveType(type: ReaderType) {
         val fields = listOf(type.face, type.size.toString(), type.measure.toString(), type.leading.toString(), if (type.justify) "1" else "0")
-        call("type.save", fields.joinToString(FIELD.toString()))
+        ask("type.save", fields.joinToString(FIELD.toString()))
     }
 
     fun session(): JSONArray = list("session", "")
@@ -89,11 +115,11 @@ object Core {
             (listOf(if (tab.current) "1" else "0", tab.at.toString(), tab.place.toString()) + tab.addresses)
                 .joinToString(FIELD.toString())
         }
-        call("session.save", lines)
+        ask("session.save", lines)
     }
 
     fun forget() {
-        call("forget", "")
+        ask("forget", "")
     }
 
     fun docs(address: String): JSONArray = list("docs", address)

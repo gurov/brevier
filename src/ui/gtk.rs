@@ -4948,7 +4948,7 @@ struct Drawn {
 /// в модели, поэтому смещения модели остаются смещениями буфера. `target` —
 /// якорь, уже приведённый (`page::anchor_in`).
 fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Drawn {
-    let page = page::Page::of(document);
+    let page = page::Page::guarded(document);
 
     let buffer = view.buffer();
     wipe(view);

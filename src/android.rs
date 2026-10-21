@@ -248,7 +248,8 @@ const CORE_STACK: usize = 8 * 1024 * 1024;
 /// своего пула, а у них стек около мегабайта: разбор страницы рекурсивен,
 /// и даже на пределе вложенности (`nesting::MAX_DEPTH`) запаса там лишь
 /// вдвое. Восемь мегабайт — как у окна. Паника доходит до вызова, как
-/// и без потока: её превращает в исключение Java `with_env`.
+/// и без потока: её превращает в исключение Java `with_env`, а ловит
+/// `Core.ask` в Kotlin — иначе одна страница закрывала бы приложение.
 fn deep<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
     let worker = std::thread::Builder::new()
         .stack_size(CORE_STACK)
@@ -588,7 +589,7 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
             }
         },
     };
-    let page = Page::of(&document);
+    let page = Page::guarded(&document);
 
     let (kept, offer) = {
         let mut core = core();

@@ -22,6 +22,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -703,6 +704,20 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun render(tab: Tab) {
         val view = tab.view ?: return
+        // Упала раскладка у самого телефона (модель, которой он не ждал) —
+        // объяснение на месте страницы, а не закрытое приложение со всеми
+        // вкладками. Упавшее в ядре сюда не доходит: его заменяет само ядро
+        // (`Page::guarded`) или `Core.ask`.
+        try {
+            draw(tab, view)
+        } catch (failure: RuntimeException) {
+            Log.w("Brevier", "drawing ${tab.current()} failed", failure)
+            tab.notes = emptyList()
+            view.show(message(TRIPPED), metrics(), dark, eager = false)
+        }
+    }
+
+    private fun draw(tab: Tab, view: ArticleView) {
         val shown = tab.shown
         when {
             shown != null -> {
@@ -1734,13 +1749,13 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun hitsOf(page: Page, text: String): List<Hit> {
         val found = mutableListOf<Hit>()
-        val flat = Core.find(page.text, text)
+        val flat = Core.search(page.text, text)
         for (index in 0 until flat.size / 2) found += Hit.Text(flat[index * 2], flat[index * 2 + 1])
         for (block in page.blocks) {
             if (block !is Block.Table) continue
             var number = 0
             for (row in block.rows) for (cell in row.cells) {
-                val pairs = Core.find(cell.text, text)
+                val pairs = Core.search(cell.text, text)
                 for (index in 0 until pairs.size / 2) found += Hit.Cell(block, number, pairs[index * 2], pairs[index * 2 + 1])
                 number += 1
             }
@@ -1993,6 +2008,8 @@ class MainActivity : Activity(), ArticleHost {
         /** Куда по высоте окна ставить заголовок, к которому прыгнули. */
         const val ANCHOR_ALIGN = 0.1f
         const val LISTING = "A list of links, not an article — pick one to read."
+        /** Как `failure::TRIPPED` в ядре: страница, которую не удалось нарисовать. */
+        const val TRIPPED = "Brevier tripped over this page"
         /** Потолок файла снаружи — тот же, что у тела страницы из сети. */
         const val MAX_FILE = 8L * 1024 * 1024
         const val SERVED_MARKDOWN = "Served as Markdown by the site — the author's exact text."

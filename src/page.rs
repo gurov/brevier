@@ -254,6 +254,30 @@ pub struct Page {
 }
 
 impl Page {
+    /// Разложить документ, а упадёт раскладка — показать вместо него
+    /// объяснение (`failure::tripped`). Одна страница не должна закрывать
+    /// окно со всеми вкладками: окно раскладывает в главном потоке, и паника
+    /// оттуда уходит через C-код GTK — это аварийный выход процесса. Адрес
+    /// и заголовок у замены те же: вкладка, история и «открыть в браузере»
+    /// ведут на настоящую страницу.
+    pub fn guarded(document: &Document) -> Page {
+        let laid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Page::of(document)));
+        laid.unwrap_or_else(|_| {
+            Page::of(&Document {
+                address: document.address.clone(),
+                title: document.title.clone(),
+                markdown: crate::failure::tripped(),
+                kind: crate::Kind::Article,
+                served: false,
+                site: Vec::new(),
+                feeds: Vec::new(),
+                lang: Some(crate::intro::LANG.to_owned()),
+                next: None,
+                archived: None,
+            })
+        })
+    }
+
     /// Разложить документ.
     pub fn of(document: &Document) -> Page {
         let arena = Arena::new();
@@ -1421,6 +1445,23 @@ mod tests {
             next: None,
             archived: None,
         }
+    }
+
+    /// Страница, что раскладывается, под защитой та же; замена упавшей —
+    /// объяснение со ссылкой, куда сообщить. Сама замена — тоже страница
+    /// и раскладываться обязана.
+    #[test]
+    fn a_guarded_page_is_the_page_and_its_stand_in_lays_out() {
+        let fine = doc("# Title\n\nText with [a link](https://example.com/).\n");
+        assert_eq!(Page::guarded(&fine), Page::of(&fine));
+        let stand_in = Page::of(&doc(&crate::failure::tripped()));
+        assert!(stand_in.text.starts_with(crate::failure::TRIPPED));
+        assert!(
+            stand_in
+                .links
+                .iter()
+                .any(|link| link.target == "https://github.com/gurov/brevier/issues")
+        );
     }
 
     /// Над копией из архива — блёклая строка: когда прочитана и откуда,

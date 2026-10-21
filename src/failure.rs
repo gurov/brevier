@@ -40,6 +40,22 @@ pub struct Way {
     pub address: String,
 }
 
+/// Заголовок страницы, на которой упала раскладка (`page::Page::guarded`).
+/// Телефон показывает его и сам, когда упал уже его код отрисовки.
+pub const TRIPPED: &str = "Brevier tripped over this page";
+
+/// Что показать вместо страницы, на которой упала раскладка: это ошибка
+/// Brevier, а не сайта, и чинить её нам — поэтому адрес для сообщения.
+pub fn tripped() -> String {
+    format!(
+        "# {TRIPPED}\n\n\
+         Something in this page set off a bug in Brevier, so it can't be shown here. \
+         The page itself is probably fine, and your browser can still show it.\n\n\
+         To help fix it, report the address at \
+         [github.com/gurov/brevier/issues](https://github.com/gurov/brevier/issues).\n"
+    )
+}
+
 pub fn describe(error: &Error) -> Failure {
     let failure = |headline, detail: String, offer_browser| Failure {
         headline,
