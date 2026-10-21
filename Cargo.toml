@@ -42,6 +42,12 @@ name = "brevier-ui"
 path = "src/ui/gtk.rs"
 required-features = ["ui"]
 
+# Тракт окна и телефона на странице с диска — для `corpus/frozen.py`.
+# Пример, а не бинарник: `cargo install` его не ставит.
+[[example]]
+name = "lay"
+required-features = ["typeset", "images"]
+
 [features]
 ui = ["dep:gtk", "dep:pango", "typeset", "images", "save"]
 # Типографика окна: переносы по языку. Отдельной фичей — cli и корпус

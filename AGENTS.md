@@ -81,6 +81,11 @@ Say in the pull request which of these you did and what you saw:
   page.html`, diff the outputs. A live run mixes your change with whatever the sites
   changed since. Every difference must be one you meant; update `corpus/expected/` only
   for those.
+- **Extraction, conversion or the page model** (typesetting, the shelf, reading progress,
+  find, notes): `corpus/frozen.py snapshot` once, then `corpus/frozen.py --approve` on the
+  base commit and `corpus/frozen.py` on yours. It lays every saved page out as the window
+  and the phone do and stops on a panic, a hang, a model that does not add up, or a
+  difference from the approved output.
 - **`--check`:** `corpus/check.sh`, offline.
 - **The window or the app:** tests do not cover them. Run it — a window, an emulator, a
   phone — and say what you looked at. A screenshot helps; a description of a pixel

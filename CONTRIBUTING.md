@@ -152,6 +152,12 @@ from source only. Its `VERSION` must match `rustls-platform-verifier-android` in
   `corpus/expected/` before it is committed — those files exist to catch regressions, and
   they have. Some sites change on their own between runs (a rotating footer, a one-time
   token, a relative date); run again before looking for the cause in the code.
+- **A change to extraction, conversion or the page model** (typesetting, the shelf,
+  reading progress, find, notes) also runs `corpus/frozen.py`. It lays every saved page out
+  the way the window and the phone do (`examples/lay.rs`) and stops on a panic, a hang, a
+  model whose offsets do not add up, or any difference from the approved output. Approve
+  on the base commit (`--approve`), then run on the change; every difference must be one
+  you meant.
 - **A change to `--check`** runs `corpus/check.sh`: one page per group of findings, with
   its expected report, no network needed.
 - **A change to the window or the app** is not covered by the tests. Say in the pull
@@ -172,11 +178,14 @@ corpus/verify.sh                  # is each address still the page it was?
 corpus/run.sh --ua honest         # a run: corpus/out/, a report and verdicts to mark
 corpus/score.sh --ua honest       # the number at the gate
 corpus/check.sh                   # the --check regression, offline
+corpus/frozen.py snapshot         # save the corpus pages' HTML once, for the next line
+corpus/frozen.py [--approve]      # lay out every saved page, offline: panics, hangs, changes
 corpus/m2.sh                      # how much documentation is reachable from a README
 ```
 
 Four jobs is the default; eight bring 403s from some hosts, and a page marked readable
-slides into a refusal. `corpus/out/` is not in git — only the expected outputs are.
+slides into a refusal. `corpus/out/` is not in git — only the expected outputs are; the
+saved pages stay there too, since other people's pages do not go into a public repository.
 
 ## Packaging and releases
 
