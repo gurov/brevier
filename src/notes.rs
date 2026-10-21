@@ -193,10 +193,7 @@ impl Plain {
         let length = note.quote.chars().count();
         // (совпало окружения, расстояние до подсказки, номер знака)
         let mut best: Option<(usize, usize, usize)> = None;
-        let (mut chars, mut bytes) = (0, 0);
-        for (byte, _) in self.text.match_indices(note.quote.as_str()) {
-            chars += self.text[bytes..byte].chars().count();
-            bytes = byte;
+        let mut consider = |byte: usize, chars: usize| {
             let around = common_suffix(&self.text[..byte], &note.before)
                 + common_prefix(&self.text[byte + note.quote.len()..], &note.after);
             let distance = self.map[chars].abs_diff(note.at);
@@ -207,6 +204,24 @@ impl Plain {
             if better {
                 best = Some((around, distance, chars));
             }
+        };
+        let (mut chars, mut bytes) = (0, 0);
+        for (byte, _) in self.text.match_indices(note.quote.as_str()) {
+            chars += self.text[bytes..byte].chars().count();
+            bytes = byte;
+            consider(byte, chars);
+        }
+        // И само место, где заметку оставили. `match_indices` перекрытий
+        // не видит, а цитата внутри ряда одинаковых знаков («……», «====»)
+        // перекрывается сама с собой: настоящее место оказывалось между
+        // найденными, и заметка вставала на соседнее (нашёл фаззинг).
+        // Перебирать каждую позицию — квадрат на таком ряду; подсказки
+        // хватает, пока страница та же.
+        if let Ok(at) = self.map.binary_search(&note.at)
+            && let Some((byte, _)) = self.text.char_indices().nth(at)
+            && self.text[byte..].starts_with(note.quote.as_str())
+        {
+            consider(byte, at);
         }
         let (_, _, start) = best?;
         Some((self.map[start], self.map[start + length - 1] + 1))
@@ -546,6 +561,19 @@ mod tests {
         // И обратно: место на странице с переносами накрывает их.
         let spots = place(typeset, &[&note(selection, 1)]);
         assert_eq!(spots[0].place, Some((from, to)));
+    }
+
+    /// Цитата внутри ряда одинаковых знаков перекрывается сама с собой:
+    /// поиск без перекрытий находил её на шаг длины цитаты, мимо места,
+    /// где заметку оставили (нашёл фаззинг, `fuzz/fuzz_targets/notes.rs`).
+    #[test]
+    fn a_note_inside_a_run_of_equal_signs_stays_where_it_was_left() {
+        let page = format!("Перед рядом {} и после.", "=".repeat(40));
+        let from = "Перед рядом ".chars().count() + 7;
+        let selection = select(&page, from, from + 10).unwrap();
+        assert_eq!(selection.quote, "==========");
+        let spots = place(&page, &[&note(selection, 1)]);
+        assert_eq!(spots[0].place, Some((from, from + 10)));
     }
 
     #[test]
