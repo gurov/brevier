@@ -166,9 +166,18 @@ fn hyphenate(text: &str, dict: &Standard) -> String {
 }
 
 /// Одно слово с мягкими переносами в местах, которые указал словарь.
-/// Точки разрыва приходят байтовыми смещениями внутри слова и всегда
-/// стоят на границе символов — вставка по ним безопасна.
+/// Точки разрыва приходят байтовыми смещениями — но в строчной форме
+/// слова: словарь ищет по ней. У нескольких букв строчная в UTF-8 длиннее
+/// или короче заглавной («İ» → «i̇», «Ⱦ» → «ⱦ», «ẞ» → «ß»), и тогда
+/// смещения не про это слово: перенос вставал не на место, а срез посреди
+/// буквы ронял раскладку — «İçişleri» в английской статье (нашёл фаззинг,
+/// `fuzz/fuzz_targets/typeset.rs`). Такое слово остаётся без переносов:
+/// оно редкое, и неверный перенос хуже никакого.
 fn push_hyphenated(out: &mut String, word: &str, dict: &Standard) {
+    if !word.chars().all(lowercase_keeps_width) {
+        out.push_str(word);
+        return;
+    }
     let breaks = dict.hyphenate(word).breaks;
     let mut last = 0;
     for point in breaks {
@@ -177,6 +186,16 @@ fn push_hyphenated(out: &mut String, word: &str, dict: &Standard) {
         last = point;
     }
     out.push_str(&word[last..]);
+}
+
+/// Строчная форма буквы — одна буква той же длины в UTF-8: смещения
+/// словаря в строчной форме тогда годятся и для исходного слова.
+fn lowercase_keeps_width(ch: char) -> bool {
+    let mut lower = ch.to_lowercase();
+    lower
+        .next()
+        .is_some_and(|small| small.len_utf8() == ch.len_utf8())
+        && lower.next().is_none()
 }
 
 /// Приклеить число к соседнему слову: пробел после числа перед словом
@@ -302,6 +321,33 @@ mod tests {
         let out = typeset("das Wort", "de");
         assert_eq!(out, "das Wort");
         assert!(!marked(&out));
+    }
+
+    /// Строчная «ⱦ» длиннее заглавной «Ⱦ», строчная «i̇» — заглавной «İ»:
+    /// смещения словаря съезжали, и срез посреди «в» или «ş» ронял раскладку
+    /// (нашёл фаззинг). Такое слово — без переносов, остальные — с ними.
+    #[test]
+    fn a_word_whose_lowercase_is_wider_stays_whole() {
+        for (text, lang, whole) in [
+            (
+                "Его оштрафȾвал инспектор на перекрёстке.",
+                "ru",
+                "оштрафȾвал",
+            ),
+            (
+                "The İçişleri Bakanlığı answered the international press.",
+                "en",
+                "İçişleri",
+            ),
+        ] {
+            let out = typeset(text, lang);
+            assert_eq!(plain(&out), plain(text));
+            assert!(out.contains(whole), "{out}");
+            assert!(
+                out.contains('\u{00AD}'),
+                "the other words still break: {out}"
+            );
+        }
     }
 
     #[test]
