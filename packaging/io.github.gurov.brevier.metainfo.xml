@@ -95,6 +95,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.15.1" date="2026-10-22" type="development">
+      <description>
+        <p>A page that trips Brevier up no longer closes the window or the
+          app: its tab explains instead, and the other tabs stay. The
+          "[edit]" links of Wikipedia no longer stand under every heading.
+          Fixes found by fuzzing, and TLS updated past its security
+          advisories.</p>
+      </description>
+    </release>
     <release version="0.15.0" date="2026-10-19" type="development">
       <description>
         <p>Flatpak installs update from Brevier's own signed repository. Find

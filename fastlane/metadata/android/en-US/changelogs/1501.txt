@@ -1,0 +1,4 @@
+• A page that trips Brevier up no longer closes the app: the tab says so, and the other tabs stay.
+• Wikipedia: the "[edit]" links no longer stand under every heading.
+• Fixes found by fuzzing: a crash on rare letters such as "İ", broken page metadata, a note in a run of equal signs.
+• TLS updated past its security advisories.
