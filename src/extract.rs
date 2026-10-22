@@ -219,6 +219,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     unprint(&doc);
     unbutton(&doc);
     unpermalink(&doc);
+    crate::hosts::without_wiki_edits(&doc);
     drop_broken_ld(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
     // и половины картинок после него в дереве уже нет.

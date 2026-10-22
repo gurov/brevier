@@ -6,8 +6,9 @@
 //! плагинов вокруг нет и не будет: строка таблицы — функция здесь.
 //!
 //! Сейчас в таблице reddit, Hacker News (`hacker_news`), Lobsters
-//! (`lobsters`), форумы Discourse (`discourse`) и документация rustdoc
-//! (`rustdoc`) — эти двое по программе, а не по хосту, — комментарии Хабра
+//! (`lobsters`), форумы Discourse (`discourse`), документация rustdoc
+//! (`rustdoc`) и вики на MediaWiki — эти трое по программе, а не по хосту, —
+//! комментарии Хабра
 //! (`habr`), поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
@@ -407,6 +408,22 @@ pub fn without_wayback_toolbar(html: &str) -> std::borrow::Cow<'_, str> {
     };
     let end = start + length + END.len();
     std::borrow::Cow::Owned(format!("{}{}", &html[..start], &html[end..]))
+}
+
+/// Вики на MediaWiki — Википедия и любая другая — без ссылок «[edit]»
+/// у заголовков. Это кнопка для правщика, а не текст статьи: читателю
+/// она вставала отдельной строкой под каждым заголовком. MediaWiki кладёт
+/// её рядом с заголовком в `span.mw-editsection` вместе со скобками;
+/// программу узнаём по генератору в шапке, как rustdoc и Discourse.
+/// Красная ссылка на ненаписанную статью (`action=edit&redlink=1`) —
+/// часть текста, её правило не трогает.
+pub fn without_wiki_edits(doc: &Document) {
+    let wiki = thread::first(&doc.root(), "meta[name=generator]")
+        .and_then(|meta| meta.attr("content"))
+        .is_some_and(|content| content.trim_start().starts_with("MediaWiki"));
+    if wiki {
+        doc.select(".mw-editsection").remove();
+    }
 }
 
 /// Снимок ли это Wayback, и если да — чей и от какого дня. Строка над
@@ -902,6 +919,32 @@ mod tests {
             without_wayback_toolbar(plain),
             std::borrow::Cow::Borrowed(_)
         ));
+    }
+
+    /// «[edit]» у заголовка вики уходит со скобками, красная ссылка в тексте
+    /// остаётся; не у MediaWiki тот же класс правило не трогает.
+    #[test]
+    fn a_wiki_edit_link_is_not_the_text() {
+        let page = |generator: &str| {
+            Document::from(format!(
+                "<html><head><meta name=\"generator\" content=\"{generator}\"></head><body>\
+                <div class=\"mw-heading\"><h2 id=\"Overview\">Overview</h2>\
+                <span class=\"mw-editsection\"><span class=\"mw-editsection-bracket\">[</span>\
+                <a href=\"/w/index.php?title=A&amp;action=edit&amp;section=1\"><span>edit</span></a>\
+                <span class=\"mw-editsection-bracket\">]</span></span></div>\
+                <p>See <a href=\"/w/index.php?title=B&amp;action=edit&amp;redlink=1\">B</a>.</p>\
+                </body></html>"
+            ))
+        };
+        let wiki = page("MediaWiki 1.47.0-wmf.24");
+        without_wiki_edits(&wiki);
+        let text = wiki.select("body").text();
+        assert!(!text.contains('[') && !text.contains("edit"), "{text}");
+        assert!(wiki.select("a[href*=redlink]").exists());
+
+        let other = page("WordPress 6.8");
+        without_wiki_edits(&other);
+        assert!(other.select("body").text().contains("[edit]"));
     }
 
     /// Снимок узнаётся по адресу: чей он и от какого дня.

@@ -78,8 +78,6 @@ Contributors to Wikimedia projects
 
 ## В ролях
 
-## Реакция
-
 - [Фрэнсис Макдорманд](https://ru.wikipedia.org/wiki/Макдорманд,_Фрэнсис "Макдорманд, Фрэнсис") — Оливия (Олив) Киттеридж
 - [Ричард Дженкинс](https://ru.wikipedia.org/wiki/Дженкинс,_Ричард "Дженкинс, Ричард") — Генри Киттеридж
 - [Зои Казан](https://ru.wikipedia.org/wiki/Казан,_Зои "Казан, Зои") — Дениз Тибодо
@@ -102,7 +100,11 @@ Contributors to Wikimedia projects
 - Донна Минтчелл — Луиз Ларкин
 - [Фрэнк Ридли](https://ru.wikipedia.org/wiki/Фрэнк_Ридли?action=edit&redlink=1 "Фрэнк Ридли (страница отсутствует)") — мистер Тибодо
 
+## Реакция
+
 Картина получила в основном положительные отзывы от критиков, в частности за сценарий, работу оператора, режиссуру, а также за игру Фрэнсис Макдорманд, Ричарда Дженкинса и Джона Галлахера младшего.
+
+## Награды и номинации
 
 | Год | Награда | Категория | Номинант(ы) | Результат |
 | --- | --- | --- | --- | --- |
@@ -137,6 +139,8 @@ Contributors to Wikimedia projects
 | Лучший дизайн основного заголовка | Гарсон Ю, Синдрелла Пенг, Майкл Лейн Паркс и Алекс Поллини | Номинация |  |  |
 | Лучший грим в мини-сериале или телефильме | Кристьен Тинсли, Джеральд Куист и Лиз Бернстром | Номинация |  |  |
 | Лучший монтаж в мини-сериале или телефильме | Джеффри М. Вернер | Победа |  |  |
+
+## Примечания
 
 1. [1](https://ru.wikipedia.org/wiki/Что_знает_Оливия%3F#cite_ref-HP_1-0) [2](https://ru.wikipedia.org/wiki/Что_знает_Оливия%3F#cite_ref-HP_1-1) *Ребекка Дойл.* [HBO's Olive Kitteridge: What the Critics Are Saying](http://www.hollywoodreporter.com/live-feed/olive-kitteridge-review-hbo-what-745634) (англ.). *[The Hollywood Reporter](https://ru.wikipedia.org/wiki/The_Hollywood_Reporter "The Hollywood Reporter")* (2 ноября 2014). Дата обращения: 10 августа 2015. [Архивировано](https://web.archive.org/web/20170807153929/http://www.hollywoodreporter.com/live-feed/olive-kitteridge-review-hbo-what-745634) 7 августа 2017 года.
 2. [↑](https://ru.wikipedia.org/wiki/Что_знает_Оливия%3F#cite_ref-2) [Olive Kitteridge: Cast & Crew](http://www.hbo.com/olive-kitteridge/cast-and-crew/index.html) (англ.). *[HBO](https://ru.wikipedia.org/wiki/HBO "HBO")*. Дата обращения: 10 августа 2015. [Архивировано](https://web.archive.org/web/20150906011129/http://www.hbo.com/olive-kitteridge/cast-and-crew/index.html) 6 сентября 2015 года.
