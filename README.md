@@ -338,6 +338,13 @@ A feed in Brevier — the Rust blog's, `blog.rust-lang.org/feed.xml`:
 italics, a few lines of its summary; the status line says it is a list of links, not an
 article](assets/screenshot-feed.png)
 
+A Hacker News thread on the phone, every reply under the comment it answers:
+
+<p align="center">
+  <img src="assets/screenshot-phone-thread.png" width="300"
+       alt="A Hacker News thread in Brevier on a phone: jokes about a theremin, each comment with its author and its day; every reply is set in under the comment it answers, each level with its own rule at the left">
+</p>
+
 ## On the phone
 
 The Android app is a second front-end over the same core. It draws the article as native
