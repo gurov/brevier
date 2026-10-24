@@ -267,11 +267,13 @@
 
 <section class="column" id="library">
   <h2><span class="chapter">Prologue</span>Once upon a time, the web was a library</h2>
-  <p class="opening">Once upon a time, the web was a quiet library. Every page was a scroll.
+  <p class="opening">Once upon a time, the web was a quiet, lamp-lit library. Every page was a scroll.
     You unrolled it, you read it, you rolled it up again. Scholars wrote them, curious
     people read them, and nobody had to accept any cookies to get through the door.</p>
-  <p>It was not a beautiful library. The scrolls were written in every hand imaginable,
-    some in bright green on purple. But the words were there, and you could reach them.</p>
+  <p>It had its bad sides, too. The scrolls were hard to read: written in every hand
+    imaginable, in inks of every quality and in wholly unpredictable colours. Old-timers
+    still remember scrolls in bright green ink on purple papyrus. But the words were there,
+    and if you wanted them, you could read them.</p>
   <p>Then the dragons moved in.</p>
 </section>
 
@@ -283,13 +285,16 @@
   <ul>
     <li><strong>The Cookie Wyrm</strong> sits on the doorstep and will not move until you have
       clicked through forty-two switches and agreed to all of them.</li>
-    <li><strong>The Newsletter Basilisk</strong> waits until you are halfway down the page,
-      then stares at you from the middle of the screen.</li>
+    <li><strong>The Pop-up Basilisk</strong> leaps out the moment you settle into reading,
+      turns you to stone and asks you to subscribe and hit the bell — until you come to and
+      find the tiny cross in the top right corner.</li>
     <li><strong>The Autoplay Hydra.</strong> Close one video and two more start in the corner.</li>
     <li><strong>The Infinite Scroll Serpent</strong> has eaten the footer of every page it ever met.</li>
-    <li>And above them all, <strong>the Great JavaScript Dragon</strong>. Once a humble helper, it no longer
-      brings you the page at all — only a cart of bricks and a book of instructions. It builds the
-      castle in front of you while your laptop fan howls and your battery quietly weeps.</li>
+    <li>And they all serve one overlord, <strong>the Great JavaScript Dragon</strong>. At the dawn
+      of time it was a tiny helper that served people faithfully; now it has grown mighty and
+      cruel. It no longer brings you the scroll at all. It rolls up with a cart of bricks, clay
+      and sticks and builds the whole castle right before your eyes, while your laptop howls
+      with the strain.</li>
   </ul>
   <p>Readers still came for the scrolls. They just had to fight their way to them.</p>
 </section>
@@ -302,7 +307,7 @@
   <p>Brevier the browser is that pocket book for the web. It does one thing: it reads.
     It walks past the dragons, takes the scroll, and brings it back to you on clean paper.</p>
   <p>The trick is simple. Brevier never lets a dragon in, because it never runs JavaScript —
-    not a little, not for one special site, not ever. It downloads the page, finds the
+    not for one special site, not even for a tiny menu, not ever. It downloads the page, finds the
     article inside, turns it into Markdown on your own computer, and sets it again in its
     own typography. <strong>The site decides the words. You decide how they look.</strong></p>
 </section>
@@ -321,7 +326,8 @@
       perfectly straight, if you turn on justified text.</li>
     <li><strong>Zoom from 67% to 200%</strong> that scales the whole layout, so a line still holds
       about 65 characters.</li>
-    <li><strong>Poems keep their lines and stanzas.</strong> Even bards are welcome.</li>
+    <li><strong>Poems keep their lines and stanzas.</strong> Wandering bards are welcome
+      too, though we can't promise to toss them a coin.</li>
   </ul>
 </section>
 
@@ -340,7 +346,13 @@
     project's documentation laid out on a shelf at the right. <code>gl:</code> works for GitLab.
     End the address with a slash, and you see what the folder holds.</p>
   <p>The same shelf shows the contents of any long page and marks the section you are
-    reading, so you never lose your place in a tall tower of text.</p>
+    reading, so you never lose your place in a tall tower of text. Under the contents sit
+    the site's feeds and its own menu; above them, your notes. Select a passage to
+    highlight it or to write a few words beside it, and the marks are where you left them
+    when you come back, even if the site has moved the furniture around them.</p>
+  <p>Markdown files from your own disk open just as well — handy in the age of AI, when so
+    much of what you save is Markdown. Everywhere but in the Flatpak, that is: its sandbox
+    keeps your files out of reach.</p>
 </section>
 
 <figure class="shot wide">
@@ -359,7 +371,8 @@
     sends with a script; Brevier sends that same messenger itself, once, and seats the
     replies under the article.</p>
   <p>Anything you type that is not an address becomes a search on DuckDuckGo, and the
-    results come back as a plain list of links. No raven was harmed.</p>
+    results come back as a plain list of links. No raven was harmed. Other search engines
+    may come later. Or they may not.</p>
 </section>
 
 <figure class="shot wide">
@@ -377,11 +390,12 @@
 <section class="column" id="chronicle">
   <h2><span class="chapter">Chapter six</span>The chronicle that does not burn</h2>
   <p>Every article you read is copied into your own archive: plain Markdown, compressed,
-    one file per page. <code>Ctrl+Shift+F</code> searches all of it. When a site changes its
+    one file == one scroll. <code>Ctrl+Shift+F</code> searches all of it. When a site changes its
     mind — or vanishes into the mists — your copy is still on your shelf.</p>
   <p>Long reads remember where you stopped. Come back to a page you read for ten minutes or
     more, and Brevier offers <strong>Continue from 43%</strong>. It does not jump on its own;
-    heroes like to choose. A thin line under the text shows how far you have come.</p>
+    heroes like to choose. A thin line under the text shows how far you have come,
+    with a dot for each section and a small square for each note.</p>
   <p>And if a page is truly gone, Brevier can fetch the last good copy from the Wayback
     Machine — but only when you press the button. Until then, archive.org hears nothing
     about what you read.</p>
@@ -398,15 +412,19 @@
 <section class="column" id="gates">
   <h2><span class="chapter">Chapter seven</span>When the gate stays shut</h2>
   <p>Not every castle opens. Some sites are built entirely out of JavaScript, and some keep
-    an anti-bot wall at the gate. Brevier knocks politely, gives its honest name, and never
+    a tall anti-bot wall at the gate, with Gandalf on top of it: “You shall not pass!” Brevier knocks politely, gives its honest name, and never
     climbs the wall. When the gate stays shut, it says so plainly and offers
     <strong>Open in your browser</strong> — or press <code>Ctrl+O</code> — and the page goes to your
     other browser.</p>
   <p>Pages that travel over plain <code>http</code> are marked <em>Not secure</em>. There is no
     padlock icon on the others, because a padlock only means the road was private, not that
     the castle is friendly.</p>
-  <p>On our own test set of 108 live pages, measured in September, 80 read well. Not every
-    quest ends in victory; we publish the score anyway, and how we counted it.</p>
+  <p>On our own test set of 108 live pages, measured in September, 80 read well — 74%.
+    In fairness: we softened the marking rules once, already knowing the results, and by
+    the strict ones it was 56%. On a separate run over 295 news sites, 94% of the articles
+    Brevier could reach read well. Not every quest ends in victory; we publish the score
+    anyway, and <a href="https://github.com/gurov/brevier/blob/main/corpus/RUBRIC.md">how we
+    counted it</a>.</p>
 </section>
 
 <figure class="shot wide">
@@ -416,8 +434,8 @@
 
 <section class="column" id="builders">
   <h2><span class="chapter">Chapter eight</span>For castle builders</h2>
-  <p>If you build websites, Brevier can tell you how yours looks to a reader who runs no
-    scripts. <code>brevier --check https://your.site/</code> gives a score from 0 to 100, says what
+  <p>If you build websites, Brevier can tell you, a bit like Lighthouse, how yours looks to
+    a reader who runs no scripts. <code>brevier --check https://your.site/</code> gives a score from 0 to 100, says what
     to change, and prints the arithmetic — so you can argue with a number instead of a
     mystery.</p>
   <p>There is a GitHub Action too. It writes the report into the job summary and fails the
@@ -444,7 +462,8 @@
     <li><strong>Video, audio and extensions.</strong></li>
     <li><strong>An AI model, by default.</strong> Pages are read by plain rules, so the words are
       always the author's. If a helper model ever joins the party — say, for pages the rules
-      can't read — it will travel in its own bag and sleep until you wake it.</li>
+      can't read — it will travel in its own bag and sleep until you wake it.
+      Perhaps we will manage without it altogether.</li>
   </ul>
   <p>And one honest limit: <strong>screen readers work on Linux only</strong> for now. GTK's
     accessibility does not reach Windows yet, and on Android TalkBack should read the native
@@ -467,8 +486,10 @@
   <p>A <a href="flatpak/brevier.flatpakref">Flatpak</a> that works on any distribution,
     from Brevier's own signed repository: GNOME Software or Discover opens it with a click,
     or <code>flatpak install --user https://brevier.bizibah.com/flatpak/brevier.flatpakref</code>,
-    and new versions arrive with <code>flatpak update</code>. Or a tarball for systems that
-    already have GTK 4.
+    and new versions arrive with <code>flatpak update</code>. Brevier itself weighs about
+    5 MB, but if your system has no GNOME runtime yet, Flatpak fetches that too: about
+    400 MB, shared by every Flatpak app. If that is too heavy a saddle, there is an 11 MB
+    tarball for systems that already have GTK 4.
     Those who keep a forge at home can build it from
     <a href="https://crates.io/crates/brevier">crates.io</a> with Rust and GTK 4:
     <code>cargo install --locked brevier --features ui</code>.</p>
@@ -477,15 +498,20 @@
     that runs from any folder. The installer is not signed yet, so Windows first says
     <em>Windows protected your PC</em>: choose <strong>More info</strong>, then
     <strong>Run anyway</strong>. Dragons have made Windows a little nervous.</p>
-  <h3>Android 7 and later</h3>
-  <p>A native app over the same core — it draws the article as real text, not in a web
-    view — with tabs, the shelf, find on page and the dark theme. Install it from
+  <h3>Android 7 and later, 64-bit ARM</h3>
+  <p>Not yet another web view in disguise: a native app over the same core that draws the
+    article as real text, with tabs, the shelf, find on page and the dark theme. Install it from
     <a href="https://f-droid.org/packages/io.github.gurov.brevier/">F-Droid</a>, which keeps
-    it up to date, or download the same APK from the releases.</p>
+    it up to date, or download the same APK from the releases. F-Droid publishes it only when its own build
+    matches ours byte for byte, so an install from either place takes updates from the
+    other.</p>
   <h3>The command line</h3>
   <p><code>brevier https://example.com/article</code> prints the article as Markdown.
     Scrolls for scripts. Every release carries it as one file for Linux, macOS and
-    Windows, with nothing to install beside it, not even GTK. Or build it:
+    Windows, with nothing to install beside it, not even GTK. On a Mac this is the only
+    mount for now: the window has not sailed there yet. The macOS file is not signed, so if
+    a browser downloaded it, run <code>xattr -d com.apple.quarantine brevier</code> once.
+    Or build it:
     <code>cargo install --locked brevier --features save</code>.</p>
   <ul class="downloads">
     <li><a href="https://github.com/gurov/brevier/releases/latest">Download the latest release<small>Linux · Windows · Android</small></a></li>
@@ -522,7 +548,7 @@
   <p>This page has no JavaScript, no trackers and no web fonts. It reads well in Brevier:
     <code>brevier https://brevier.bizibah.com</code></p>
   <p>Brevier is made by <a rel="author" href="https://github.com/gurov">gurov</a> ·
-    MIT or Apache-2.0 · this page updated <time datetime="2026-10-19">19 October 2026</time></p>
+    MIT or Apache-2.0 · this page updated <time datetime="2026-10-24">24 October 2026</time></p>
 </footer>
 
 </body>

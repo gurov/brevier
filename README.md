@@ -386,6 +386,10 @@ pipeline scores **F1 0.929**, and extraction alone 0.951 — next to 0.947 for R
 and 0.958 for trafilatura in the same table. That set is news; Brevier is aimed at long
 reads, documentation and threads.
 
+On 295 news sites (9 October 2026: three fresh articles from each site's feed, checked
+against the headline and summary the feed gives), 671 of the 712 articles Brevier could
+reach read well (94%); another 91 were closed to it.
+
 On 211 news front pages (copies saved on 9 October 2026), 95% of the newest headlines from
 each site's feed that are in the page's HTML reach the reader; before 0.13.0 it was 42%.
 
