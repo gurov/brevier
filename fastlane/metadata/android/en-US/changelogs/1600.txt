@@ -1,0 +1,3 @@
+• High contrast: black on white, or white on black in the dark theme. Until you choose, it follows the system's contrast level (Android 14 and later).
+• The bar slides out of the way while you read and comes back as you scroll up; the text never moves. Settings → Slide the bar away turns it off.
+• Numbered lists: an item's text lines up with its wrapped lines and the code under it.

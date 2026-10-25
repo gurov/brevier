@@ -97,6 +97,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.16.0" date="2026-10-25" type="development">
+      <description>
+        <p>High contrast, beside the dark theme: black ink on white paper, or
+          white on black, following the system's contrast setting until you
+          choose. Muted text and comments in code on the ivory paper are
+          darker, up to WCAG's 4.5:1. On the phone the bar slides out of the
+          way while you read. The text of a numbered item lines up with its
+          wrapped lines.</p>
+      </description>
+    </release>
     <release version="0.15.1" date="2026-10-22" type="development">
       <description>
         <p>A page that trips Brevier up no longer closes the window or the
