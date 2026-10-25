@@ -50,6 +50,9 @@ pub const IMAGE_CHARS: usize = 500;
 pub const MAX_HITS: usize = 2000;
 /// Знак объекта: место картинки или таблицы в тексте.
 pub const OBJECT: char = '\u{FFFC}';
+/// Цифровой пробел: шириной в цифру, им номер пункта добивается до ширины
+/// самого длинного номера списка.
+const FIGURE_SPACE: &str = "\u{2007}";
 
 /// Чем набран участок текста.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,15 +81,18 @@ pub enum Style {
     Comment,
     /// Цитата, уровень 1..=[`QUOTE_LEVELS`].
     Quote(u8),
-    /// Пункт списка, уровень 1..=[`LIST_LEVELS`].
-    List(u8),
+    /// Пункт списка, уровень 1..=[`LIST_LEVELS`], и ширина его маркера
+    /// (`outline::hang`): 0 — «•», 1..=3 — цифр в номере. Ширина одна
+    /// на весь список — по самому длинному номеру, — и в имени её нет,
+    /// пока она нулевая: `list2`, но `list2h1` (#13).
+    List(u8, u8),
     /// Блок кода внутри цитаты уровня 1..=[`QUOTE_LEVELS`] (#13): только
     /// поле — под текстом цитаты. Сам тег цитаты принёс бы коду курсив.
     Inset(u8),
     /// Блок кода внутри пункта списка уровня 1..=[`LIST_LEVELS`]: только
     /// поле — под текстом пункта, правее маркера. Сам тег пункта принёс бы
-    /// воздух между строками.
-    ItemInset(u8),
+    /// воздух между строками. Второе число — ширина маркера, как у `List`.
+    ItemInset(u8, u8),
     /// Линейка цитаты уровня 1..=[`QUOTE_LEVELS`] — и больше ничего:
     /// на строках кода внутри цитаты она не должна обрываться.
     Rule(u8),
@@ -118,9 +124,11 @@ impl Style {
             Style::Number => "num".to_owned(),
             Style::Comment => "com".to_owned(),
             Style::Quote(level) => format!("quote{level}"),
-            Style::List(level) => format!("list{level}"),
+            Style::List(level, 0) => format!("list{level}"),
+            Style::List(level, hang) => format!("list{level}h{hang}"),
             Style::Inset(level) => format!("inset{level}"),
-            Style::ItemInset(level) => format!("iteminset{level}"),
+            Style::ItemInset(level, 0) => format!("iteminset{level}"),
+            Style::ItemInset(level, hang) => format!("iteminset{level}h{hang}"),
             Style::Rule(level) => format!("rule{level}"),
             Style::Link => "link".to_owned(),
             Style::Dim => "dim".to_owned(),
@@ -1010,12 +1018,26 @@ impl Writer<'_> {
             NodeValue::List(list) => {
                 let ordered = matches!(list.list_type, ListType::Ordered);
                 let mut number = list.start;
+                // Маркер стоит в висячем отступе, текст — по табуляции на его
+                // краю (#13). Отступ один на список, по самому широкому
+                // маркеру: номера в столбик выровнены вправо цифровыми
+                // пробелами, и у « 9.» и «10.» текст начинается в одном месте.
+                let digits = |number: usize| number.to_string().len();
+                let widest = if ordered {
+                    digits(number + node.children().count().saturating_sub(1))
+                } else {
+                    0
+                };
+                let tasks = node
+                    .children()
+                    .any(|item| matches!(item.data.borrow().value, NodeValue::TaskItem(_)));
+                let hang = (widest as u8).max(u8::from(tasks)).min(3);
 
                 self.depth += 1;
-                let level = Style::List(self.depth.min(LIST_LEVELS));
+                let level = Style::List(self.depth.min(LIST_LEVELS), hang);
                 let was = self
                     .inset
-                    .replace(Style::ItemInset(self.depth.min(LIST_LEVELS)));
+                    .replace(Style::ItemInset(self.depth.min(LIST_LEVELS), hang));
                 for item in node.children() {
                     let mut styles = outer.to_vec();
                     styles.push(Style::Body);
@@ -1026,17 +1048,18 @@ impl Writer<'_> {
                         // и рисуют везде, где markdown вообще про них знает.
                         NodeValue::TaskItem(done) => {
                             if done.symbol.is_some() {
-                                "☑  ".to_owned()
+                                "☑\t".to_owned()
                             } else {
-                                "☐  ".to_owned()
+                                "☐\t".to_owned()
                             }
                         }
                         _ if ordered => {
-                            let marker = format!("{number}.  ");
+                            let pad = FIGURE_SPACE.repeat(widest - digits(number));
+                            let marker = format!("{pad}{number}.\t");
                             number += 1;
                             marker
                         }
-                        _ => "•  ".to_owned(),
+                        _ => "•\t".to_owned(),
                     };
                     self.put(&marker, &styles);
 
@@ -1749,7 +1772,33 @@ mod tests {
             styles_at(&page, offset_of(&page, "fn")),
             vec!["codeblock", "kw"]
         );
-        assert!(page.text.contains("•  один"));
+        assert!(page.text.contains("•\tодин"));
+    }
+
+    #[test]
+    fn a_number_hangs_as_wide_as_the_longest_in_its_list() {
+        let ten: String = (1..=10).map(|n| format!("{n}. пункт {n}\n")).collect();
+        let page = Page::of(&doc(&format!(
+            "{ten}\n- [ ] задача\n- просто\n\nТекст.\n\n1. один\n2. два\n"
+        )));
+        // Номера в столбик — вправо, до ширины «10.»; текст — по табуляции.
+        assert!(page.text.contains("\u{2007}9.\tпункт 9"));
+        assert!(page.text.contains("\n10.\tпункт 10"));
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "пункт 1")),
+            vec!["body", "list1h2"]
+        );
+        // Галочке — отступ в одну цифру, и всему её списку.
+        assert!(page.text.contains("☐\tзадача"));
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "просто")),
+            vec!["body", "list1h1"]
+        );
+        assert!(page.text.contains("\n1.\tодин"));
+        assert_eq!(
+            styles_at(&page, offset_of(&page, "два")),
+            vec!["body", "list1h1"]
+        );
     }
 
     #[test]
@@ -1763,7 +1812,7 @@ mod tests {
         ));
         assert_eq!(
             styles_at(&page, offset_of(&page, "первый")),
-            vec!["codeblock", "iteminset1"]
+            vec!["codeblock", "iteminset1h1"]
         );
         assert_eq!(
             styles_at(&page, offset_of(&page, "второй")),
@@ -1784,7 +1833,7 @@ mod tests {
         );
         // Поля панели идут вместе с кодом.
         let pad = offset_of(&page, "первый") - 1;
-        assert_eq!(styles_at(&page, pad), vec!["pad", "iteminset1"]);
+        assert_eq!(styles_at(&page, pad), vec!["pad", "iteminset1h1"]);
         // Вне контейнеров — у края, как и было.
         assert_eq!(
             styles_at(&page, offset_of(&page, "шестой")),

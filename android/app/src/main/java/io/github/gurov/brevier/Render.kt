@@ -12,6 +12,7 @@ import android.text.style.LeadingMarginSpan
 import android.text.style.LineBackgroundSpan
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
+import android.text.style.TabStopSpan
 import android.text.style.UnderlineSpan
 
 /**
@@ -30,7 +31,14 @@ private val PRIORITY = listOf(
 )
 
 private fun ordered(styles: List<String>): List<String> =
-    styles.sortedBy { PRIORITY.indexOf(it).let { at -> if (at < 0) Int.MAX_VALUE else at } }
+    styles.sortedBy { PRIORITY.indexOf(base(it)).let { at -> if (at < 0) Int.MAX_VALUE else at } }
+
+/** Ширина маркера пункта (#13) — хвостом имени: `list2h1`, `iteminset1h2`. */
+private val WIDE = Regex("(?<=\\d)h(\\d)$")
+
+private fun base(style: String) = style.replace(WIDE, "")
+
+private fun width(style: String) = WIDE.find(style)?.groupValues?.get(1)?.toInt() ?: 0
 
 /** Чем набран знак: гарнитура, кегль, вес, наклон, цвет. */
 private class Look(
@@ -113,6 +121,8 @@ private class Shape(
     val inside: Float,
     val panel: Boolean,
     val quotes: Int,
+    /** Текст пункта — по табуляции на краю висячего отступа (#13). */
+    val tab: Boolean,
 )
 
 private fun shape(styles: List<String>, m: Metrics): Shape {
@@ -124,8 +134,9 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
     var inside = 0f
     var panel = false
     var quotes = 0
+    var tab = false
     for (style in ordered(styles)) {
-        when (style) {
+        when (base(style)) {
             "body" -> {
                 inside = m.extra
                 below = m.extra * 2
@@ -159,9 +170,10 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
                 quotes = maxOf(quotes, level)
             }
             "list1", "list2", "list3" -> {
-                val level = style.last() - '0'
+                val level = base(style).last() - '0'
                 margin = m.px(type.indent) * level
-                hang = m.px(type.hang)
+                hang = m.px(type.hang(width(style)))
+                tab = true
                 // Пункты стоят плотнее абзацев: список — одна мысль, разбитая на части.
                 below = m.extra / 2
             }
@@ -169,7 +181,7 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
             // текстом (у пункта — правее маркера) — и линейки цитат вокруг.
             "inset1", "inset2", "inset3" -> margin = m.px(type.indent) * (style.last() - '0')
             "iteminset1", "iteminset2", "iteminset3" ->
-                margin = m.px(type.indent) * (style.last() - '0') + m.px(type.hang)
+                margin = m.px(type.indent) * (base(style).last() - '0') + m.px(type.hang(width(style)))
             "rule1", "rule2", "rule3" -> quotes = maxOf(quotes, style.last() - '0')
             "note" -> {
                 margin = m.px(type.noteIndent)
@@ -178,7 +190,7 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
             }
         }
     }
-    return Shape(margin, hang, above, below, inside, panel, quotes)
+    return Shape(margin, hang, above, below, inside, panel, quotes, tab)
 }
 
 /**
@@ -519,6 +531,8 @@ fun typeset(
             ),
             start, stop, Spanned.SPAN_PARAGRAPH,
         )
+        // Табуляция меряется от поля первой строки — там стоит маркер.
+        if (shape.tab) out.setSpan(TabStopSpan.Standard(shape.hang.toInt()), start, stop, Spanned.SPAN_PARAGRAPH)
         start = stop
     }
     return out

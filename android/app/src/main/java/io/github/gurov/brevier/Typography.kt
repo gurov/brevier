@@ -22,6 +22,8 @@ class Typography(json: JSONObject) {
     val zoomNormal = json.getInt("zoomNormal")
     val indent = json.getDouble("indent").toFloat()
     val hang = json.getDouble("hang").toFloat()
+    /** Висячий отступ пункта с номером в 1, 2, 3 цифры (#13). */
+    val numberHangs = floats(json, "numberHangs")
     val noteIndent = json.getDouble("noteIndent").toFloat()
     val noteHang = json.getDouble("noteHang").toFloat()
     val codeGap = json.getDouble("codeGap").toFloat()
@@ -43,6 +45,9 @@ class Typography(json: JSONObject) {
     val dark = Palette(json.getJSONObject("dark"))
 
     fun palette(dark: Boolean) = if (dark) this.dark else light
+
+    /** Висячий отступ по ширине маркера: 0 — «•», 1..3 — цифр в номере (`outline::hang`). */
+    fun hang(width: Int) = if (width == 0) hang else numberHangs[minOf(width, numberHangs.size) - 1]
 
     companion object {
         private fun floats(json: JSONObject, key: String) =

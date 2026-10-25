@@ -418,7 +418,7 @@ fn typography() -> String {
         "{{\"textSize\":{},\"textPx\":{},\"lineHeight\":{},\"headingLineHeight\":{},\
          \"headings\":[{}],\"headingWeights\":[{}],\"measureInEms\":{},\
          \"zoomSteps\":[{}],\"zoomNormal\":{},\
-         \"indent\":{},\"hang\":{},\"noteIndent\":{},\"noteHang\":{},\"codeGap\":{},\
+         \"indent\":{},\"hang\":{},\"numberHangs\":[{}],\"noteIndent\":{},\"noteHang\":{},\"codeGap\":{},\
          \"codeSize\":{},\"padSize\":{},\"noteSize\":{},\"noterefSize\":{},\
          \"noterefRise\":{},\"alertSize\":{},\"alertTracking\":{},\
          \"ruleWidth\":{},\"ruleX\":{},\"ruleInset\":{},\
@@ -436,6 +436,7 @@ fn typography() -> String {
         outline::ZOOM_NORMAL,
         outline::INDENT,
         outline::HANG,
+        list(&outline::NUMBER_HANGS),
         outline::NOTE_INDENT,
         outline::NOTE_HANG,
         outline::CODE_GAP,

@@ -4802,20 +4802,29 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
     }
 
     // Список: маркер выступает влево, перенос строки встаёт под текст,
-    // а не под маркер. Уровни вложенности — свой отступ каждому.
+    // а не под маркер. Уровни вложенности — свой отступ каждому. Текст
+    // после маркера начинается табуляцией на краю отступа (#13): Pango
+    // меряет её от поля абзаца, и первое слово встаёт ровно над переносами.
+    // Отступ — по ширине маркера: у номера свой, пошире.
     for level in 1..=page::LIST_LEVELS {
-        style(
-            buffer,
-            &format!("list{level}"),
-            &[
-                ("left-margin", &px(f64::from(INDENT) * f64::from(level))),
-                ("indent", &px(-f64::from(HANG))),
-                ("justification", &gtk::Justification::Left),
-                // Пункты стоят плотнее абзацев: список — одна мысль, разбитая
-                // на части, а не несколько абзацев подряд.
-                ("pixels-below-lines", &(extra / 2)),
-            ],
-        );
+        for width in 0..=3 {
+            let hang = px(f64::from(outline::hang(width)));
+            let mut tabs = pango::TabArray::new(1, true);
+            tabs.set_tab(0, pango::TabAlign::Left, hang);
+            style(
+                buffer,
+                &page::Style::List(level, width).name(),
+                &[
+                    ("left-margin", &px(f64::from(INDENT) * f64::from(level))),
+                    ("indent", &-hang),
+                    ("tabs", &tabs),
+                    ("justification", &gtk::Justification::Left),
+                    // Пункты стоят плотнее абзацев: список — одна мысль,
+                    // разбитая на части, а не несколько абзацев подряд.
+                    ("pixels-below-lines", &(extra / 2)),
+                ],
+            );
+        }
     }
     // Блок кода внутри цитаты или пункта (#13): только поле — то, под которым
     // стоит их текст (у пункта — правее маркера). Теги самих цитаты и пункта
@@ -4831,14 +4840,16 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
         style(buffer, &format!("rule{level}"), &[]);
     }
     for level in 1..=page::LIST_LEVELS {
-        style(
-            buffer,
-            &format!("iteminset{level}"),
-            &[(
-                "left-margin",
-                &px(f64::from(INDENT) * f64::from(level) + f64::from(HANG)),
-            )],
-        );
+        for width in 0..=3 {
+            style(
+                buffer,
+                &page::Style::ItemInset(level, width).name(),
+                &[(
+                    "left-margin",
+                    &px(f64::from(INDENT) * f64::from(level) + f64::from(outline::hang(width))),
+                )],
+            );
+        }
     }
     let (link, dim) = (colors.link, colors.dim);
     style(
