@@ -94,8 +94,10 @@ object Core {
         obj("bookmark", utcOffset(), address, title).optBoolean("kept")
 
     fun settings(): JSONObject = obj("settings")
-    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean) {
-        val flags = listOf(dark, images, archive).map { if (it) "1" else "0" }
+    /** `contrast` — выбор читателя (#44); `null` — не выбирал, решает система. */
+    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?) {
+        val flags = listOf(dark, images, archive).map { if (it) "1" else "0" } +
+            when (contrast) { true -> "1"; false -> "0"; null -> "" }
         ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 

@@ -258,7 +258,10 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   tab-separated cells.
 - **Justified text** as a setting: paragraphs get a straight right edge; headings, lists
   and code stay ragged.
-- **Ivory paper** instead of glaring white, and a warm dark theme.
+- **Ivory paper** instead of glaring white, and a warm dark theme. **High contrast** for
+  sharper letters: black on white paper, or white on black in the dark theme. Until you
+  choose, Brevier follows your system's contrast setting (Linux, Android 14 and later,
+  Windows).
 - **Zoom (67–200%) scales the whole layout**, so a line still holds about 65 characters.
 - **Fonts are built in** — Noto Sans and Noto Sans Mono — so a page looks the same on every
   system, unless you pick your system's serif or sans.

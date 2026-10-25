@@ -285,6 +285,12 @@ fn call(method: &str, arg: &str) -> String {
             if !field(2).is_empty() {
                 settings.archive = field(2) == "1";
             }
+            // Контраст (#44): пусто — читатель не выбирал, решает система.
+            settings.high_contrast = match field(3) {
+                "1" => Some(true),
+                "0" => Some(false),
+                _ => None,
+            };
             settings.save();
             "{}".to_owned()
         }
@@ -387,19 +393,16 @@ fn typography() -> String {
         .map(|weight| weight.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let theme = |dark: bool| {
-        let colors = palette::colors(dark);
-        let (paper, ink) = palette::paper_and_ink(dark);
-        let shelf = if dark {
-            palette::SHELF_DARK
-        } else {
-            palette::SHELF_LIGHT
-        };
+    let theme = |dark: bool, high: bool| {
+        let colors = palette::colors(palette::Theme { dark, high });
         format!(
-            "{{\"paper\":\"{paper}\",\"ink\":\"{ink}\",\"shelf\":\"{shelf}\",\
+            "{{\"paper\":\"{}\",\"ink\":\"{}\",\"shelf\":\"{}\",\
              \"link\":\"{}\",\"dim\":\"{}\",\"panel\":\"{}\",\"keyword\":\"{}\",\
              \"literal\":\"{}\",\"number\":\"{}\",\"comment\":\"{}\",\"rule\":\"{}\",\
              \"chosen\":\"{}\",\"touched\":\"{}\",\"note\":\"{}\",\"noteRule\":\"{}\"}}",
+            colors.paper,
+            colors.ink,
+            colors.shelf,
             colors.link,
             colors.dim,
             colors.panel,
@@ -424,7 +427,7 @@ fn typography() -> String {
          \"ruleWidth\":{},\"ruleX\":{},\"ruleInset\":{},\
          \"listLevels\":{},\"quoteLevels\":{},\"hints\":{},\
          \"found\":\"{}\",\"foundHere\":\"{}\",\"foundInk\":\"{}\",\
-         \"light\":{},\"dark\":{}}}",
+         \"light\":{},\"dark\":{},\"lightHigh\":{},\"darkHigh\":{}}}",
         outline::TEXT_SIZE,
         outline::TEXT_PX,
         outline::LINE_HEIGHT,
@@ -456,8 +459,10 @@ fn typography() -> String {
         palette::FOUND,
         palette::FOUND_HERE,
         palette::FOUND_INK,
-        theme(false),
-        theme(true),
+        theme(false, false),
+        theme(true, false),
+        theme(false, true),
+        theme(true, true),
     )
 }
 
@@ -851,10 +856,15 @@ fn settings() -> String {
         })
         .collect();
     format!(
-        "{{\"dark\":{},\"images\":{},\"archive\":{},\"type\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
         settings.dark,
+        match settings.high_contrast {
+            Some(true) => "high",
+            Some(false) => "usual",
+            None => "",
+        },
         settings.images,
         settings.archive,
         type_json(&chosen),

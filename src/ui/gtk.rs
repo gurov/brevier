@@ -43,10 +43,7 @@ use brevier::outline::{
     Type, ZOOM_NORMAL, ZOOM_STEPS, clip,
 };
 use brevier::page::{self, Block};
-use brevier::palette::{
-    FOUND, FOUND_HERE, FOUND_INK, INK_DARK, INK_LIGHT, PAPER_DARK, PAPER_LIGHT, SHELF_DARK,
-    SHELF_LIGHT, colors, rgb,
-};
+use brevier::palette::{FOUND, FOUND_HERE, FOUND_INK, Theme, colors, picture_paper, rgb};
 use brevier::reading::{self, Progress, Readings};
 use brevier::save;
 use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
@@ -381,6 +378,9 @@ struct Tab {
     /// Окно переехало на другой экран — перерисовать, как при смене ступени:
     /// картинки разбираются в пикселях экрана (#15).
     density_seen: i32,
+    /// На какую бумагу легли прозрачные места её картинок: высокий контраст
+    /// кладёт их на белую (#44). Сменился — перерисовать при показе.
+    contrast_seen: bool,
     /// Кэш «назад/вперёд»: уже показанные документы этой вкладки, по адресу.
     /// «Назад» рисует страницу из него сразу, без сети, — как bfcache
     /// у браузеров. Живёт ровно на путь истории: страницы, обрубленные
@@ -451,6 +451,13 @@ struct State {
     next_id: u64,
     /// Тема общая для всех вкладок: это настройка читателя, а не страницы.
     dark: bool,
+    /// Высокий контраст (#44), если читатель его выбрал; `None` — решает
+    /// система, её ответ — в `system_contrast`.
+    high_contrast: Option<bool>,
+    /// Просит ли высокий контраст система (`follow_system_contrast`).
+    system_contrast: bool,
+    /// Подписка на смену контраста в портале: уходит вместе с окном.
+    contrast_watch: Option<gio::SignalSubscription>,
     /// Грузить ли картинки. Читатель волен выключить их кнопкой в панели:
     /// после отказа от JS декодер картинок — единственная серьёзная
     /// поверхность атаки, и закрыть её должно быть чем.
@@ -602,6 +609,14 @@ impl Slot {
 impl State {
     fn find(&mut self, id: u64) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|tab| tab.id == id)
+    }
+
+    /// Чем печатать: выбор читателя, а пока его нет — что говорит система.
+    fn theme(&self) -> Theme {
+        Theme {
+            dark: self.dark,
+            high: self.high_contrast.unwrap_or(self.system_contrast),
+        }
     }
 }
 
@@ -839,6 +854,9 @@ fn build(app: &Application, start: Vec<String>) {
         tabs: Vec::new(),
         next_id: 0,
         dark: settings.dark,
+        high_contrast: settings.high_contrast,
+        system_contrast: false,
+        contrast_watch: None,
         images: settings.images,
         archive: settings.archive,
         zoom: ZOOM_NORMAL,
@@ -858,6 +876,7 @@ fn build(app: &Application, start: Vec<String>) {
         shelf: Vec::new(),
     }));
     apply_theme(&ui, &state);
+    follow_system_contrast(&ui, &state);
     reading_hooks(&ui, &state);
     {
         // Дверь снаружи: по ней приезжают адреса из второго запуска.
@@ -1301,6 +1320,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             zoom_seen: ZOOM_NORMAL,
             type_seen: Type::USUAL,
             density_seen: 1,
+            contrast_seen: false,
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: true,
@@ -1350,9 +1370,10 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
 /// У каждой настройки есть причина, которую надо объяснить строкой, — в кнопку
 /// с иконкой такое не помещается, потому это страница, а не значок в панели.
 fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
-    let (dark_on, images_on, archive_on) = {
+    let (dark_on, high_on, images_on, archive_on) = {
         let borrowed = state.borrow();
-        (borrowed.dark, borrowed.images, borrowed.archive)
+        let theme = borrowed.theme();
+        (theme.dark, theme.high, borrowed.images, borrowed.archive)
     };
     let keep_copies = gtk::Switch::builder()
         .valign(gtk::Align::Center)
@@ -1370,6 +1391,10 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         .valign(gtk::Align::Center)
         .active(dark_on)
         .build();
+    let high_contrast = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(high_on)
+        .build();
     let show_images = gtk::Switch::builder()
         .valign(gtk::Align::Center)
         .active(images_on)
@@ -1379,6 +1404,16 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         let state = state.clone();
         dark_mode.connect_active_notify(move |switch| {
             state.borrow_mut().dark = switch.is_active();
+            apply_theme(&ui, &state);
+            remember_settings(&ui, &state);
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        // Тронул — выбрал: с этой минуты решает читатель, а не система.
+        high_contrast.connect_active_notify(move |switch| {
+            state.borrow_mut().high_contrast = Some(switch.is_active());
             apply_theme(&ui, &state);
             remember_settings(&ui, &state);
         });
@@ -1413,6 +1448,12 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         "Dark theme",
         "Warm dark, in the same row as the ivory paper.",
         &dark_mode,
+    ));
+    rows.append(&setting_row(
+        "High contrast",
+        "Black ink on white paper, or white on black in the dark theme. \
+         Until you choose, Brevier follows your system's contrast setting.",
+        &high_contrast,
     ));
     rows.append(&setting_row(
         "Images",
@@ -1487,7 +1528,7 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         let borrowed = state.borrow();
         tags(
             &sample.buffer(),
-            borrowed.dark,
+            borrowed.theme(),
             page_scale(&borrowed),
             &chosen,
         );
@@ -1576,7 +1617,7 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
             remember_settings(&ui, &state);
             let borrowed = state.borrow();
             let buffer = sample.buffer();
-            tags(&buffer, borrowed.dark, page_scale(&borrowed), &next);
+            tags(&buffer, borrowed.theme(), page_scale(&borrowed), &next);
             sample.set_width_request(
                 (f64::from(TEXT_SIZE * next.measure * page_scale(&borrowed)) * dpi() / 72.0).round()
                     as i32,
@@ -2053,7 +2094,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     // слева от цитаты. Настраиваем его уже как `TextView`, чтобы не спорить
     // с одноимёнными методами других интерфейсов GTK.
     let article = Article::new();
-    article.set_rule_color(rule_color(state.borrow().dark));
+    article.set_rule_color(rule_color(state.borrow().theme()));
     let view: gtk::TextView = article.upcast();
     view.set_editable(false);
     view.set_cursor_visible(false);
@@ -2070,7 +2111,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         let borrowed = state.borrow();
         tags(
             &view.buffer(),
-            borrowed.dark,
+            borrowed.theme(),
             borrowed.typography.scale(),
             &borrowed.typography,
         );
@@ -2133,6 +2174,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             zoom_seen: ZOOM_NORMAL,
             type_seen: Type::USUAL,
             density_seen: 1,
+            contrast_seen: false,
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: false,
@@ -2736,6 +2778,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
     let borrowed = state.borrow();
     Settings {
         dark: borrowed.dark,
+        high_contrast: borrowed.high_contrast,
         images: borrowed.images,
         shelf: ui.show_contents.is_active(),
         shelf_width: Some(ui.shelf_width.get()),
@@ -3360,6 +3403,7 @@ fn show_document(
     );
     let seen = current_zoom(&borrowed);
     let typography = borrowed.typography;
+    let high = borrowed.theme().high;
     // Прогресс чтения (#19) — у статьи, не у списка ссылок и не у своих
     // страниц. Записанное о ней поднимаем сразу: доли на полке видны с порога.
     let readable = document.kind == brevier::Kind::Article
@@ -3404,6 +3448,7 @@ fn show_document(
         tab.zoom_seen = seen;
         tab.type_seen = typography;
         tab.density_seen = density(ui);
+        tab.contrast_seen = high;
     }
     drop(borrowed);
     place_notes(state, id);
@@ -3528,7 +3573,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         format!("{title} — Brevier")
     }));
 
-    let (total, dark) = {
+    let (total, theme) = {
         let borrowed = state.borrow();
         let total = ui
             .notebook
@@ -3537,7 +3582,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
             .and_then(|tab| tab.progress.as_ref())
             .map(Progress::total)
             .unwrap_or(0);
-        (total, borrowed.dark)
+        (total, borrowed.theme())
     };
     let noted = {
         let borrowed = state.borrow();
@@ -3547,7 +3592,7 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         &ui.contents,
         &marks,
         total,
-        dark,
+        theme,
         &entries,
         here.as_ref(),
         &noted,
@@ -3690,16 +3735,180 @@ fn reveal(pane: &gtk::ScrolledWindow, row: &gtk::ListBoxRow) {
 /// Тема. Кроме настройки GTK перекрашиваем страницу и свои теги: цвет бумаги,
 /// ссылки и приглушённого текста — часть типографики, а не оформления окна.
 fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
-    let dark = state.borrow().dark;
+    let theme = state.borrow().theme();
     if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_application_prefer_dark_theme(dark);
+        settings.set_gtk_application_prefer_dark_theme(theme.dark);
     }
-    ui.paint.load_from_data(&page_css(dark));
+    ui.paint.load_from_data(&page_css(theme));
     for tab in &state.borrow().tabs {
-        recolor(&tab.view.buffer(), dark);
+        recolor(&tab.view.buffer(), theme);
         if let Some(article) = tab.view.downcast_ref::<Article>() {
-            article.set_rule_color(rule_color(dark));
+            article.set_rule_color(rule_color(theme));
         }
+    }
+    // Картинки с прозрачным легли на бумагу прежнего контраста: открытую
+    // вкладку перерисовываем сразу, фоновые — при показе.
+    rezoom_current(ui, state);
+}
+
+/// Высокий контраст, о котором просит система (#44): пока читатель сам
+/// не выбрал, следуем ей. Linux говорит через портал оформления
+/// (`org.freedesktop.appearance`, ключ `contrast`, 1 — «выше обычного»):
+/// его ведут и GNOME, и KDE, и в песочнице flatpak он тот же. Ответа не
+/// ждём — окно показывается сразу, контраст догоняет; ждать значило бы
+/// зависеть от того, проснулся ли портал. Windows — режим высокой
+/// контрастности; о его смене система говорит окну сообщением, до которого
+/// GTK не пускает, поэтому переспрашиваем, когда окно снова в фокусе.
+fn follow_system_contrast(ui: &Ui, state: &Rc<RefCell<State>>) {
+    #[cfg(windows)]
+    {
+        hear_contrast(ui, state, windows_high_contrast());
+        let window = ui.window.clone();
+        let ui = ui.clone();
+        let state = Rc::downgrade(state);
+        window.connect_is_active_notify(move |window| {
+            if let (true, Some(state)) = (window.is_active(), state.upgrade()) {
+                hear_contrast(&ui, &state, windows_high_contrast());
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    {
+        let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else {
+            return;
+        };
+        let heard: Rc<dyn Fn(bool)> = {
+            let ui = ui.clone();
+            let state = Rc::downgrade(state);
+            Rc::new(move |high| {
+                if let Some(state) = state.upgrade() {
+                    hear_contrast(&ui, &state, high);
+                }
+            })
+        };
+        let changed = heard.clone();
+        let watch = bus.subscribe_to_signal(
+            Some(PORTAL),
+            Some(PORTAL_SETTINGS),
+            Some("SettingChanged"),
+            Some(PORTAL_PATH),
+            Some(APPEARANCE),
+            gio::DBusSignalFlags::NONE,
+            move |signal| {
+                let parameters = signal.parameters;
+                if parameters.n_children() == 3
+                    && parameters.child_value(1).str() == Some("contrast")
+                    && let Some(high) = contrast_from(&parameters.child_value(2))
+                {
+                    changed(high);
+                }
+            },
+        );
+        state.borrow_mut().contrast_watch = Some(watch);
+        read_contrast(&bus, "ReadOne", heard);
+    }
+}
+
+#[cfg(not(windows))]
+const PORTAL: &str = "org.freedesktop.portal.Desktop";
+#[cfg(not(windows))]
+const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+#[cfg(not(windows))]
+const PORTAL_SETTINGS: &str = "org.freedesktop.portal.Settings";
+#[cfg(not(windows))]
+const APPEARANCE: &str = "org.freedesktop.appearance";
+
+/// Спросить портал о контрасте. `ReadOne` — с версии 2 интерфейса; портал
+/// старше знает только `Read`, им и переспрашиваем. Ключа нет и там —
+/// система молчит, остаётся обычный.
+#[cfg(not(windows))]
+fn read_contrast(bus: &gio::DBusConnection, method: &'static str, heard: Rc<dyn Fn(bool)>) {
+    let again = bus.clone();
+    bus.call(
+        Some(PORTAL),
+        PORTAL_PATH,
+        PORTAL_SETTINGS,
+        method,
+        Some(&(APPEARANCE, "contrast").to_variant()),
+        glib::VariantTy::new("(v)").ok(),
+        gio::DBusCallFlags::NONE,
+        5000,
+        gio::Cancellable::NONE,
+        move |reply| match reply {
+            Ok(reply) => {
+                if let Some(high) = contrast_from(&reply.child_value(0)) {
+                    heard(high);
+                }
+            }
+            Err(_) if method == "ReadOne" => read_contrast(&again, "Read", heard),
+            Err(_) => {}
+        },
+    );
+}
+
+/// Значение ключа `contrast`: `u`, 1 — высокий. Приходит в варианте,
+/// у старого `Read` — в варианте внутри варианта.
+#[cfg(not(windows))]
+fn contrast_from(value: &glib::Variant) -> Option<bool> {
+    let mut value = value.clone();
+    while value.is_type(glib::VariantTy::VARIANT)
+        && let Some(inner) = value.as_variant()
+    {
+        value = inner;
+    }
+    value.get::<u32>().map(|contrast| contrast == 1)
+}
+
+/// Режим высокой контрастности Windows (`SPI_GETHIGHCONTRAST`).
+#[cfg(windows)]
+fn windows_high_contrast() -> bool {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct HighContrast {
+        size: u32,
+        flags: u32,
+        scheme: *mut u16,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SystemParametersInfoW(action: u32, param: u32, data: *mut c_void, ini: u32) -> i32;
+    }
+
+    const SPI_GETHIGHCONTRAST: u32 = 0x0042;
+    const HCF_HIGHCONTRASTON: u32 = 0x0001;
+    let mut answer = HighContrast {
+        size: std::mem::size_of::<HighContrast>() as u32,
+        flags: 0,
+        scheme: std::ptr::null_mut(),
+    };
+    // Безопасно: структура той раскладки, что ждёт Windows, и её размер
+    // назван в ней самой; строку схемы система не выделяет, а показывает
+    // на свою.
+    let done = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            answer.size,
+            (&raw mut answer).cast(),
+            0,
+        )
+    };
+    done != 0 && answer.flags & HCF_HIGHCONTRASTON != 0
+}
+
+/// Система сказала, просит ли она высокий контраст. Читатель, выбравший
+/// сам, этого не заметит.
+fn hear_contrast(ui: &Ui, state: &Rc<RefCell<State>>, high: bool) {
+    let Ok(mut borrowed) = state.try_borrow_mut() else {
+        return;
+    };
+    let was = borrowed.theme();
+    borrowed.system_contrast = high;
+    let changed = borrowed.theme() != was;
+    drop(borrowed);
+    if changed {
+        apply_theme(ui, state);
     }
 }
 
@@ -3708,14 +3917,15 @@ fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
 /// линеек таблицы, а середину между ними.
 /// Краска страницы. Нужна холсту формулы: он рисует исходник сам,
 /// в обход тегов буфера, и цвет ему надо дать явно.
-fn ink_color(dark: bool) -> gtk::gdk::RGBA {
-    if dark { INK_DARK } else { INK_LIGHT }
+fn ink_color(theme: Theme) -> gtk::gdk::RGBA {
+    colors(theme)
+        .ink
         .parse::<gtk::gdk::RGBA>()
         .unwrap_or_else(|_| gtk::gdk::RGBA::new(0.1, 0.1, 0.1, 1.0))
 }
 
-fn rule_color(dark: bool) -> gtk::gdk::RGBA {
-    let mut color = colors(dark)
+fn rule_color(theme: Theme) -> gtk::gdk::RGBA {
+    let mut color = colors(theme)
         .dim
         .parse::<gtk::gdk::RGBA>()
         .unwrap_or_else(|_| gtk::gdk::RGBA::new(0.6, 0.6, 0.6, 1.0));
@@ -3728,13 +3938,9 @@ fn rule_color(dark: bool) -> gtk::gdk::RGBA {
 /// Красим и текст, и то, что вокруг него: колонка узкая, поля по бокам широкие,
 /// и если их красит тема окна, страница получается из трёх полос разного тона.
 /// Оглавлению отличаться можно — оно рядом со страницей, а не на ней.
-fn page_css(dark: bool) -> String {
-    let (paper, ink, shelf) = if dark {
-        (PAPER_DARK, INK_DARK, SHELF_DARK)
-    } else {
-        (PAPER_LIGHT, INK_LIGHT, SHELF_LIGHT)
-    };
-    let colors = colors(dark);
+fn page_css(theme: Theme) -> String {
+    let colors = colors(theme);
+    let (paper, ink, shelf) = (colors.paper, colors.ink, colors.shelf);
     let (dim, rule) = (colors.dim, colors.rule);
     let (chosen, touched) = (colors.chosen, colors.touched);
 
@@ -3774,18 +3980,18 @@ fn page_css(dark: bool) -> String {
 }
 
 /// Подложка ссылки под отметкой клавиатуры: цвет ссылки на пятую часть.
-fn focus_color(dark: bool) -> gtk::gdk::RGBA {
-    let mut color = gtk::gdk::RGBA::parse(colors(dark).link).unwrap_or(gtk::gdk::RGBA::BLUE);
+fn focus_color(theme: Theme) -> gtk::gdk::RGBA {
+    let mut color = gtk::gdk::RGBA::parse(colors(theme).link).unwrap_or(gtk::gdk::RGBA::BLUE);
     color.set_alpha(0.22);
     color
 }
 
-fn recolor(buffer: &gtk::TextBuffer, dark: bool) {
+fn recolor(buffer: &gtk::TextBuffer, theme: Theme) {
     let table = buffer.tag_table();
     if let Some(tag) = table.lookup("focus") {
-        tag.set_property("background-rgba", focus_color(dark));
+        tag.set_property("background-rgba", focus_color(theme));
     }
-    let colors = colors(dark);
+    let colors = colors(theme);
     let paint = |name: &str, property: &str, value: &str| {
         if let Some(tag) = table.lookup(name) {
             tag.set_property(property, value);
@@ -3828,12 +4034,12 @@ fn current_zoom(state: &State) -> usize {
 /// под меру. Всё, что зависит от масштаба, ставится здесь — иначе кегли,
 /// картинки и сетка таблицы разъедутся между собой.
 fn dress(state: &Rc<RefCell<State>>, view: &gtk::TextView) {
-    let (scale, dark, typography) = {
+    let (scale, theme, typography) = {
         let borrowed = state.borrow();
         set_scale(&borrowed);
-        (zoom() as f32, borrowed.dark, borrowed.typography)
+        (zoom() as f32, borrowed.theme(), borrowed.typography)
     };
-    tags(&view.buffer(), dark, scale, &typography);
+    tags(&view.buffer(), theme, scale, &typography);
     fit_column(view);
 }
 
@@ -3934,6 +4140,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         let mut borrowed = state.borrow_mut();
         let seen = current_zoom(&borrowed);
         let typography = borrowed.typography;
+        let high = borrowed.theme().high;
         if let Some(tab) = borrowed.find(id) {
             tab.links = page.links;
             tab.focus = None;
@@ -3944,6 +4151,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.zoom_seen = seen;
             tab.type_seen = typography;
             tab.density_seen = density(ui);
+            tab.contrast_seen = high;
         }
     }
     sync(ui, state, None);
@@ -3984,7 +4192,8 @@ fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
                 && tab.document.is_some()
                 && (tab.zoom_seen != current_zoom(&borrowed)
                     || tab.type_seen != borrowed.typography
-                    || tab.density_seen != density(ui))
+                    || tab.density_seen != density(ui)
+                    || tab.contrast_seen != borrowed.theme().high)
         })
     };
     if stale {
@@ -4624,6 +4833,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
     let mut borrowed = state.borrow_mut();
     let seen = current_zoom(&borrowed);
     let typography = borrowed.typography;
+    let high = borrowed.theme().high;
     if let Some(tab) = borrowed.find(id) {
         tab.links = page.links;
         tab.focus = None;
@@ -4633,6 +4843,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         tab.zoom_seen = seen;
         tab.type_seen = typography;
         tab.density_seen = density(ui);
+        tab.contrast_seen = high;
     }
     drop(borrowed);
     sync(ui, state, None);
@@ -4661,7 +4872,7 @@ fn style(buffer: &gtk::TextBuffer, name: &str, properties: &[(&str, &dyn glib::v
 /// Масштаб умножает модель целиком — кегль, воздух между строками, шкалу
 /// заголовков, отступы списка и цитаты, поля блока кода. Умножить один
 /// кегль значило бы развалить их между собой.
-fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
+fn tags(buffer: &gtk::TextBuffer, theme: Theme, scale: f32, typography: &Type) {
     let scale = f64::from(scale);
     let px = |value: f64| (value * scale).round() as i32;
     let extra = px(f64::from((typography.leading - 1.0) * TEXT_SIZE));
@@ -4726,7 +4937,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
 
     style(buffer, "em", &[("style", &pango::Style::Italic)]);
     style(buffer, "strong", &[("weight", &BOLD)]);
-    let colors = colors(dark);
+    let colors = colors(theme);
 
     // Код в строке отличается не только гарнитурой: подложка отделяет его
     // от текста там, где моноширинного мало — в одном-двух знаках.
@@ -4921,7 +5132,7 @@ fn tags(buffer: &gtk::TextBuffer, dark: bool, scale: f32, typography: &Type) {
     // Ссылка под отметкой клавиатуры (#34): бледная подложка цвета ссылки —
     // видна, но текст не перекрикивает. До подсветки поиска: найденное
     // важнее, его и показываем поверх.
-    style(buffer, "focus", &[("background-rgba", &focus_color(dark))]);
+    style(buffer, "focus", &[("background-rgba", &focus_color(theme))]);
 
     // Подсветка поиска. Заводится последней: у тегов, наложенных позже,
     // приоритет выше, и жёлтое ложится поверх цвета ссылки.
@@ -5309,7 +5520,7 @@ fn fill_contents(
     list: &gtk::ListBox,
     marks: &[page::Mark],
     total: usize,
-    dark: bool,
+    theme: Theme,
     entries: &[Entry],
     here: Option<&Entry>,
     noted: &[Noted],
@@ -5376,7 +5587,7 @@ fn fill_contents(
             .margin_bottom(5)
             .build();
         bar.set_draw_func(move |_, cairo, width, height| {
-            let colors = colors(dark);
+            let colors = colors(theme);
             let [r, g, b] = rgb(if placed {
                 colors.note_rule
             } else {
@@ -5411,7 +5622,7 @@ fn fill_contents(
             &mark.title,
             i32::from(mark.level.saturating_sub(1)) * 12,
             place.as_deref(),
-            dark,
+            theme,
         );
         if !mark.heading {
             // Веха — не структура автора, а наша выжимка. Пусть это видно.
@@ -5533,7 +5744,7 @@ fn shelf_row_with_share(
     title: &str,
     indent: i32,
     place: Option<&str>,
-    dark: bool,
+    theme: Theme,
 ) -> (gtk::ListBoxRow, gtk::Label, gtk::DrawingArea, Rc<Cell<f32>>) {
     let (row, label) = shelf_row(title, indent);
     label.set_hexpand(true);
@@ -5565,7 +5776,7 @@ fn shelf_row_with_share(
             if part <= 0.0 {
                 return;
             }
-            let colors = colors(dark);
+            let colors = colors(theme);
             let paint = |hex: &str, alpha: f64| {
                 let [r, g, b] = rgb(hex);
                 cairo.set_source_rgba(
@@ -5712,7 +5923,7 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
             ))));
             Some(layout)
         });
-        canvas.set_fallback(layout.flatten(), ink_color(state.borrow().dark));
+        canvas.set_fallback(layout.flatten(), ink_color(state.borrow().theme()));
         return;
     }
 
@@ -5837,10 +6048,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     let source = shot.source.clone();
     let look = media::Look {
         width: measure_px().max(1) as u32,
-        // Прозрачное кладём на светлую бумагу, а не на белое: белая карточка
-        // посреди слоновой кости заметна, а схеме нужен только светлый фон —
-        // на тёмной теме тем более.
-        paper: rgb(PAPER_LIGHT),
+        paper: picture_paper(state.borrow().theme()),
         font_size: text_px(),
         fit: if shot.inline {
             media::Fit::Natural
@@ -6457,7 +6665,7 @@ fn draw_bar(
         return;
     }
     let (_, reached) = visible_range(&tab.view);
-    let colors = colors(borrowed.dark);
+    let colors = colors(borrowed.theme());
     let paint = |hex: &str, alpha: f64| {
         let [r, g, b] = rgb(hex);
         cairo.set_source_rgba(

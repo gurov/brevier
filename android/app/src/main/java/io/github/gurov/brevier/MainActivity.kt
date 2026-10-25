@@ -57,6 +57,10 @@ class MainActivity : Activity(), ArticleHost {
     private val main = Handler(Looper.getMainLooper())
 
     private var dark = false
+    /** Высокий контраст (#44), если читатель выбрал; `null` — решает система. */
+    private var contrast: Boolean? = null
+    /** Просит ли высокий контраст система (`systemContrast`). */
+    private var systemHigh = false
     private var images = true
     /** Класть ли копию каждой прочитанной страницы в архив (#8). */
     private var archive = true
@@ -112,13 +116,20 @@ class MainActivity : Activity(), ArticleHost {
     private var hits: List<Hit> = emptyList()
     private var hit = 0
 
-    private val palette: Palette get() = type.palette(dark)
+    private val theme: Theme get() = Theme(dark, contrast ?: systemHigh)
+    private val palette: Palette get() = type.palette(theme)
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
         fonts = Fonts.of(this)
         val stored = Core.settings()
         dark = stored.optBoolean("dark")
+        contrast = when (stored.optString("contrast")) {
+            "high" -> true
+            "usual" -> false
+            else -> null
+        }
+        systemHigh = systemContrast()
         images = stored.optBoolean("images", true)
         archive = stored.optBoolean("archive", true)
         reader = ReaderType.of(stored.getJSONObject("type"))
@@ -156,6 +167,13 @@ class MainActivity : Activity(), ArticleHost {
 
     override fun onResume() {
         super.onResume()
+        // Контраст меняют в настройках системы — и возвращаются сюда.
+        val high = systemContrast()
+        if (high != systemHigh) {
+            val was = theme
+            systemHigh = high
+            if (theme != was) retheme()
+        }
         main.removeCallbacks(ticker)
         main.postDelayed(ticker, 1000)
         lastTouch = android.os.SystemClock.uptimeMillis()
@@ -287,7 +305,8 @@ class MainActivity : Activity(), ArticleHost {
         root.addView(tabList, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         settings = SettingsPage(this, fonts,
             changed = { dark, images -> changeSettings(dark, images) },
-            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive) },
+            contrasted = { on -> changeContrast(on) },
+            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast) },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
             typeChanged = { chosen -> changeType(chosen) },
@@ -673,7 +692,7 @@ class MainActivity : Activity(), ArticleHost {
                     loaded == null -> {
                         tab.loading = false
                         tab.title = "The load fell through"
-                        tab.view?.show(message("The load fell through"), metrics(), dark, eager = false)
+                        tab.view?.show(message("The load fell through"), metrics(), theme, eager = false)
                         sync()
                     }
                     loaded.ok -> {
@@ -690,7 +709,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun tickLoading(tab: Tab, generation: Long, dots: Int) {
         if (tab.generation != generation || !tab.loading) return
         tab.dots = dots
-        tab.view?.show(message("Loading" + ".".repeat(dots)), metrics(), dark, eager = false)
+        tab.view?.show(message("Loading" + ".".repeat(dots)), metrics(), theme, eager = false)
         main.postDelayed({ tickLoading(tab, generation, dots % LOADING_DOTS + 1) }, 350)
     }
 
@@ -713,7 +732,7 @@ class MainActivity : Activity(), ArticleHost {
         } catch (failure: RuntimeException) {
             Log.w("Brevier", "drawing ${tab.current()} failed", failure)
             tab.notes = emptyList()
-            view.show(message(TRIPPED), metrics(), dark, eager = false)
+            view.show(message(TRIPPED), metrics(), theme, eager = false)
         }
     }
 
@@ -721,7 +740,7 @@ class MainActivity : Activity(), ArticleHost {
         val shown = tab.shown
         when {
             shown != null -> {
-                view.show(shown.page, metrics(), dark, eager = images && shown.ok, offer = shown.offer, ways = shown.ways)
+                view.show(shown.page, metrics(), theme, eager = images && shown.ok, offer = shown.offer, ways = shown.ways)
                 // Заметки (#39) — у ядра, на каждый показ: их могли оставить
                 // в другой вкладке на той же странице.
                 tab.notes = if (readable(tab) != null) Core.notes(shown.address) else emptyList()
@@ -735,12 +754,12 @@ class MainActivity : Activity(), ArticleHost {
                     anchor != null -> view.settle(anchor, ANCHOR_ALIGN)
                 }
             }
-            tab.loading || tab.pending -> view.show(message("Loading" + ".".repeat(tab.dots)), metrics(), dark, eager = false)
+            tab.loading || tab.pending -> view.show(message("Loading" + ".".repeat(tab.dots)), metrics(), theme, eager = false)
             tab.current() == null -> {
                 // У ядра, на каждый показ: наверху недавнее из журнала, а он растёт.
                 val intro = Core.intro()
                 tab.title = intro.optString("title", "Brevier")
-                view.show(Page.of(intro.getJSONObject("page")), metrics(), dark, eager = false)
+                view.show(Page.of(intro.getJSONObject("page")), metrics(), theme, eager = false)
             }
         }
     }
@@ -1617,7 +1636,7 @@ class MainActivity : Activity(), ArticleHost {
         menu.show(more)
     }
 
-    private fun showSettings() = settings.show(palette, dark, images, archive, isBrowser(), reader)
+    private fun showSettings() = settings.show(palette, theme, images, archive, isBrowser(), reader)
 
     /** Новый набор: на диск, открытой вкладке — сразу; фоновые набираются при показе. */
     private fun changeType(chosen: ReaderType) {
@@ -1681,14 +1700,35 @@ class MainActivity : Activity(), ArticleHost {
         val imagesOn = images && !this.images
         this.dark = dark
         this.images = images
-        Core.saveSettings(dark, images, archive)
-        if (themeChanged) {
-            applyTheme()
-            showSettings()
-            currentTab()?.let { redraw(it) }
-        }
+        Core.saveSettings(dark, images, archive, contrast)
+        if (themeChanged) retheme()
         if (imagesOn) currentTab()?.view?.loadAll()
     }
+
+    /** Контраст выбран руками (#44): с этой минуты система его не меняет. */
+    private fun changeContrast(high: Boolean) {
+        val was = theme
+        contrast = high
+        Core.saveSettings(dark, images, archive, contrast)
+        if (theme != was) retheme()
+    }
+
+    /** Тема сменилась: перекрасить окно, открытые настройки и статью — с картинками на новой бумаге. */
+    private fun retheme() {
+        applyTheme()
+        if (settings.visibility == View.VISIBLE) showSettings()
+        currentTab()?.let { redraw(it) }
+    }
+
+    /**
+     * Высокий ли контраст просит система. С Android 14 это уровень контраста
+     * (`UiModeManager.getContrast`: 0 — обычный, 0.5 — средний, 1 — высокий);
+     * раньше системного уровня нет, а «текст высокой контрастности» —
+     * закрытый вызов, и его не спросить.
+     */
+    private fun systemContrast(): Boolean =
+        Build.VERSION.SDK_INT >= 34 &&
+            (getSystemService(android.app.UiModeManager::class.java)?.contrast ?: 0f) > 0f
 
     /** Забыть всё прочитанное — с вопросом, потому что назад это не отыграть. */
     private fun forgetEverything() {

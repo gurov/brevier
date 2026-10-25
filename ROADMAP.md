@@ -320,6 +320,8 @@ with generative AI, and Brevier's is.
 
 ### 14. A white page (#44)
 
+Done, in the window and on Android; the Windows branch has not yet met a live Windows.
+
 The ivory paper is a choice, not an accident: pure white glows on a screen, and the warm
 tone takes the glow off without touching the contrast. But the page is the reader's, and
 some readers want black on white and nothing softer. A switch beside the theme — usual

@@ -484,6 +484,7 @@ class SettingsPage(
     context: Context,
     private val fonts: Fonts,
     private val changed: (dark: Boolean, images: Boolean) -> Unit,
+    private val contrasted: (high: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
     private val browser: () -> Unit,
@@ -492,6 +493,7 @@ class SettingsPage(
 ) : ScrollView(context) {
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private var dark = false
+    private var theme = Theme(dark = false, high = false)
     private var images = true
     /** Развёрнута ли тонкая настройка набора; `null` — по набору: свой — да. */
     private var fineTune: Boolean? = null
@@ -503,8 +505,9 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, dark: Boolean, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType) {
-        this.dark = dark
+    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType) {
+        this.dark = theme.dark
+        this.theme = theme
         this.images = images
         setBackgroundColor(palette.shelf)
         column.removeAllViews()
@@ -520,6 +523,12 @@ class SettingsPage(
         column.addView(row(
             "Dark theme", "Warm dark, in the same row as the ivory paper.",
             switch(palette, dark) { on -> this.dark = on; changed(this.dark, this.images) }, palette,
+        ))
+        // Тронул — выбрал: с этой минуты решает читатель, а не система (#44).
+        column.addView(row(
+            "High contrast",
+            "Black ink on white paper, or white on black in the dark theme. Until you choose, Brevier follows your system's contrast setting.",
+            switch(palette, theme.high) { on -> contrasted(on) }, palette,
         ))
         column.addView(row(
             "Images",
@@ -661,7 +670,7 @@ class SettingsPage(
             val pad = m.text.toInt()
             setPadding(pad, pad / 2, pad, pad)
             background = GradientDrawable().apply {
-                setColor(m.type.palette(dark).paper)
+                setColor(m.type.palette(theme).paper)
                 cornerRadius = context.dp(6f).toFloat()
             }
         }

@@ -631,6 +631,10 @@ impl Marks {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub dark: bool,
+    /// Высокий контраст (#44). `None` — читатель не выбирал, и решает
+    /// система, если она что-то говорит, — по той же причине, что у
+    /// `shelf_width`: умолчание, записанное в файл, застыло бы выбором.
+    pub high_contrast: Option<bool>,
     pub images: bool,
     /// Показывать ли полку.
     pub shelf: bool,
@@ -652,6 +656,7 @@ impl Default for Settings {
             // Светлая по умолчанию: бумага белая, и читатель, которому нужно
             // иначе, жмёт переключатель.
             dark: false,
+            high_contrast: None,
             // Читатель приходит читать статью с картинками, а не с рамками;
             // выключить их есть чем.
             images: true,
@@ -692,6 +697,13 @@ impl Settings {
             };
             match name {
                 "theme" => settings.dark = value == "dark",
+                "contrast" => {
+                    settings.high_contrast = match value {
+                        "high" => Some(true),
+                        "usual" => Some(false),
+                        _ => None,
+                    }
+                }
                 "images" => settings.images = value == "on",
                 "shelf" => settings.shelf = value == "on",
                 "shelf-width" => settings.shelf_width = value.parse().ok(),
@@ -739,6 +751,12 @@ impl Settings {
             switch(self.shelf),
             switch(self.archive),
         ));
+        if let Some(high) = self.high_contrast {
+            text.push_str(&format!(
+                "contrast\t{}\n",
+                if high { "high" } else { "usual" }
+            ));
+        }
         if let Some(width) = self.shelf_width {
             text.push_str(&format!("shelf-width\t{width}\n"));
         }
@@ -1702,6 +1720,7 @@ mod tests {
         let path = dir.join("settings.tsv");
         let chosen = Settings {
             dark: true,
+            high_contrast: Some(true),
             images: false,
             shelf: false,
             shelf_width: Some(320),
@@ -1734,6 +1753,34 @@ mod tests {
         assert_eq!(typography.measure, Type::default().measure);
         assert_eq!(typography.face, Face::Bundled);
         assert_eq!(typography.leading, 1.4);
+    }
+
+    /// Контраст, который читатель не выбирал, в файле не стоит: решает
+    /// система (#44). Выбранный — стоит, в обе стороны.
+    #[test]
+    fn contrast_is_written_only_once_chosen() {
+        let dir = temporary("contrast");
+        let path = dir.join("settings.tsv");
+        Settings::default().save_at(&path);
+        assert!(!fs::read_to_string(&path).unwrap().contains("contrast"));
+        assert_eq!(Settings::at(&path).high_contrast, None);
+
+        let usual = Settings {
+            high_contrast: Some(false),
+            ..Settings::default()
+        };
+        usual.save_at(&path);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("contrast\tusual\n")
+        );
+        assert_eq!(Settings::at(&path).high_contrast, Some(false));
+
+        fs::write(&path, "contrast high\n").unwrap();
+        assert_eq!(Settings::at(&path).high_contrast, Some(true));
+        fs::write(&path, "contrast loud\n").unwrap();
+        assert_eq!(Settings::at(&path).high_contrast, None);
     }
 
     #[test]

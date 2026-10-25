@@ -91,7 +91,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         private set
     private lateinit var metrics: Metrics
     private lateinit var palette: Palette
-    private var dark = false
+    private var theme = Theme(dark = false, high = false)
 
     private val proses = mutableListOf<ProseView>()
     private val images = mutableListOf<ImageFrame>()
@@ -137,7 +137,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     fun show(
         page: Page,
         metrics: Metrics,
-        dark: Boolean,
+        theme: Theme,
         eager: Boolean,
         offer: String? = null,
         ways: List<Entry> = emptyList(),
@@ -145,8 +145,8 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         generation += 1
         this.page = page
         this.metrics = metrics
-        this.dark = dark
-        palette = metrics.type.palette(dark)
+        this.theme = theme
+        palette = metrics.type.palette(theme)
         setBackgroundColor(palette.paper)
         if (hasFocus()) requestFocus()
         column.removeAllViews()
@@ -527,7 +527,8 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         width = columnWidth(),
         // Прозрачное кладём на светлую бумагу, а не на белое: белая карточка
         // посреди слоновой кости заметна, а схеме нужен только светлый фон.
-        paper = metrics.type.light.paper and 0xffffff,
+        // Высокому контрасту — его белую (`palette::picture_paper`).
+        paper = metrics.type.palette(theme.copy(dark = false)).paper and 0xffffff,
         fontSize = metrics.text,
         natural = natural,
     )

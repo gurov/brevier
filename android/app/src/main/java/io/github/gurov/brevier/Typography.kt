@@ -43,8 +43,16 @@ class Typography(json: JSONObject) {
     val foundInk = color(json.getString("foundInk"))
     val light = Palette(json.getJSONObject("light"))
     val dark = Palette(json.getJSONObject("dark"))
+    /** Высокий контраст (#44): белая бумага и чёрная краска, в тёмной — наоборот. */
+    val lightHigh = Palette(json.getJSONObject("lightHigh"))
+    val darkHigh = Palette(json.getJSONObject("darkHigh"))
 
-    fun palette(dark: Boolean) = if (dark) this.dark else light
+    fun palette(theme: Theme) = when {
+        theme.dark && theme.high -> darkHigh
+        theme.dark -> dark
+        theme.high -> lightHigh
+        else -> light
+    }
 
     /** Висячий отступ по ширине маркера: 0 — «•», 1..3 — цифр в номере (`outline::hang`). */
     fun hang(width: Int) = if (width == 0) hang else numberHangs[minOf(width, numberHangs.size) - 1]
@@ -59,6 +67,9 @@ class Typography(json: JSONObject) {
         val shared: Typography by lazy { Typography(Core.typography()) }
     }
 }
+
+/** Чем печатать: тема и контраст — как `palette::Theme` в ядре. */
+data class Theme(val dark: Boolean, val high: Boolean)
 
 /** Цвета темы. */
 class Palette(json: JSONObject) {
