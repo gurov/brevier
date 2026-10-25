@@ -291,6 +291,10 @@ fn call(method: &str, arg: &str) -> String {
                 "0" => Some(false),
                 _ => None,
             };
+            // Шапка уезжает (#45); поля нет — переключатель не трогали.
+            if !field(4).is_empty() {
+                settings.slide_bar = field(4) == "1";
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -856,7 +860,7 @@ fn settings() -> String {
         })
         .collect();
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"type\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
         settings.dark,
@@ -867,6 +871,7 @@ fn settings() -> String {
         },
         settings.images,
         settings.archive,
+        settings.slide_bar,
         type_json(&chosen),
         styles.join(","),
         chosen.style().map_or(-1, |index| index as i64),

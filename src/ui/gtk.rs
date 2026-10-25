@@ -2783,6 +2783,8 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         shelf: ui.show_contents.is_active(),
         shelf_width: Some(ui.shelf_width.get()),
         archive: borrowed.archive,
+        // Шапка, что уезжает, — у телефона (#45); у окна её нет.
+        slide_bar: Settings::default().slide_bar,
         typography: borrowed.typography,
     }
     .save();

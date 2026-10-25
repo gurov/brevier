@@ -362,6 +362,9 @@ text — not in a WebView — with the same typography and colours as the window
   passage edits or removes its note.
 - A tap on a picture saves it to your gallery or shares it.
 - A very long page — a whole novel — shows its first screen at once.
+- **The bar slides away while you read**: it follows your finger up and down without moving
+  the text, and stays put at the top and end of a page, on short pages, while you type,
+  search or select, and with TalkBack or Switch Access on. A setting keeps it in place.
 - With a keyboard attached, the window's shortcuts work, and `Alt+←` / `Alt+→` go back and
   forward.
 

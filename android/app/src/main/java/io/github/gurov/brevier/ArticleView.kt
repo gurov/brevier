@@ -69,6 +69,18 @@ interface ArticleHost {
     /** Страницу прокрутили: полка отмечает, где читатель. */
     fun scrolled()
 
+    /**
+     * Палец сдвинул страницу на `dy` пикселей (#45): шапка идёт за ним.
+     * Прыжки, броски после отпускания и подгрузка картинок сюда не доходят.
+     */
+    fun dragged(dy: Int)
+
+    /** Палец отпустил страницу (`pinch` — это был щипок): шапке — к ближнему краю. */
+    fun released(pinch: Boolean)
+
+    /** Читатель выделяет текст — или кончил (#45): шапка на месте, пока выделяет. */
+    fun selecting(on: Boolean)
+
     /** Щипок: ступень масштаба вверх или вниз. */
     fun zoom(step: Int)
 }
@@ -118,6 +130,16 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     /** Заметки страницы (#39) — их тоже получают и досыпанные куски. */
     private var notes: List<NoteSpot> = emptyList()
 
+    /**
+     * Шапка лежит поверх статьи (#45): сверху у статьи поле в её рост
+     * (`reserve`), текст под шапку уходит, не сдвигаясь, когда она уезжает.
+     * `covered` — сколько сверху закрыто шапкой сейчас: место чтения, прыжки
+     * и прочитанное меряются от её нижнего края (`visibleTop`).
+     */
+    var covered = 0
+    /** Прокрутку ведёт палец: только её сдвиг достаётся шапке. */
+    private var dragging = false
+
     init {
         isFillViewport = true
         isVerticalScrollBarEnabled = true
@@ -126,6 +148,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         // полю ввода — адресной строке, и та начинает принимать «назад».
         isFocusableInTouchMode = true
         descendantFocusability = FOCUS_BEFORE_DESCENDANTS
+        clipToPadding = false
         addView(column, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
@@ -172,7 +195,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         while (pending.isNotEmpty() && laid < FIRST_CHARS) append()
         if (pending.isNotEmpty()) drip(generation)
 
-        scrollTo(0, 0)
+        jump { scrollTo(0, 0) }
         if (eager) loadAll()
     }
 
@@ -356,7 +379,21 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     }
 
     /** Где читатель: смещение строки у верхнего края. От масштаба не зависит. */
-    fun place(): Int = offsetAt(scrollY) ?: 0
+    fun place(): Int = offsetAt(visibleTop()) ?: 0
+
+    /** Поле сверху под шапку (#45): её полный рост. */
+    fun reserve(top: Int) {
+        if (paddingTop != top) setPadding(0, top, 0, 0)
+    }
+
+    /** Верх видимого — под шапкой, если она видна, — на высоте колонки. */
+    fun visibleTop(): Int = scrollY - paddingTop + covered
+
+    /** Низ видимого на высоте колонки: снизу статью ничего не закрывает. */
+    fun visibleBottom(): Int = scrollY - paddingTop + height
+
+    /** Сколько статьи видно: окно без шапки. */
+    fun visibleHeight(): Int = height - covered
 
     /** Где на высоте колонки стоит это смещение. */
     private fun yOf(offset: Int): Int? {
@@ -382,7 +419,15 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     fun scrollToOffset(offset: Int, align: Float) {
         ensure(offset)
         val y = yOf(offset) ?: return
-        scrollTo(0, max(0, y - (height * align).toInt()))
+        jump { scrollTo(0, max(0, y + paddingTop - covered - (visibleHeight() * align).toInt())) }
+    }
+
+    /** Прокрутить не пальцем — прыжком: шапку (#45) это не двигает. */
+    private fun jump(move: () -> Unit) {
+        val was = dragging
+        dragging = false
+        move()
+        dragging = was
     }
 
     /**
@@ -415,6 +460,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
+        if (dragging && t != oldt) host.dragged(t - oldt)
         host.scrolled()
     }
 
@@ -460,7 +506,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             val box = Rect()
             cell.getDrawingRect(box)
             frame.offsetDescendantRectToMyCoords(cell, box)
-            scrollTo(0, max(0, frame.top + box.top - (height * align).toInt()))
+            jump { scrollTo(0, max(0, frame.top + box.top + paddingTop - covered - (visibleHeight() * align).toInt())) }
             if (box.left < frame.scrollX || box.right > frame.scrollX + frame.width) {
                 frame.scrollTo(max(0, box.left - metrics.px(16f).toInt()), 0)
             }
@@ -517,7 +563,20 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         scaler.onTouchEvent(event)
-        if (scaler.isInProgress) return true
+        if (scaler.isInProgress) {
+            if (dragging) host.released(pinch = true)
+            dragging = false
+            return true
+        }
+        // Шапка (#45) идёт за пальцем, как у Firefox: от касания до отпускания;
+        // бросок после него страницу листает, а шапку уже нет.
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> dragging = true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (dragging) {
+                dragging = false
+                host.released(pinch = false)
+            }
+        }
         return super.dispatchTouchEvent(event)
     }
 
@@ -692,7 +751,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
          * и до 18 октября 2026 место не держалось вовсе.
          */
         private fun hold(change: () -> Unit) {
-            val above = bottom <= this@ArticleView.scrollY
+            val above = bottom <= this@ArticleView.visibleTop()
             val before = height
             change()
             if (!above) return
@@ -702,7 +761,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int,
                 ) {
                     view.removeOnLayoutChangeListener(this)
-                    this@ArticleView.scrollBy(0, (bottom - top) - before)
+                    this@ArticleView.jump { scrollBy(0, (bottom - top) - before) }
                 }
             })
         }
@@ -876,6 +935,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 override fun onCreateActionMode(mode: ActionMode, menu: android.view.Menu): Boolean {
                     menu.add(android.view.Menu.NONE, MARK, 0, "Highlight")
                     menu.add(android.view.Menu.NONE, NOTE, 1, "Note")
+                    host.selecting(true)
                     return true
                 }
 
@@ -896,7 +956,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     return true
                 }
 
-                override fun onDestroyActionMode(mode: ActionMode) {}
+                override fun onDestroyActionMode(mode: ActionMode) = host.selecting(false)
             }
             setOnLongClickListener {
                 val link = linkAt(downX, downY) ?: return@setOnLongClickListener false

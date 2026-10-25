@@ -380,6 +380,9 @@ Known cost: disk. A ceiling per copy, set by measurement.
 
 ### 17. The bar steps aside, on the phone (#45)
 
+Done, with the rules Firefox for Android uses for its own bar. Sliding is the default:
+decided on 25 October 2026, before the two weeks, while readers are still few.
+
 On a phone the bar — Back, the address, Contents, tabs, the menu — takes a real share
 of the screen, and Firefox has taught readers that it can slide away while they read.
 A bar that comes and goes is also the quickest way to irritate, so the rules come

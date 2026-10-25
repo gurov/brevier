@@ -61,6 +61,17 @@ class MainActivity : Activity(), ArticleHost {
     private var contrast: Boolean? = null
     /** Просит ли высокий контраст система (`systemContrast`). */
     private var systemHigh = false
+    /** Уезжает ли шапка, пока читают (#45): настройка, по умолчанию — да. */
+    private var slideBar = true
+    /** Насколько шапка уехала вверх: 0 — на месте, её рост — вся. */
+    private var hidden = 0f
+    private var barMotion: android.animation.ValueAnimator? = null
+    /** Куда шапка едет сейчас (`moveBar`). */
+    private var barTarget = 0f
+    /** Читатель выделяет текст: шапка на месте. */
+    private var selecting = false
+    /** Включены ли TalkBack или Switch Access (`assistance`): спрашиваем на `onResume`, не на каждом кадре. */
+    private var assisted = false
     private var images = true
     /** Класть ли копию каждой прочитанной страницы в архив (#8). */
     private var archive = true
@@ -130,6 +141,8 @@ class MainActivity : Activity(), ArticleHost {
             else -> null
         }
         systemHigh = systemContrast()
+        slideBar = stored.optBoolean("slideBar", true)
+        assisted = assistance()
         images = stored.optBoolean("images", true)
         archive = stored.optBoolean("archive", true)
         reader = ReaderType.of(stored.getJSONObject("type"))
@@ -167,7 +180,9 @@ class MainActivity : Activity(), ArticleHost {
 
     override fun onResume() {
         super.onResume()
-        // Контраст меняют в настройках системы — и возвращаются сюда.
+        // Контраст и дикторов включают в настройках системы — и возвращаются сюда.
+        assisted = assistance()
+        if (assisted) showBar()
         val high = systemContrast()
         if (high != systemHigh) {
             val was = theme
@@ -262,11 +277,16 @@ class MainActivity : Activity(), ArticleHost {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(column, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
+        // Шапка — поверх статьи, а не над ней (#45): уезжая, она не отдаёт
+        // статье места, и строки под глазами не сдвигаются. Статья оставляет
+        // под неё поле сверху (`ArticleView.reserve`).
         bar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
+            addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+                if (bottom - top != oldBottom - oldTop) fitUnderBar()
+            }
         }
-        column.addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         stage = FrameLayout(this)
         column.addView(stage, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -282,6 +302,7 @@ class MainActivity : Activity(), ArticleHost {
             setPadding(dp(12f), dp(2f), dp(4f), dp(2f))
         }
         column.addView(findBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        root.addView(bar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
         notice = TextView(this).apply {
             visibility = View.GONE
@@ -306,7 +327,8 @@ class MainActivity : Activity(), ArticleHost {
         settings = SettingsPage(this, fonts,
             changed = { dark, images -> changeSettings(dark, images) },
             contrasted = { on -> changeContrast(on) },
-            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast) },
+            slid = { on -> changeSlideBar(on) },
+            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast, slideBar) },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
             typeChanged = { chosen -> changeType(chosen) },
@@ -350,6 +372,7 @@ class MainActivity : Activity(), ArticleHost {
             })
             setOnFocusChangeListener { _, focused ->
                 if (focused) {
+                    showBar()
                     showCard()
                 } else {
                     hints.dismiss()
@@ -595,6 +618,8 @@ class MainActivity : Activity(), ArticleHost {
             stage.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             if (reading) view.requestFocus()
         }
+        view.reserve(bar.height)
+        showBar()
         if (tab.pending) wakeTab(tab) else if (fresh) render(tab)
         closeFind()
         sync()
@@ -618,6 +643,7 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     private fun showTabList() {
+        showBar()
         fillTabList()
         tabList.visibility = View.VISIBLE
         hideKeyboard()
@@ -723,6 +749,7 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun render(tab: Tab) {
         val view = tab.view ?: return
+        if (tab == currentTab()) showBar()
         // Упала раскладка у самого телефона (модель, которой он не ждал) —
         // объяснение на месте страницы, а не закрытое приложение со всеми
         // вкладками. Упавшее в ядре сюда не доходит: его заменяет само ядро
@@ -958,6 +985,7 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun toggleShelf() {
         if (shelf.open) shelf.hide() else if (!shelf.empty) {
+            showBar()
             shelf.show()
             scrolled()
             hideKeyboard()
@@ -1079,6 +1107,7 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Спросить слова к заметке. Пустые — тоже ответ: заметка станет отметкой. */
     private fun askNoteText(initial: String, title: String, done: (String) -> Unit) {
+        showBar()
         val field = EditText(this).apply {
             setText(initial)
             setSelection(initial.length)
@@ -1289,10 +1318,11 @@ class MainActivity : Activity(), ArticleHost {
     override fun scrolled() {
         strip.invalidate()
         val view = currentTab()?.view ?: return
+        if (atEnd(view)) revealBar()
         if (!shelf.open) return
         // Мерим не по верхней кромке, а по той строке, куда ставит заголовок
         // прыжок по оглавлению, плюс полстроки запаса.
-        val probe = view.scrollY + (view.height * ANCHOR_ALIGN).toInt() + (metrics().text * reader.leading / 2).toInt()
+        val probe = view.visibleTop() + (view.visibleHeight() * ANCHOR_ALIGN).toInt() + (metrics().text * reader.leading / 2).toInt()
         shelf.follow(view.offsetAt(probe))
     }
 
@@ -1495,8 +1525,8 @@ class MainActivity : Activity(), ArticleHost {
         val present = hasWindowFocus() &&
             android.os.SystemClock.uptimeMillis() - lastTouch < PRESENT_MS
         if (!present || tab.loading) return
-        val from = view.offsetAt(view.scrollY) ?: return
-        val to = view.offsetAt(view.scrollY + view.height) ?: shown.page.text.length
+        val from = view.offsetAt(view.visibleTop()) ?: return
+        val to = view.offsetAt(view.visibleBottom()) ?: shown.page.text.length
         shelf.shares(Core.readingTick(shown.address, from, to))
         strip.invalidate()
     }
@@ -1515,9 +1545,9 @@ class MainActivity : Activity(), ArticleHost {
         val view = tab.view ?: return null
         // Страница в экран — пути нет.
         val content = view.getChildAt(0)?.height ?: 0
-        if (content <= view.height) return null
+        if (content + view.paddingTop <= view.height) return null
         val total = shown.page.text.length
-        val reached = view.offsetAt(view.scrollY + view.height) ?: total
+        val reached = view.offsetAt(view.visibleBottom()) ?: total
         return Triple(reached, total, shown.page.contents.map { it.at })
     }
 
@@ -1636,7 +1666,17 @@ class MainActivity : Activity(), ArticleHost {
         menu.show(more)
     }
 
-    private fun showSettings() = settings.show(palette, theme, images, archive, isBrowser(), reader)
+    private fun showSettings() {
+        showBar()
+        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar)
+    }
+
+    /** Шапке — уезжать или стоять (#45). */
+    private fun changeSlideBar(on: Boolean) {
+        slideBar = on
+        Core.saveSettings(dark, images, archive, contrast, slideBar)
+        if (!on) showBar()
+    }
 
     /** Новый набор: на диск, открытой вкладке — сразу; фоновые набираются при показе. */
     private fun changeType(chosen: ReaderType) {
@@ -1700,7 +1740,7 @@ class MainActivity : Activity(), ArticleHost {
         val imagesOn = images && !this.images
         this.dark = dark
         this.images = images
-        Core.saveSettings(dark, images, archive, contrast)
+        Core.saveSettings(dark, images, archive, contrast, slideBar)
         if (themeChanged) retheme()
         if (imagesOn) currentTab()?.view?.loadAll()
     }
@@ -1709,7 +1749,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun changeContrast(high: Boolean) {
         val was = theme
         contrast = high
-        Core.saveSettings(dark, images, archive, contrast)
+        Core.saveSettings(dark, images, archive, contrast, slideBar)
         if (theme != was) retheme()
     }
 
@@ -1745,9 +1785,115 @@ class MainActivity : Activity(), ArticleHost {
             .show()
     }
 
+    // ── шапка уходит с дороги (#45) ─────────────────────────────────────────
+    //
+    // Правила те же, что у Firefox на Android (android-components,
+    // `EngineViewScrollingGesturesBehavior`): шапка идёт за пальцем на столько
+    // же, на сколько ушёл текст, отпустили — доезжает к ближнему краю за 150 мс;
+    // бросок после отпускания и прыжки её не двигают; при щипке встаёт сразу;
+    // с TalkBack и Switch Access стоит на месте. Своё сверх того: наверху
+    // страницы и в её конце она на месте, на коротких и своих страницах
+    // не уезжает вовсе.
+
+    /** Где шапке стоять на месте: всё, что не чтение длинной статьи. */
+    private fun barPinned(): Boolean {
+        if (!slideBar || selecting || assisted) return true
+        if (address.hasFocus() || findBar.visibility == View.VISIBLE) return true
+        if (shelf.open || tabList.visibility == View.VISIBLE || settings.visibility == View.VISIBLE) return true
+        val tab = currentTab() ?: return true
+        val shown = tab.shown ?: return true
+        if (tab.loading || shown.address.startsWith("brevier:")) return true
+        val view = tab.view ?: return true
+        val content = view.getChildAt(0)?.height ?: 0
+        return content < 2 * view.height
+    }
+
+    /**
+     * Читают ли страницу дикторы и переключатели: им шапка нужна на месте —
+     * TalkBack ходит по экрану касанием, Switch Access — по рамкам, и уехавшей
+     * кнопки они не найдут. Как у Firefox (`shouldUseFixedTopToolbar`), только
+     * проверка жестов — по биту, а не сравнением с единицей.
+     */
+    private fun assistance(): Boolean {
+        val manager = getSystemService(android.view.accessibility.AccessibilityManager::class.java) ?: return false
+        if (manager.isTouchExplorationEnabled) return true
+        return manager.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            .any { it.capabilities and android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0 }
+    }
+
+    override fun dragged(dy: Int) {
+        if (barPinned()) {
+            if (hidden > 0f) showBar()
+            return
+        }
+        val view = currentTab()?.view ?: return
+        if (atEnd(view)) return revealBar()
+        barMotion?.cancel()
+        placeBar(hidden + dy)
+    }
+
+    /** Конец страницы: дальше листать некуда, и шапка нужна — пальцем ли дошли или броском. */
+    private fun atEnd(view: ArticleView) = !view.canScrollVertically(1)
+
+    private fun revealBar() {
+        if (hidden <= 0f || (barMotion?.isRunning == true && barTarget == 0f)) return
+        moveBar(0f)
+    }
+
+    override fun released(pinch: Boolean) {
+        val height = bar.height.toFloat()
+        if (hidden <= 0f || hidden >= height) return
+        val to = if (hidden > height / 2f) height else 0f
+        if (pinch) placeBar(to) else moveBar(to)
+    }
+
+    override fun selecting(on: Boolean) {
+        selecting = on
+        if (on) showBar()
+    }
+
+    /**
+     * Поставить шапку: уехала на `to` пикселей, но не дальше, чем прокручена
+     * страница, — наверху статьи её начало под шапкой не прячется.
+     */
+    private fun placeBar(to: Float) {
+        val view = currentTab()?.view
+        val most = minOf(bar.height.toFloat(), (view?.scrollY ?: 0).toFloat())
+        hidden = to.coerceIn(0f, maxOf(0f, most))
+        bar.translationY = -hidden
+        view?.covered = bar.height - hidden.toInt()
+    }
+
+    /** Довести шапку до места коротким движением — после отпускания пальца. */
+    private fun moveBar(to: Float) {
+        barMotion?.cancel()
+        barTarget = to
+        if (to == hidden) return
+        barMotion = android.animation.ValueAnimator.ofFloat(hidden, to).apply {
+            duration = BAR_SETTLE_MS
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { placeBar(it.animatedValue as Float) }
+            start()
+        }
+    }
+
+    /** Шапку — на место сразу: новая страница, поиск, адрес, полка. */
+    private fun showBar() {
+        barMotion?.cancel()
+        barMotion = null
+        placeBar(0f)
+    }
+
+    /** Шапка сменила рост (поворот, кегль системы): статья оставляет под неё поле заново. */
+    private fun fitUnderBar() {
+        currentTab()?.view?.reserve(bar.height)
+        placeBar(hidden)
+    }
+
     // ── поиск ───────────────────────────────────────────────────────────────
 
     private fun openFind() {
+        showBar()
         findBar.visibility = View.VISIBLE
         needle.requestFocus()
         showKeyboard(needle)
@@ -2047,6 +2193,8 @@ class MainActivity : Activity(), ArticleHost {
         private const val LOADING_DOTS = 10
         /** Куда по высоте окна ставить заголовок, к которому прыгнули. */
         const val ANCHOR_ALIGN = 0.1f
+        /** Доезд шапки к краю после отпускания (#45) — как у Firefox. */
+        const val BAR_SETTLE_MS = 150L
         const val LISTING = "A list of links, not an article — pick one to read."
         /** Как `failure::TRIPPED` в ядре: страница, которую не удалось нарисовать. */
         const val TRIPPED = "Brevier tripped over this page"

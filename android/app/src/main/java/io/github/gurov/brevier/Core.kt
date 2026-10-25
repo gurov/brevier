@@ -94,10 +94,14 @@ object Core {
         obj("bookmark", utcOffset(), address, title).optBoolean("kept")
 
     fun settings(): JSONObject = obj("settings")
-    /** `contrast` — выбор читателя (#44); `null` — не выбирал, решает система. */
-    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?) {
+    /**
+     * `contrast` — выбор читателя (#44); `null` — не выбирал, решает система.
+     * `slideBar` — уезжает ли шапка, пока читают (#45).
+     */
+    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean) {
         val flags = listOf(dark, images, archive).map { if (it) "1" else "0" } +
-            when (contrast) { true -> "1"; false -> "0"; null -> "" }
+            when (contrast) { true -> "1"; false -> "0"; null -> "" } +
+            if (slideBar) "1" else "0"
         ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 

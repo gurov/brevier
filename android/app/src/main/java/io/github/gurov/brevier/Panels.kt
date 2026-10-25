@@ -485,6 +485,7 @@ class SettingsPage(
     private val fonts: Fonts,
     private val changed: (dark: Boolean, images: Boolean) -> Unit,
     private val contrasted: (high: Boolean) -> Unit,
+    private val slid: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
     private val browser: () -> Unit,
@@ -505,7 +506,7 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType) {
+    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType, slideBar: Boolean) {
         this.dark = theme.dark
         this.theme = theme
         this.images = images
@@ -534,6 +535,11 @@ class SettingsPage(
             "Images",
             "Off means no decoding at all: after JavaScript is gone, the image decoder is the one serious attack surface left.",
             switch(palette, images) { on -> this.images = on; changed(this.dark, this.images) }, palette,
+        ))
+        column.addView(row(
+            "Slide the bar away",
+            "Reading down, the bar at the top moves out of the text's way as far as your finger goes; reading back up brings it back. Off: it stays put.",
+            switch(palette, slideBar) { on -> slid(on) }, palette,
         ))
 
         typeSection(palette, reader)
