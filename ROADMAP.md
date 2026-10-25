@@ -218,12 +218,26 @@ until the reading moves.
 
 Work items:
 
-- the extension itself, Manifest V3, submitted to both stores
-- the native-messaging host: a small binary, its manifest installed by `install.sh`
-  and, for the Flatpak, a wrapper script on the host that calls `flatpak run` — the
-  browser wants an executable outside the sandbox
+- the extension itself, Manifest V3, submitted to both stores — after reading what
+  they say about code written with AI, as was done for Flathub and F-Droid
+- the native-messaging host: a small binary, its manifest installed by `install.sh`,
+  by the Windows installer (per user, in the registry, no UAC) and, for the Flatpak, a
+  wrapper script on the host that calls `flatpak run` — the browser wants an
+  executable outside the sandbox. A browser in a sandbox of its own — Ubuntu's Firefox
+  is a snap, Flathub's browsers are Flatpaks — is a cost to measure before promising
 - the same path from the command line, so `--stdin` and the extension are one code
-  path with two front doors
+  path with two front doors. The cli has it; the window does not yet, and a page has
+  to reach the window already running, together with its address
+
+On the phone the front door exists already: "Open in Brevier" from the browser's menu
+or the share sheet. What the extension adds — pages built by scripts, pages behind a
+login — has no way in there: Firefox for Android takes extensions, but not native
+messaging.
+
+Habr's comments (#40) arrive only when Brevier fetches the page itself. A page handed
+over by the extension touches no network, so either that path asks for them too, or the
+reader is told. Later, perhaps: "always read this site in Brevier", for the sites a
+reader visits most.
 
 ### 11. Updates on Linux (#1)
 
@@ -303,6 +317,84 @@ rather than in Releases.
 
 IzzyOnDroid, the quicker door, is closed: its policy declines apps whose code is written
 with generative AI, and Brevier's is.
+
+### 14. A white page (#44)
+
+The ivory paper is a choice, not an accident: pure white glows on a screen, and the warm
+tone takes the glow off without touching the contrast. But the page is the reader's, and
+some readers want black on white and nothing softer. A switch beside the theme — usual
+or high contrast — in the window and on the phone.
+
+- **High contrast in the light theme:** white paper, ink near black, and everything
+  else darkened to match — muted text, comments in code, table rules, the shelf. Text
+  of any kind at 7:1 or better. In the dark theme, the same rule the other way: black
+  paper, light ink.
+- **The usual set has a debt of its own.** Muted text on ivory measures 4.4:1, just
+  under the 4.5 that WCAG asks for; comments in code, 3.8. Those are raised whatever
+  the switch says.
+- **The system is listened to** where it states a preference: the appearance portal on
+  Linux, the contrast level on Android 14 and later, high-contrast mode on Windows.
+- The colours stay in one table in the core, shared by the window and the phone. The
+  site keeps the ivory.
+
+### 15. Plain copies (#43)
+
+The archive promises that only a decompressor stands between the reader and their text.
+For the reader's own eyes that holds; for their tools it does not — desktop search,
+Obsidian, another reader app do not open LZ4. A setting beside the archive switch writes
+copies as plain `.md`, the header kept: those tools read it as properties.
+
+- **Both kinds side by side.** Switching changes how new copies are written; the old
+  ones stay as they are, and the archive reads, searches and cleans up both.
+- **Size is not the argument.** On the corpus, LZ4 gives 1.84×: 28 KB of Markdown a
+  page against 15, a thousand pages 28 MB against 15. Compressed stays the default
+  (see *Decided*) unless that is decided again.
+- **The phone is a case apart.** There the archive lives in the app's private storage,
+  where no other app sees it, compressed or not. A plain copy helps there only together
+  with a folder the reader picks, and that is a decision of its own.
+
+### 16. Pictures in the archive (#42)
+
+A copy is Markdown: the text outlives the site, the pictures die with it. For most pages
+that is the right trade. A bookmark, though, promises a page kept for good, and in
+documentation the diagrams and screenshots are half of the page.
+
+- **Kept for the pages kept for good** — bookmarks and pages with notes. Every other
+  copy stays text only. No new setting.
+- **Not one extra request.** The pictures of a page being read are already downloaded;
+  bookmarking it, writing a note on it or reading it again copies them from the tab and
+  from the week's cache. Pictures turned off stay off, and a picture not at hand is not
+  fetched for this.
+- **Beside the copy, not inside it.** The copy's text is untouched — search, notes and
+  the reading place rest on it. The pictures lie next to it byte for byte, as `--save`
+  writes them, with a list of which address is which file, and they leave with their
+  copy.
+- **Not into the phone's backup.** Android backs an app up to Google only up to 25 MB
+  and stops altogether beyond that, bookmarks and notes included. Pictures would get
+  there fast, and the archive's text gets there too, at about 1,700 pages — so the
+  backup leaves the archive's pictures out, perhaps the archive as a whole.
+
+Known cost: disk. A ceiling per copy, set by measurement.
+
+### 17. The bar steps aside, on the phone (#45)
+
+On a phone the bar — Back, the address, Contents, tabs, the menu — takes a real share
+of the screen, and Firefox has taught readers that it can slide away while they read.
+A bar that comes and goes is also the quickest way to irritate, so the rules come
+first:
+
+- **The text does not move.** The bar slides over the article rather than handing it
+  the room; no line shifts, and the reading place stays where it was.
+- **It follows the finger:** out as far as the text went down, back as far as it came
+  up, settling fully in or fully out on release. No timer, no animation that starts by
+  itself, nothing on a twitch, a tap or a selection.
+- **It stays where it is needed:** at the top and at the end of a page, on a new page,
+  while an address is typed, a word is searched, text is selected or a note is written;
+  never on Brevier's own pages or on a page shorter than two screens.
+- **Jumps land below it.** Contents, find and "Continue from 43%" count from its lower
+  edge while it is shown.
+- The status bar and the progress strip stay. A setting keeps the bar in place; whether
+  sliding is the default is decided after two weeks of reading with it, on a real phone.
 
 ## Far — after that
 
