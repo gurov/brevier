@@ -30,7 +30,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let url = ADDRESSES[pick as usize % ADDRESSES.len()];
-    let html = brevier::fetch::decode(rest, None, brevier::fetch::ContentKind::Html);
+    let html = brevier::fetch::decode(rest, None, brevier::fetch::ContentKind::Html, url);
     let document = if url.contains("duckduckgo") {
         brevier::from_search(&html, url)
     } else {

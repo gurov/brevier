@@ -129,7 +129,7 @@ fn check_page(args: &Args) -> ExitCode {
     // первой такой ошибки: она важнее порога.
     let mut failed: Option<u8> = None;
     if args.stdin {
-        let html = match stdin_page() {
+        let html = match stdin_page(&args.url) {
             Ok(html) => html,
             Err(e) => {
                 eprintln!("brevier: {e}");
@@ -246,7 +246,7 @@ fn save_page(_args: &Args) -> ExitCode {
 #[cfg(feature = "save")]
 fn document(args: &Args) -> Result<brevier::Document, Error> {
     if args.stdin {
-        return brevier::from_html(&stdin_page()?, &args.url);
+        return brevier::from_html(&stdin_page(&args.url)?, &args.url);
     }
     brevier::open(&address::parse(&args.url)?, args.ua)
 }
@@ -254,7 +254,8 @@ fn document(args: &Args) -> Result<brevier::Document, Error> {
 /// Страница из stdin. Байтами, а не строкой: старый веб бывает в cp1251
 /// и koi8-r, и сказано это в самой странице (#32), — разбирает кодировку
 /// тот же `fetch::decode`, что и у страницы из сети, только без заголовка.
-fn stdin_page() -> Result<String, Error> {
+/// Адрес — подсказка догадке, когда страница кодировку не назвала.
+fn stdin_page(url: &str) -> Result<String, Error> {
     let mut bytes = Vec::new();
     io::stdin()
         .read_to_end(&mut bytes)
@@ -263,6 +264,7 @@ fn stdin_page() -> Result<String, Error> {
         &bytes,
         None,
         brevier::fetch::ContentKind::Html,
+        url,
     ))
 }
 
@@ -281,7 +283,7 @@ fn run(args: &Args) -> Result<String, Error> {
     }
 
     let text = if args.stdin {
-        let html = stdin_page()?;
+        let html = stdin_page(&args.url)?;
         // Лента на руках идёт тем же трактом, что из сети.
         if brevier::feed::is_feed(&html) {
             feed_text(&html, &args.url)?

@@ -45,7 +45,7 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     // Как `brevier --stdin`: кодировку — из самой страницы (#32).
-    let html = brevier::fetch::decode(&bytes, None, brevier::fetch::ContentKind::Html);
+    let html = brevier::fetch::decode(&bytes, None, brevier::fetch::ContentKind::Html, url);
     let document = match brevier::from_html(&html, url) {
         Ok(document) => document,
         Err(error) => {

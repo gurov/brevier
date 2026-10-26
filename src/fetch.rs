@@ -299,7 +299,7 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         }
         (kind, body)
     } else {
-        let body = decode(&bytes, charset.as_deref(), kind);
+        let body = decode(&bytes, charset.as_deref(), kind, &final_url);
         // Ленту отдают и `text/html`, и `text/plain` (сырые файлы хостингов):
         // по телу видно, что это она.
         let kind = if feed::is_feed(&body) {
@@ -333,14 +333,13 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
 /// требует браузера: метка порядка байтов; `charset` заголовка; объявление
 /// в самой странице — `<meta charset>` или `http-equiv` в первых 1024 байтах,
 /// а у XHTML и ленты на руках — объявление XML; UTF-8, если байты им
-/// и являются; иначе windows-1252 — умолчание стандарта для страницы, которая
-/// не сказала ничего. Старый веб чаще всего именно такой: сервер молчит,
-/// а страница называет cp1251 или koi8-r в `<meta>`. Угадывать молчащую
-/// по статистике (chardetng, как Firefox) не берёмся.
+/// и являются; иначе — догадка (`guess`). Старый веб чаще всего такой:
+/// сервер молчит, а страница называет cp1251 или koi8-r в `<meta>`, — но
+/// бывает, что молчит и она (FrontPage, IIS: spsl.nsc.ru).
 ///
 /// Битый байт — не ошибка, а U+FFFD, как у браузера: страница в кодировке,
 /// которую она назвала неверно, всё равно читается почти целиком.
-pub fn decode(bytes: &[u8], charset: Option<&str>, kind: ContentKind) -> String {
+pub fn decode(bytes: &[u8], charset: Option<&str>, kind: ContentKind, url: &str) -> String {
     let named = |label: &str| encoding_rs::Encoding::for_label(label.trim().as_bytes());
     let header = charset.and_then(named);
     let inside = || {
@@ -365,12 +364,47 @@ pub fn decode(bytes: &[u8], charset: Option<&str>, kind: ContentKind) -> String 
     let encoding = header.or_else(inside).unwrap_or_else(|| {
         // Недописанный последний знак — обрыв тела, а не другая кодировка.
         match std::str::from_utf8(bytes) {
-            Err(error) if error.error_len().is_some() => encoding_rs::WINDOWS_1252,
+            Err(error) if error.error_len().is_some() => guess(bytes, url),
             _ => encoding_rs::UTF_8,
         }
     });
     // `decode` сам смотрит на метку порядка байтов, и она старше всего.
     encoding.decode(bytes).0.into_owned()
+}
+
+/// Сколько байт от первого не-ASCII читает догадка: десятки тысяч букв.
+const GUESS_FROM: usize = 256 * 1024;
+
+/// Кодировка страницы, что не назвала её и не UTF-8, — по частотам пар
+/// букв (chardetng, как Firefox с 2020 года): стандарт такую догадку
+/// разрешает, а его умолчание, windows-1252, — это умолчание браузера
+/// с английским интерфейсом; русский браузер берёт cp1251 и показывает
+/// такую страницу верно. Домен — подсказка: на `.ru` короткий текст скорее
+/// кириллица. UTF-8 детектору уже не предлагаем — байты его не прошли.
+///
+/// Детектор небыстрый (5 МБ/с на компьютере: 8 МиБ — полторы секунды),
+/// а частотам хватает и куска: ASCII до первого иного байта он пропускает
+/// сам, дальше читаем `GUESS_FROM` байт.
+fn guess(bytes: &[u8], url: &str) -> &'static encoding_rs::Encoding {
+    let tld = Url::parse(url).ok().and_then(|url| {
+        let domain = url.domain()?.trim_end_matches('.').to_ascii_lowercase();
+        let tld = domain.rsplit('.').next()?.to_owned();
+        // Что-то кроме строчных ASCII — паника детектора, а не подсказка.
+        (!tld.is_empty()
+            && tld
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'))
+        .then_some(tld)
+    });
+    let start = encoding_rs::Encoding::ascii_valid_up_to(bytes);
+    let end = bytes.len().min(start + GUESS_FROM);
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    // Кусок — не конец потока: недописанный знак на срезе не ошибка.
+    detector.feed(&bytes[..end], end == bytes.len());
+    detector.guess(
+        tld.as_deref().map(str::as_bytes),
+        chardetng::Utf8Detection::Deny,
+    )
 }
 
 /// Кодировка из `<meta>` в первых 1024 байтах страницы: `charset="…"` или
@@ -611,7 +645,7 @@ mod tests {
     }
 
     fn read(bytes: &[u8], charset: Option<&str>) -> String {
-        decode(bytes, charset, ContentKind::Html)
+        decode(bytes, charset, ContentKind::Html, "https://e.com/")
     }
 
     #[test]
@@ -643,13 +677,11 @@ mod tests {
 
     #[test]
     fn a_meta_in_a_comment_or_past_1024_bytes_is_not_read() {
+        // Прочитанный koi8-r испортил бы cp1251; не прочитан — решает догадка.
         let head = r#"<!-- <meta charset="koi8-r"> -->"#;
-        assert!(!read(&page(head, CP1251), None).contains("Привет"));
-        let head = format!(
-            "<title>{}</title><meta charset=windows-1251>",
-            "x".repeat(1100)
-        );
-        assert!(!read(&page(&head, CP1251), None).contains("Привет"));
+        assert!(read(&page(head, CP1251), None).contains("Привет"));
+        let head = format!("<title>{}</title><meta charset=koi8-r>", "x".repeat(1100));
+        assert!(read(&page(&head, CP1251), None).contains("Привет"));
     }
 
     #[test]
@@ -658,15 +690,49 @@ mod tests {
         // Обрыв посреди знака — всё ещё UTF-8.
         let cut = &"Привет".as_bytes()[..5];
         assert!(read(cut, None).starts_with("Пр"));
-        // Не UTF-8 и не названа — windows-1252, а не отказ.
+        // Не UTF-8 и не названа — догадка, а не отказ.
         assert_eq!(read(b"caf\xe9 au lait", None), "café au lait");
+    }
+
+    #[test]
+    fn a_page_that_says_nothing_and_is_not_utf8_is_guessed() {
+        let text = "Старые страницы часто молчат о своей кодировке, \
+                    и читалке остаётся угадать её по самим буквам.";
+        for encoding in [encoding_rs::WINDOWS_1251, encoding_rs::KOI8_R] {
+            let (bytes, _, _) = encoding.encode(text);
+            let html = read(&page("", &bytes), None);
+            assert!(html.contains(text), "{}: {html}", encoding.name());
+        }
+        // Домен подсказывает, когда слов мало: без него «шарф» — иврит.
+        let (scarf, _, _) = encoding_rs::WINDOWS_1251.encode("шарф");
+        let short = |url| decode(&scarf, None, ContentKind::Markdown, url);
+        assert_eq!(short("https://www.spsl.nsc.ru/"), "шарф");
+        assert_eq!(short("https://e.RU./x"), "шарф");
+        assert_ne!(short("https://e.com/"), "шарф");
+    }
+
+    #[test]
+    fn a_strange_host_is_no_hint_and_no_panic() {
+        let bytes = page("", CP1251);
+        // Нелатинский домен — уже в Punycode, его и получает детектор.
+        let urls = [
+            "",
+            "not a url",
+            "https://127.0.0.1/",
+            "https://[::1]/",
+            "file:///x.html",
+            "https://пример.рф/",
+        ];
+        for url in urls {
+            decode(&bytes, None, ContentKind::Html, url);
+        }
     }
 
     #[test]
     fn markdown_is_not_searched_for_meta() {
         // Метатег в markdown — пример в тексте, а не объявление.
         let text = b"Example: <meta charset=\"koi8-r\">\n\n\xd0\x9f\xd1\x80\xd0\xb8";
-        assert!(decode(text, None, ContentKind::Markdown).ends_with("При"));
+        assert!(decode(text, None, ContentKind::Markdown, "https://e.com/").ends_with("При"));
     }
 
     fn html_page(body: &str) -> Page {

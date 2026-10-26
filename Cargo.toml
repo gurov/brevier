@@ -62,6 +62,9 @@ images = ["dep:image", "dep:resvg"]
 save = ["dep:zip", "images"]
 
 [dependencies]
+# Страница, что кодировку не назвала, — по статистике, как в Firefox (#32):
+# детектор того же автора, что `encoding_rs`, и поверх него же.
+chardetng = "1.0"
 comrak = { version = "0.55", default-features = false }
 dom_query = "0.28"
 dom_smoothie = "0.18.2"
