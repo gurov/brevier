@@ -297,8 +297,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 
 - **A list of links** — a blog's front page, a section of a site — is shown as a list, and
   the status line says so.
-- **A news site's front page reads as its headlines**, in the page's order, rather than as
-  the one story an article extractor would pick out of it.
+- **A news site's front page and its sections read as their headlines**, in the page's
+  order, rather than as the one story — or the site's footer — an article extractor would
+  pick out of them.
 - **Pages that never say what encoding they are in**, common on the older web, still read
   right: Brevier guesses the encoding from the text, as Firefox does.
 - **Feeds** open as lists of entries with date, author and a short summary — from an

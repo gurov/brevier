@@ -228,10 +228,11 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let feeds = crate::feed::advertised(&doc, url);
     let next = next_page(&doc, url);
     let listing = listing(&doc, url);
-    let headlines = if is_front(url) {
-        headlines(&doc, url)
-    } else {
-        Vec::new()
+    let front = front(url);
+    let mut headlines = match &front {
+        Some(Front::Home) => headlines(&doc, url, "/"),
+        Some(Front::Section(path)) => headlines(&doc, url, path),
+        None => Vec::new(),
     };
     let chrome = chrome(&doc, url);
     // Язык страницы — до того, как `Readability` заберёт документ себе.
@@ -288,16 +289,36 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let listing_html = listing
         .filter(|listing| (!claims_article || fragment) && listing.holds(&content_html))
         .map(|listing| listing.html);
-    // Главная: заголовки, которых извлечение не донесло, — списком.
-    let listing_html =
-        front_page(&headlines, listing_html.as_deref().unwrap_or(&content_html)).or(listing_html);
-
     // Сироты возвращаем только в статью: в ленте абзацев статьи нет,
     // а решение «лента или статья» принято по строгому содержимому.
-    let content_html = if listing_html.is_none() {
-        restore(&source, &content_html, url, &article.title, claims_article).unwrap_or(content_html)
-    } else {
-        content_html
+    let restored = listing_html
+        .is_none()
+        .then(|| restore(&source, &content_html, url, &article.title, claims_article))
+        .flatten();
+    // Раздел — списком, только если показанное короче самих заголовков:
+    // значит, Readability нашла обвязку (подвал у mobile-review), а не
+    // текст. Статья с колонкой ссылок вглубь своего адреса длиннее их,
+    // лента карточек с подводками — тоже, и она богаче списка; у CNET её
+    // возвращают сироты, поэтому мерим с ними.
+    if let Some(Front::Section(_)) = front {
+        let titles: usize = headlines
+            .iter()
+            .map(|link| link.title.split_whitespace().count())
+            .sum();
+        let shown = listing_html
+            .as_deref()
+            .or(restored.as_deref())
+            .unwrap_or(&content_html);
+        if words(shown) >= titles {
+            headlines.clear();
+        }
+    }
+    // Главная и раздел: заголовки, которых извлечение не донесло, — списком.
+    let listing_html =
+        front_page(&headlines, listing_html.as_deref().unwrap_or(&content_html)).or(listing_html);
+    let content_html = match restored {
+        Some(restored) if listing_html.is_none() => restored,
+        _ => content_html,
     };
 
     // Навигация — из готового текста, а не из страницы до извлечения:
@@ -2052,9 +2073,9 @@ fn squeeze(text: &str) -> String {
 /// заголовков ленты — 0 вместо 1: свежая лента у него во врезке, а вместо
 /// фотоблока теперь главные заметки дня).
 ///
-/// Только корень (и корень языковой версии, `/ru/`): у страницы глубже
-/// бывает статья с колонкой ссылок рядом, и отличить её по одной форме
-/// ссылок нельзя. Разделы (`/politics/`) — следующий шаг.
+/// Глубже корня бывает статья с колонкой ссылок рядом, и отличить её
+/// по одной форме ссылок нельзя, — поэтому раздел узнаётся строже, см.
+/// [`front`].
 fn front_page(headlines: &[Link], shown_html: &str) -> Option<String> {
     if headlines.len() < MIN_HEADLINES {
         return None;
@@ -2083,6 +2104,50 @@ fn front_page(headlines: &[Link], shown_html: &str) -> Option<String> {
     }
     html.push_str("</ul>");
     Some(html)
+}
+
+/// Страница, которая — заголовки, а не статья (#41).
+enum Front {
+    /// Корень сайта или языковой версии: заголовки — со всего сайта.
+    Home,
+    /// Раздел: заголовки — только под этим путём (`/all/`).
+    Section(String),
+}
+
+/// Главная или раздел — по адресу. Раздел — страница, чей адрес на статью
+/// не похож, а статьи лежат под ним: `/all/` → `/all/reviews/gadgets/…`
+/// у mobile-review, `/world` → `/world/2026/oct/…` у The Guardian.
+/// Ссылки колонки рядом со статьёй ведут к соседям, а не вглубь её
+/// адреса, — так раздел со статьёй не спутать. Страница ленты
+/// (`/all/page/2/`) — тот же раздел. Лента рубрики из другого места сайта
+/// (`/rubrics/world/` → `/news/…` у Ленты.ру) разделом не считается.
+fn front(url: &str) -> Option<Front> {
+    if is_front(url) {
+        return Some(Front::Home);
+    }
+    let mut url = Url::parse(url).ok()?;
+    let mut segments: Vec<String> = url
+        .path_segments()?
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if let [.., page, number] = segments.as_slice()
+        && page == "page"
+        && number.chars().all(|c| c.is_ascii_digit())
+    {
+        segments.truncate(segments.len() - 2);
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    let path = format!("/{}/", segments.join("/"));
+    url.set_path(&path);
+    (!looks_like_article(&url)).then_some(Front::Section(path))
+}
+
+/// Слова в тексте куска разметки.
+fn words(html: &str) -> usize {
+    Document::from(html).text().split_whitespace().count()
 }
 
 /// Корень сайта или его языковой версии: `/`, `/ru/`, `/en-us/`, `/index.html`.
@@ -2114,10 +2179,11 @@ fn is_locale(segment: &str) -> bool {
 /// на статью ([`looks_like_article`]), и не из меню, шапки, подвала или
 /// врезки. Один адрес — одна строка: на главной одна заметка стоит дважды,
 /// картинкой и заголовком, а то и в двух блоках сразу. Прототип того же
-/// правила на 211 главных донёс 84% заголовков против 42%.
+/// правила на 211 главных донёс 84% заголовков против 42%. У раздела
+/// заголовки — только под его путём (`under`), у главной — `/`.
 ///
 /// Снимать надо до извлечения: `Readability` забирает документ себе.
-fn headlines(doc: &Document, url: &str) -> Vec<Link> {
+fn headlines(doc: &Document, url: &str, under: &str) -> Vec<Link> {
     let Ok(base) = Url::parse(url) else {
         return Vec::new();
     };
@@ -2141,6 +2207,7 @@ fn headlines(doc: &Document, url: &str) -> Vec<Link> {
         };
         if !matches!(parsed.scheme(), "http" | "https")
             || parsed.host_str().map(site_key).as_deref() != Some(home.as_str())
+            || !parsed.path().starts_with(under)
         {
             continue;
         }
@@ -3530,11 +3597,85 @@ mod tests {
         assert!(!listing.contains("Кто мы такие"), "{listing}");
     }
 
-    /// Глубже корня — не главная: там бывает статья с колонкой ссылок рядом.
+    /// Глубже корня заголовки — только под адресом страницы: у статьи
+    /// ссылки колонки рядом ведут к соседям, а не вглубь неё.
     #[test]
-    fn only_the_root_is_read_as_headlines() {
+    fn headlines_elsewhere_on_the_site_make_no_section() {
         let article = extract(&front_page_html(), "https://example.org/world/").unwrap();
         assert!(article.listing_html.is_none());
+    }
+
+    /// Раздел как у mobile-review: заголовок и подводка внутри ссылки,
+    /// статьи — под адресом раздела, и прозой Readability считает подвал.
+    fn section_html(prose: &str) -> String {
+        let cards: String = (1..=10)
+            .map(|i| {
+                format!(
+                    "<article><a href=\"/all/reviews/review-number-{i}/\">\
+                     <h2>Обзор номер {i} о том, что вышло сегодня</h2>\
+                     <p>Подводка к обзору, в две строки.</p></a></article>"
+                )
+            })
+            .collect();
+        format!(
+            "<html><body><main>{prose}</main><div class=\"cards\">{cards}</div>\
+             <footer><p>Сайт простым языком рассказывает о технологиях, гаджетах, \
+             устройстве бизнеса электроники изнутри и интересных событиях в мире \
+             техники. На сайте есть статьи для широкого круга читателей, а есть \
+             и профильные материалы для игроков рынка.</p></footer></body></html>"
+        )
+    }
+
+    #[test]
+    fn a_section_reads_as_its_headlines() {
+        for url in [
+            "https://example.org/all/",
+            "https://example.org/all/page/2/",
+        ] {
+            let article = extract(&section_html(""), url).unwrap();
+            let listing = article.listing_html.expect(url);
+            assert!(
+                listing.contains("https://example.org/all/reviews/review-number-10/"),
+                "{listing}"
+            );
+        }
+    }
+
+    /// Своего текста больше, чем в заголовках под адресом, — это статья
+    /// с оглавлением, а не раздел, хотя извлечение ни одного не донесло.
+    #[test]
+    fn a_page_with_its_own_text_is_no_section() {
+        let prose = format!("<h1>Руководство</h1>{}", format!("<p>{TEXT}</p>").repeat(4));
+        let article = extract(&section_html(&prose), "https://example.org/all/").unwrap();
+        assert!(article.listing_html.is_none());
+    }
+
+    #[test]
+    fn the_shape_of_a_section_address() {
+        let section = |url: &str| match front(url) {
+            Some(Front::Section(path)) => Some(path),
+            _ => None,
+        };
+        assert_eq!(
+            section("https://example.org/all/").as_deref(),
+            Some("/all/")
+        );
+        assert_eq!(
+            section("https://example.org/all/page/218/").as_deref(),
+            Some("/all/")
+        );
+        assert_eq!(
+            section("https://example.org/world").as_deref(),
+            Some("/world/")
+        );
+        assert_eq!(
+            section("https://example.org/news/2026/10/09/a-story-slug"),
+            None
+        );
+        assert!(matches!(
+            front("https://example.org/ru/"),
+            Some(Front::Home)
+        ));
     }
 
     /// Извлечение уже донесло две трети заголовков — его и оставляем:
@@ -3574,7 +3715,7 @@ mod tests {
             <aside><a href=\"/2026/10/09/most-read-in-the-aside\">Самое читаемое во врезке сбоку</a></aside>\
             <a href=\"https://other.example.com/2026/10/09/elsewhere-story\">Чужой сайт со своей длинной заметкой</a>\
             </body></html>";
-        let titles: Vec<String> = headlines(&Document::from(html), "https://www.example.org/")
+        let titles: Vec<String> = headlines(&Document::from(html), "https://www.example.org/", "/")
             .into_iter()
             .map(|link| link.title)
             .collect();
