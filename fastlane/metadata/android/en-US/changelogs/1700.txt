@@ -1,0 +1,2 @@
+• Pages that never say what encoding they are in read right: Brevier guesses it from the text, as Firefox does.
+• A news site's section (/news/, /technology/) reads as its headlines, like its front page, rather than as the site's footer.

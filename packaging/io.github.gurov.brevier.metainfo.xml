@@ -97,6 +97,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.17.0" date="2026-10-26" type="development">
+      <description>
+        <p>Pages that never say what encoding they are in read right:
+          Brevier guesses the encoding from the text, as Firefox does. A
+          section of a news site reads as its headlines, like its front
+          page, rather than as the site's footer.</p>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-10-25" type="development">
       <description>
         <p>High contrast, beside the dark theme: black ink on white paper, or
