@@ -69,8 +69,8 @@ impl UserAgent {
     }
 }
 
-/// Что мы вообще соглашаемся читать. Всё остальное — чужой проект:
-/// PDF, картинки, видео.
+/// Что мы вообще соглашаемся читать. PDF понимаем только из открытых ссылок
+/// Cloud Mail; остальные бинарные документы, картинки и видео — чужой проект.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentKind {
     Html,
@@ -160,6 +160,46 @@ pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
 /// с ней. `--check`, `--raw`, `--html`, `--links` и `--nav` сюда не ходят —
 /// им нужен сам HTML, а не его замена.
 pub fn readable(url: &str, ua: UserAgent) -> Result<Page, Error> {
+    // Cloud Mail file links open a JavaScript viewer. Resolve their public
+    // download shard and extract PDF text locally instead.
+    if let Some(api) = crate::hosts::cloud_mail::pdf_api(url) {
+        let metadata = binary(&api, ua, "application/json", MAX_BODY)?;
+        let metadata = String::from_utf8_lossy(&metadata.bytes);
+        if let Some(title) = crate::hosts::cloud_mail::pdf_name(&metadata) {
+            let dispatcher = binary(
+                &crate::hosts::cloud_mail::dispatcher_api(),
+                ua,
+                "application/json",
+                MAX_BODY,
+            )?;
+            let dispatcher = String::from_utf8_lossy(&dispatcher.bytes);
+            let direct = crate::hosts::cloud_mail::download_url(url, &dispatcher)
+                .ok_or(Error::EmptyExtraction)?;
+            let pdf = binary(&direct, ua, "application/pdf", MAX_BODY)?;
+            let body = crate::hosts::cloud_mail::pdf_markdown(&pdf.bytes, &title)
+                .ok_or(Error::EmptyExtraction)?;
+            return Ok(Page {
+                url: url.to_owned(),
+                kind: ContentKind::Text,
+                body,
+                redirects: 0,
+            });
+        }
+    }
+    // Cloud Mail's public pages are an empty JavaScript shell; its public
+    // folder API is the read-only request that supplies the visible listing.
+    if let Some(api) = crate::hosts::cloud_mail::folder_api(url)
+        && let Ok(response) = binary(&api, ua, "application/json", MAX_BODY)
+        && let Ok(json) = String::from_utf8(response.bytes)
+        && let Some(body) = crate::hosts::cloud_mail::atom(&json, url)
+    {
+        return Ok(Page {
+            url: url.to_owned(),
+            kind: ContentKind::Feed,
+            body,
+            redirects: 0,
+        });
+    }
     // Читалка книги (#20): порцию текста берём отдельным запросом, как её
     // берёт скрипт сайта.
     if let Some(part) = crate::hosts::book_part(url) {

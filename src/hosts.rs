@@ -35,6 +35,7 @@
 use dom_query::Document;
 use url::Url;
 
+pub mod cloud_mail;
 pub mod discourse;
 pub mod habr;
 pub mod hacker_news;

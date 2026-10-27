@@ -8,6 +8,7 @@ A browser for reading. Brevier downloads a page, turns it into clean text on you
 computer, and sets it in the typography you chose — not the one the site chose.
 
 - **Articles** without scripts, site styles, pop-ups or ads.
+- **PDFs shared publicly in Cloud Mail** as clean text in your chosen type.
 - **Documentation** straight from git repositories: `gh:owner/repo` opens its README.
 - **Feeds** — RSS, Atom and JSON Feed — as lists of links.
 - **Search** from the address bar.

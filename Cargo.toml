@@ -82,6 +82,7 @@ htmd = "0.5.5"
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "frame", "checked-decode"] }
 hyphenation = { version = "0.8", optional = true, default-features = false, features = ["embed_en-us"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
+pdf-extract = { version = "0.12.1", default-features = false }
 resvg = { version = "0.48.1", optional = true }
 # Ленты RSS и Atom: разбор XML без зависимостей. Та же версия, что тянет `resvg`.
 roxmltree = "0.21"

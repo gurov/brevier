@@ -129,7 +129,7 @@ pub fn describe(error: &Error) -> Failure {
         ),
         Error::UnsupportedContentType(kind) => failure(
             "This is not a page",
-            format!("The server sent “{kind}”. Brevier reads html, markdown, plain text and RSS, Atom or JSON feeds; PDF, video and images are work for the system browser."),
+            format!("The server sent “{kind}”. Brevier reads html, markdown, plain text and RSS, Atom or JSON feeds, and extracts text from public Cloud Mail PDFs; other PDFs, video and images are work for the system browser."),
             true,
         ),
         Error::TooLarge(limit) => failure(

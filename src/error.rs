@@ -16,7 +16,7 @@ pub enum Error {
     Network(Box<ureq::Error>),
     /// Сервер ответил не-2xx.
     HttpStatus(u16),
-    /// Тип содержимого, который мы не читаем: PDF, картинка, видео.
+    /// Тип содержимого, который мы не читаем: сторонний PDF, картинка, видео.
     UnsupportedContentType(String),
     /// Тело больше лимита.
     TooLarge(u64),
