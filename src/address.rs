@@ -53,7 +53,7 @@ pub enum ArchivePage {
     List,
     /// `brevier:archive?q=слова` — страницы, где есть все слова.
     Search(String),
-    /// `brevier:archive/<хост>/<файл>.md.lz4` — сама копия.
+    /// `brevier:archive/<хост>/<файл>.md.lz4` или `….md` — сама копия.
     Copy(String),
 }
 
@@ -93,7 +93,7 @@ impl Internal {
         }
         if let Some(path) = name.strip_prefix("archive/") {
             let path = percent_decoded(path);
-            return (path.ends_with(crate::archive::EXTENSION) && !path.contains(".."))
+            return (crate::archive::is_copy(&path) && !path.contains(".."))
                 .then_some(Internal::Archive(ArchivePage::Copy(path)));
         }
         // Снимок ищут у веб-страницы, как и проверяют только её.
@@ -757,6 +757,14 @@ mod tests {
         assert!(copy.external().is_empty());
         assert!(parse("brevier:archive/../history.tsv").is_err());
         assert!(parse("brevier:archive/../../x.md.lz4").is_err());
+        // Простая копия (#43) — тоже копия.
+        assert_eq!(
+            parse("brevier:archive/danluu.com/2026-10-09-keyboard-latency.md").unwrap(),
+            Address::Internal(Internal::Archive(ArchivePage::Copy(
+                "danluu.com/2026-10-09-keyboard-latency.md".to_owned()
+            )))
+        );
+        assert!(parse("brevier:archive/danluu.com/x.txt").is_err());
     }
 
     /// Снимок Wayback (#9) — адрес страницы внутри своего; снаружи —

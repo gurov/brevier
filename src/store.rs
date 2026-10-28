@@ -644,6 +644,10 @@ pub struct Settings {
     pub shelf_width: Option<i32>,
     /// Класть ли копию каждой прочитанной страницы в архив (#8).
     pub archive: bool,
+    /// Класть ли её простым `.md`, а не сжатой (#43). Выбирают в окне;
+    /// телефон пишет сжатыми всегда (`archive::Form`). В файл — только
+    /// `archive-files plain`.
+    pub plain_archive: bool,
     /// Уезжает ли шапка телефона, пока читают (#45). Окно этого не умеет
     /// и строку не пишет. По умолчанию уезжает (мейнтейнер, 25 октября 2026);
     /// в файл — только `bar stays`.
@@ -668,6 +672,7 @@ impl Default for Settings {
             shelf_width: None,
             // Включён по умолчанию: решено в ROADMAP. Выключить есть чем.
             archive: true,
+            plain_archive: false,
             slide_bar: true,
             typography: Type::default(),
         }
@@ -713,6 +718,7 @@ impl Settings {
                 "shelf" => settings.shelf = value == "on",
                 "shelf-width" => settings.shelf_width = value.parse().ok(),
                 "archive" => settings.archive = value == "on",
+                "archive-files" => settings.plain_archive = value == "plain",
                 "bar" => settings.slide_bar = value != "stays",
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
@@ -765,6 +771,9 @@ impl Settings {
         }
         if let Some(width) = self.shelf_width {
             text.push_str(&format!("shelf-width\t{width}\n"));
+        }
+        if self.plain_archive {
+            text.push_str("archive-files\tplain\n");
         }
         if !self.slide_bar {
             text.push_str("bar\tstays\n");
@@ -1734,6 +1743,7 @@ mod tests {
             shelf: false,
             shelf_width: Some(320),
             archive: false,
+            plain_archive: true,
             slide_bar: false,
             typography: Type {
                 face: Face::Serif,
@@ -1756,8 +1766,10 @@ mod tests {
         Settings::default().save_at(&path);
         let text = fs::read_to_string(&path).unwrap();
         assert!(!text.contains("size") && !text.contains("face"), "{text}");
-        // Шапка телефона (#45) — тоже только не по умолчанию.
+        // Шапка телефона (#45) и простые копии архива (#43) — тоже только
+        // не по умолчанию.
         assert!(!text.contains("bar"), "{text}");
+        assert!(!text.contains("archive-files"), "{text}");
 
         fs::write(&path, "size 17\nmeasure 900\nface comic\nleading 1.4\n").unwrap();
         let typography = Settings::at(&path).typography;

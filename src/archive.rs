@@ -15,6 +15,14 @@
 //! есть. Базы нет: жизнь чтения — тысячи страниц, не миллионы, и поиск
 //! по ним — проход по файлам со скоростью памяти.
 //!
+//! **Или простым `.md`** (#43, по выбору в настройках окна): LZ4 не открывают
+//! ни поиск по диску, ни Obsidian, ни другие читалки, а сжатие даёт всего
+//! 1,84× (83 страницы `corpus/expected/`: 28 КБ текста на страницу против
+//! 15). Выбор меняет только то, как ложатся новые копии; прежние остаются
+//! какими были, и читается любая из двух. Телефон пишет сжатыми: архив там
+//! в закрытой папке приложения, простой файл никому не виден, а резервной
+//! копии Android вдвое теснее.
+//!
 //! **Что кладём** — то же, что и в недельный кэш: статью из сети или из
 //! репозитория. Ленту — нет: её открывают ради нового, а не ради текста.
 //! Свои страницы и локальные файлы — нет: первые и так на диске в своём
@@ -47,8 +55,54 @@ use crate::markdown::Kind;
 use crate::store::{self, Stamp};
 use crate::{Document, cache};
 
-/// Хвост имени копии.
-pub const EXTENSION: &str = ".md.lz4";
+/// Хвост имени сжатой копии.
+pub const COMPRESSED: &str = ".md.lz4";
+
+/// Хвост имени копии простым текстом (#43).
+pub const PLAIN: &str = ".md";
+
+/// Как копия ложится на диск. По умолчанию — сжатой: так решено в ROADMAP
+/// («on by default and compressed»).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Form {
+    #[default]
+    Compressed,
+    Plain,
+}
+
+impl Form {
+    fn extension(self) -> &'static str {
+        match self {
+            Form::Compressed => COMPRESSED,
+            Form::Plain => PLAIN,
+        }
+    }
+
+    fn other(self) -> Form {
+        match self {
+            Form::Compressed => Form::Plain,
+            Form::Plain => Form::Compressed,
+        }
+    }
+
+    /// Вид копии по имени файла; не копия — `None`. Сжатую проверяем первой:
+    /// `.md.lz4` на `.md` не кончается, но порядок держит это явным.
+    fn of(name: &str) -> Option<Form> {
+        if name.ends_with(COMPRESSED) {
+            Some(Form::Compressed)
+        } else if name.ends_with(PLAIN) {
+            Some(Form::Plain)
+        } else {
+            None
+        }
+    }
+}
+
+/// Имя копии: `.md.lz4` или `.md`, и ничего другого — ни адресная строка,
+/// ни обход папки других файлов архивом не считают.
+pub fn is_copy(name: &str) -> bool {
+    Form::of(name).is_some()
+}
 
 /// Длина слага в знаках. Имя файла узнают глазами в списке каталога,
 /// а не читают: полстроки заголовка хватает.
@@ -82,13 +136,13 @@ pub struct Archive {
 /// Копия, как она лежит: шапка и текст.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Copy {
-    /// Путь внутри архива: `<host>/<дата>-<слаг>.md.lz4`.
+    /// Путь внутри архива: `<host>/<дата>-<слаг>.md.lz4` или `….md`.
     pub path: String,
     pub title: String,
     /// Адрес страницы в том виде, в каком его показывает строка Brevier.
     pub source: String,
     pub read: Stamp,
-    /// Файл целиком, с шапкой: ровно то, что даст `lz4 -d`.
+    /// Файл целиком, с шапкой: у сжатой копии — ровно то, что даст `lz4 -d`.
     pub markdown: String,
 }
 
@@ -107,14 +161,21 @@ impl Archive {
         }
     }
 
-    /// Положить копию прочитанной страницы. Ответ — путь копии внутри
-    /// архива: его записывает строка истории. `None` — класть нечего
-    /// (лента, своя страница) или некуда.
+    /// Положить сжатую копию прочитанной страницы — см. [`Archive::keep_as`].
+    pub fn keep(&self, document: &Document, read: &Stamp) -> Option<String> {
+        self.keep_as(document, read, Form::Compressed)
+    }
+
+    /// Положить копию прочитанной страницы в названном виде. Ответ — путь
+    /// копии внутри архива: его записывает строка истории. `None` — класть
+    /// нечего (лента, своя страница) или некуда.
     ///
     /// Та же страница, прочитанная в тот же день ещё раз, переписывает свою
     /// копию: имя у неё то же. В другой день — новая копия рядом: страница
-    /// могла измениться, а прочитано было то, что было.
-    pub fn keep(&self, document: &Document, read: &Stamp) -> Option<String> {
+    /// могла измениться, а прочитано было то, что было. Копия того же дня
+    /// в другом виде уступает новой: копия дня одна, а строка журнала
+    /// с прежним именем находит её через [`twin`].
+    pub fn keep_as(&self, document: &Document, read: &Stamp, form: Form) -> Option<String> {
         let dir = self.dir.as_ref()?;
         if !worth_keeping(document) {
             return None;
@@ -124,36 +185,56 @@ impl Archive {
         let date = date_of(read);
         let slug = slug_of(&document.title, &source);
         let text = file_text(&document.title, &source, read, &document.markdown);
-        let bytes = compress(text.as_bytes())?;
+        let bytes = match form {
+            Form::Compressed => compress(text.as_bytes())?,
+            Form::Plain => text.into_bytes(),
+        };
 
         for number in 1..=SAME_NAME {
-            let name = if number == 1 {
-                format!("{date}-{slug}{EXTENSION}")
+            let stem = if number == 1 {
+                format!("{date}-{slug}")
             } else {
-                format!("{date}-{slug}-{number}{EXTENSION}")
+                format!("{date}-{slug}-{number}")
             };
+            let name = format!("{stem}{}", form.extension());
             let path = dir.join(&host).join(&name);
-            // Имя занято другой страницей — берём следующее.
-            if let Some(head) = read_head(&path)
-                && head.source != source
+            let other = dir
+                .join(&host)
+                .join(format!("{stem}{}", form.other().extension()));
+            // Имя занято другой страницей, в любом из двух видов, — берём
+            // следующее.
+            if [&path, &other]
+                .into_iter()
+                .any(|file| read_head(file).is_some_and(|head| head.source != source))
             {
                 continue;
             }
             cache::write_atomically(&path, &bytes);
-            return path.exists().then(|| format!("{host}/{name}"));
+            if !path.exists() {
+                return None;
+            }
+            let _ = fs::remove_file(&other);
+            return Some(format!("{host}/{name}"));
         }
         None
     }
 
     /// Копия по пути внутри архива. Путь проверяется: из адресной строки
     /// приходит что угодно, а выйти за пределы архива он не должен.
+    /// Нет файла — ищем его двойника в другом виде: копию дня могли
+    /// переписать иначе (#43), а журнал помнит прежнее имя.
     pub fn read(&self, path: &str) -> Option<Copy> {
-        let file = self.dir.as_ref()?.join(checked(path)?);
-        let bytes = fs::read(file).ok()?;
-        let text = decompress(&bytes)?;
+        let dir = self.dir.as_ref()?;
+        let (path, text) = [Some(path.to_owned()), twin(path)]
+            .into_iter()
+            .flatten()
+            .find_map(|path| {
+                let text = text_of(&dir.join(checked(&path)?))?;
+                Some((path, text))
+            })?;
         let head = parse_head(&text)?;
         Some(Copy {
-            path: path.to_owned(),
+            path,
             title: head.title,
             source: head.source,
             read: head.read,
@@ -209,7 +290,7 @@ impl Archive {
             let Some(name) = file.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if !name.ends_with(EXTENSION) {
+            if !is_copy(&name) {
                 continue;
             }
             let Some(head) = read_head(&file.path()) else {
@@ -262,8 +343,8 @@ impl Archive {
         let copies = self.list();
         if copies.is_empty() {
             out.push_str(
-                "Nothing here yet. Every page you read is kept here, as a compressed \
-                 Markdown file, so you can read it again even when the site is gone.\n",
+                "Nothing here yet. Every page you read is kept here, as a Markdown \
+                 file, so you can read it again even when the site is gone.\n",
             );
             out.push_str(&self.footer());
             return out;
@@ -301,7 +382,7 @@ impl Archive {
         }
         let mut found = Vec::new();
         for (path, file) in self.files() {
-            let Some(text) = fs::read(&file).ok().and_then(|bytes| decompress(&bytes)) else {
+            let Some(text) = text_of(&file) else {
                 continue;
             };
             let Some(head) = parse_head(&text) else {
@@ -412,7 +493,10 @@ impl Archive {
         }
         let marked_copies: HashSet<String> = newest.into_values().map(|(_, path)| path).collect();
         for (path, file) in heads {
-            if kept.contains(&path) || marked_copies.contains(&path) || spare(&file) {
+            // Журнал мог запомнить копию под именем другого вида (#43).
+            let in_history =
+                kept.contains(&path) || twin(&path).is_some_and(|other| kept.contains(&other));
+            if in_history || marked_copies.contains(&path) || spare(&file) {
                 continue;
             }
             let _ = fs::remove_file(&file);
@@ -446,9 +530,10 @@ impl Archive {
             None => "nowhere: there is no home folder".to_owned(),
         };
         format!(
-            "\n---\n\nThese are plain files in {place}, one per page; `lz4 -d` opens any of \
-             them without Brevier. **Search what you've read**, in the menu, looks through them \
-             all, and so does `brevier:archive?q=` with your words in the address bar.\n"
+            "\n---\n\nThese are plain files in {place}, one per page, in Markdown: a `.md` copy \
+             opens in anything that reads text, and `lz4 -d` opens a `.md.lz4` one without \
+             Brevier. **Search what you've read**, in the menu, looks through them all, and so \
+             does `brevier:archive?q=` with your words in the address bar.\n"
         )
     }
 
@@ -472,7 +557,7 @@ impl Archive {
                 let Some(name) = file.file_name().to_str().map(str::to_owned) else {
                     continue;
                 };
-                if name.ends_with(EXTENSION) {
+                if is_copy(&name) {
                     out.push((format!("{host_name}/{name}"), file.path()));
                 }
             }
@@ -542,8 +627,15 @@ fn slug_of(title: &str, source: &str) -> String {
     }
 }
 
-/// Путь внутри архива, если он законный: ровно `хост/имя.md.lz4`, без
-/// выхода наверх и без абсолютных путей.
+/// Та же копия в другом виде: `хост/имя.md.lz4` ↔ `хост/имя.md`.
+fn twin(path: &str) -> Option<String> {
+    let form = Form::of(path)?;
+    let stem = path.strip_suffix(form.extension())?;
+    Some(format!("{stem}{}", form.other().extension()))
+}
+
+/// Путь внутри архива, если он законный: ровно `хост/имя.md.lz4` или
+/// `хост/имя.md`, без выхода наверх и без абсолютных путей.
 fn checked(path: &str) -> Option<PathBuf> {
     let mut parts = path.split('/');
     let (host, name) = (parts.next()?, parts.next()?);
@@ -555,7 +647,7 @@ fn checked(path: &str) -> Option<PathBuf> {
     let fine = |part: &str| {
         !part.is_empty() && part != "." && part != ".." && !part.contains(['\\', '\0', ':'])
     };
-    (fine(host) && fine(name) && name.ends_with(EXTENSION)).then(|| Path::new(host).join(name))
+    (fine(host) && fine(name) && is_copy(name)).then(|| Path::new(host).join(name))
 }
 
 /// Текст файла: шапка YAML и markdown страницы.
@@ -624,14 +716,33 @@ fn parse_head(text: &str) -> Option<Head> {
     })
 }
 
-/// Шапка файла, без распаковки всего текста.
+/// Вид копии по имени её файла.
+fn form_of(file: &Path) -> Option<Form> {
+    Form::of(file.file_name()?.to_str()?)
+}
+
+/// Текст копии целиком, какого бы вида она ни была.
+fn text_of(file: &Path) -> Option<String> {
+    let form = form_of(file)?;
+    let bytes = fs::read(file).ok()?;
+    match form {
+        Form::Compressed => decompress(&bytes),
+        Form::Plain => String::from_utf8(bytes).ok(),
+    }
+}
+
+/// Шапка файла, без чтения и распаковки всего текста.
 fn read_head(file: &Path) -> Option<Head> {
+    let form = form_of(file)?;
     let reader = fs::File::open(file).ok()?;
-    let mut decoder = lz4_flex::frame::FrameDecoder::new(reader);
+    let mut reader: Box<dyn Read> = match form {
+        Form::Compressed => Box::new(lz4_flex::frame::FrameDecoder::new(reader)),
+        Form::Plain => Box::new(reader),
+    };
     let mut head = vec![0; HEAD_BYTES];
     let mut filled = 0;
     while filled < head.len() {
-        match decoder.read(&mut head[filled..]) {
+        match reader.read(&mut head[filled..]) {
             Ok(0) => break,
             Ok(read) => filled += read,
             Err(_) => return None,
@@ -833,6 +944,88 @@ mod tests {
         );
     }
 
+    /// Простая копия (#43) — тот же текст без сжатия, в `.md`: её откроет
+    /// любая программа, а архив находит, читает и ищет её как сжатую.
+    #[test]
+    fn a_page_can_be_kept_as_plain_markdown() {
+        let dir = temporary("plain-keep");
+        let archive = Archive::at(&dir);
+        let read = stamp("2026-10-09T09:36:28+02:00");
+        let page = article(
+            "https://danluu.com/keyboard-latency/",
+            "Keyboard latency",
+            "If you look at gaming keyboards…",
+        );
+        let path = archive.keep_as(&page, &read, Form::Plain).unwrap();
+        assert_eq!(path, "danluu.com/2026-10-09-keyboard-latency.md");
+
+        let text = fs::read_to_string(dir.join(&path)).unwrap();
+        assert!(
+            text.starts_with("---\ntitle: \"Keyboard latency\"\n"),
+            "{text}"
+        );
+        assert_eq!(archive.read(&path).unwrap().markdown, text);
+        assert_eq!(archive.list().len(), 1);
+        assert_eq!(archive.search("gaming").len(), 1);
+        assert_eq!(
+            archive
+                .latest(&parse("https://danluu.com/keyboard-latency/").unwrap())
+                .unwrap()
+                .path,
+            path
+        );
+    }
+
+    /// Копия дня одна: та же страница в тот же день, но в другом виде,
+    /// заменяет прежнюю. Строка журнала с прежним именем по-прежнему ведёт
+    /// к копии, и уборка её не трогает.
+    #[test]
+    fn a_copy_written_again_in_the_other_form_replaces_it() {
+        let dir = temporary("plain-twin");
+        let archive = Archive::at(&dir);
+        let read = stamp("2026-10-09T09:00:00Z");
+        let url = "https://danluu.com/keyboard-latency/";
+        let old = archive
+            .keep(&article(url, "Keyboard latency", "Old text."), &read)
+            .unwrap();
+        let new = archive
+            .keep_as(
+                &article(url, "Keyboard latency", "New text."),
+                &read,
+                Form::Plain,
+            )
+            .unwrap();
+        assert_eq!(old, "danluu.com/2026-10-09-keyboard-latency.md.lz4");
+        assert_eq!(new, "danluu.com/2026-10-09-keyboard-latency.md");
+        assert!(!dir.join(&old).exists());
+        assert_eq!(archive.list().len(), 1);
+
+        let copy = archive.read(&old).expect("старое имя не ведёт к копии");
+        assert_eq!(copy.path, new);
+        assert!(copy.markdown.contains("New text."));
+
+        let later = SystemTime::now() + Duration::from_secs(48 * 3600);
+        archive.prune_at(&[old].into(), &HashSet::new(), later);
+        assert!(dir.join(&new).exists());
+    }
+
+    /// Имя, занятое другой страницей в другом виде, тоже занято: её копию
+    /// новая не заменяет.
+    #[test]
+    fn a_name_taken_in_the_other_form_is_taken() {
+        let dir = temporary("plain-names");
+        let archive = Archive::at(&dir);
+        let monday = stamp("2026-10-05T10:00:00+02:00");
+        let one = article("https://news.example.org/a/1", "Live", "first");
+        let two = article("https://news.example.org/a/2", "Live", "second");
+        let first = archive.keep(&one, &monday).unwrap();
+        assert_eq!(
+            archive.keep_as(&two, &monday, Form::Plain).unwrap(),
+            "news.example.org/2026-10-05-live-2.md"
+        );
+        assert!(dir.join(&first).exists());
+    }
+
     /// Странице отказа (#9) — последняя копия именно этой страницы: соседка
     /// по хосту не в счёт, решётка в адресе не мешает.
     #[test]
@@ -933,11 +1126,14 @@ mod tests {
             "..",
             "C:/notes.md.lz4",
             "example.org/x.md.lz4:hidden.md.lz4",
+            "../history.md",
+            "example.org/x.lz4",
         ] {
             assert!(checked(path).is_none(), "{path}");
             assert!(archive.read(path).is_none(), "{path}");
         }
         assert!(checked("example.org/2026-10-09-x.md.lz4").is_some());
+        assert!(checked("example.org/2026-10-09-x.md").is_some());
     }
 
     /// Список — свежие сверху, по дням; поиск — все слова запроса, с куском

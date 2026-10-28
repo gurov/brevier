@@ -464,6 +464,8 @@ struct State {
     images: bool,
     /// Класть ли копию каждой прочитанной страницы в архив (#8).
     archive: bool,
+    /// Простым `.md`, а не сжатой (#43).
+    plain_archive: bool,
     /// Ступень масштаба — одна на окно, общая для всех страниц. Читатель
     /// выставляет её раз и ждёт её везде: разная по хостам ступень
     /// оборачивалась тем, что соседняя страница открывалась «странно».
@@ -860,6 +862,7 @@ fn build(app: &Application, start: Vec<String>) {
         contrast_watch: None,
         images: settings.images,
         archive: settings.archive,
+        plain_archive: settings.plain_archive,
         zoom: ZOOM_NORMAL,
         typography: settings.typography,
         store: Store::open(),
@@ -1371,20 +1374,42 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
 /// У каждой настройки есть причина, которую надо объяснить строкой, — в кнопку
 /// с иконкой такое не помещается, потому это страница, а не значок в панели.
 fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
-    let (dark_on, high_on, images_on, archive_on) = {
+    let (dark_on, high_on, images_on, archive_on, plain_on) = {
         let borrowed = state.borrow();
         let theme = borrowed.theme();
-        (theme.dark, theme.high, borrowed.images, borrowed.archive)
+        (
+            theme.dark,
+            theme.high,
+            borrowed.images,
+            borrowed.archive,
+            borrowed.plain_archive,
+        )
     };
     let keep_copies = gtk::Switch::builder()
         .valign(gtk::Align::Center)
         .active(archive_on)
         .build();
+    // Простые копии (#43) — свойство архива: выключен он — выбирать нечего.
+    let plain_copies = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(plain_on)
+        .sensitive(archive_on)
+        .build();
     {
         let ui = ui.clone();
         let state = state.clone();
+        let plain_copies = plain_copies.clone();
         keep_copies.connect_active_notify(move |switch| {
             state.borrow_mut().archive = switch.is_active();
+            plain_copies.set_sensitive(switch.is_active());
+            remember_settings(&ui, &state);
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        plain_copies.connect_active_notify(move |switch| {
+            state.borrow_mut().plain_archive = switch.is_active();
             remember_settings(&ui, &state);
         });
     }
@@ -1483,11 +1508,17 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
     history_rows.add_css_class("rich-list");
     history_rows.append(&setting_row(
         "Keep a copy of every page you read",
-        "Each article you read is kept as a compressed Markdown file — your \
-         copy, next to the page in the history — so you can read it and search \
-         it even when the site is gone. Off: new pages are not kept; what is \
-         there stays.",
+        "Each article you read is kept as a Markdown file — your copy, next to \
+         the page in the history — so you can read it and search it even when \
+         the site is gone. Off: new pages are not kept; what is there stays.",
         &keep_copies,
+    ));
+    history_rows.append(&setting_row(
+        "Keep the copies as plain files",
+        "Plain .md files that other programs can open — Obsidian, desktop search, \
+         another reader — at about twice the space. Off: compressed .md.lz4, \
+         which lz4 -d opens. Copies kept before stay as they are.",
+        &plain_copies,
     ));
     history_rows.append(&action_row(
         "Forget everything you have read",
@@ -2798,6 +2829,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         shelf: ui.show_contents.is_active(),
         shelf_width: Some(ui.shelf_width.get()),
         archive: borrowed.archive,
+        plain_archive: borrowed.plain_archive,
         // Шапка, что уезжает, — у телефона (#45); у окна её нет.
         slide_bar: Settings::default().slide_bar,
         typography: borrowed.typography,
@@ -3284,7 +3316,15 @@ fn open_with(
     // Чем открыть это в чужом браузере — считаем до того, как адрес уедет
     // в поток загрузки: на отказе он понадобится, а его уже не будет.
     let external = address.external();
-    let archive_on = state.borrow().archive;
+    let (archive_on, form) = {
+        let borrowed = state.borrow();
+        let form = if borrowed.plain_archive {
+            brevier::archive::Form::Plain
+        } else {
+            brevier::archive::Form::Compressed
+        };
+        (borrowed.archive, form)
+    };
     let offset = local_offset();
     glib::spawn_future_local(async move {
         let loaded = off_main(move || {
@@ -3299,8 +3339,11 @@ fn open_with(
             // И в архив (#8), по тому же правилу: что кладётся — решает он.
             let copy = archive_on
                 .then(|| {
-                    brevier::archive::Archive::open()
-                        .keep(&document, &brevier::store::Stamp::now(offset))
+                    brevier::archive::Archive::open().keep_as(
+                        &document,
+                        &brevier::store::Stamp::now(offset),
+                        form,
+                    )
                 })
                 .flatten();
             Ok::<_, Failure>((document, copy))

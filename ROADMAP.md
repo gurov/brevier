@@ -135,8 +135,9 @@ Done.
 Done.
 
 - On by default. Every article read is kept under
-  `$XDG_DATA_HOME/brevier/archive/<host>/<date>-<slug>.md.lz4`, one file per page,
-  and the history line points to its copy. LZ4 in pure Rust (`lz4_flex`), for the
+  `$XDG_DATA_HOME/brevier/archive/<host>/<date>-<slug>.md.lz4`, one file per page
+  (`.md`, if the reader chose plain copies — item 15), and the history line points to its
+  copy. LZ4 in pure Rust (`lz4_flex`), for the
   same reason there is no SQLite; fast enough that the write is not felt and a search
   over the whole archive is a scan at memory speed.
 - The frame is the standard one, so `lz4 -d` opens a file without Brevier;
@@ -340,6 +341,8 @@ or high contrast — in the window and on the phone.
   site keeps the ivory.
 
 ### 15. Plain copies (#43)
+
+Done, in the window; the phone writes compressed copies, for the reason below.
 
 The archive promises that only a decompressor stands between the reader and their text.
 For the reader's own eyes that holds; for their tools it does not — desktop search,

@@ -173,7 +173,7 @@ brevier --save <url>                    # save to a file instead of stdout
 brevier brevier:history                 # what you have read, by day
 brevier brevier:archive                 # a copy of every article you read
 brevier "brevier:archive?q=latency"     # …searched for words
-brevier brevier:archive/<host>/<file>   # one copy, printed as `lz4 -d` would
+brevier brevier:archive/<host>/<file>   # one copy, printed as plain Markdown
 brevier brevier:wayback/<url>           # the Wayback Machine's latest good copy
 brevier "borrow checker"                # not an address: a search
 brevier "?danluu.com"                   # a leading ? searches for anything
@@ -289,8 +289,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **A new tab shows the five pages you read last.**
 - **Tabs come back** after you close the window; only the visible one loads at start.
 - **History and bookmarks**, and the address bar suggests pages you have read.
-- **Every article you read is kept as your copy**, a compressed Markdown file, so you can
-  read and search it after the site has changed or gone. The history links each page to
+- **Every article you read is kept as your copy**, a Markdown file, so you can read and
+  search it after the site has changed or gone; compressed, or plain `.md` for other
+  programs to open. The history links each page to
   its copy; a bookmark keeps its copy for good. **Search what you've read** is in the menu
   (`Ctrl+Shift+F`), and `brevier:archive` lists every copy.
 
@@ -436,7 +437,11 @@ History, open tabs and bookmarks are plain text, one line per entry:
 
 The archive holds one file per page, `<host>/<date>-<title>.md.lz4`: Markdown with a short
 header (title, address, when you read it), compressed in the standard LZ4 format, so
-`lz4 -d` opens it without Brevier. A copy stays as long as its line in the history, and a
+`lz4 -d` opens it without Brevier. **Keep the copies as plain files**, in Settings, writes
+new copies as plain `.md` instead, which Obsidian, desktop search or another reader open as
+they are, at about twice the space; the copies kept before stay as they were, and Brevier
+reads both. On the phone copies stay compressed: no other app can see the app's own
+folder anyway. A copy stays as long as its line in the history, and a
 bookmarked page, and a page with notes, keeps its latest copy for good, even through
 **Forget everything**. A switch
 in Settings stops new copies.

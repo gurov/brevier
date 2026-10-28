@@ -588,6 +588,8 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
         None => match crate::open(&address, UserAgent::Honest) {
             Ok(document) => {
                 disk.keep(&address, &document);
+                // Сжатой всегда (#43): архив в закрытой папке приложения,
+                // простой файл другим программам не виден.
                 if Settings::load().archive {
                     archived = Archive::open().keep(&document, &Stamp::now(offset));
                 }
