@@ -1,0 +1,1 @@
+• Nothing changes on the phone: this release is for the desktop window — Alt+Left and Alt+Right go back and forward, and the archive can keep its copies as plain .md files.

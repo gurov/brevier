@@ -97,6 +97,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.18.0" date="2026-10-28" type="development">
+      <description>
+        <p>Alt+Left and Alt+Right go back and forward, from the article and
+          from the address bar alike. The archive can keep its copies as plain
+          Markdown files, for Obsidian, desktop search or another reader to
+          open; compressed stays the default.</p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-10-26" type="development">
       <description>
         <p>Pages that never say what encoding they are in read right:
