@@ -780,6 +780,7 @@ fn build(app: &Application, start: Vec<String>) {
     ui.bar.add_css_class("page");
     ui.back.set_sensitive(false);
     ui.forward.set_sensitive(false);
+    ui.forward.set_tooltip_text(Some("Forward (Alt+→)"));
 
     let new_tab_button = gtk::Button::from_icon_name("tab-new-symbolic");
     new_tab_button.set_tooltip_text(Some("New tab (Ctrl+T)"));
@@ -1873,6 +1874,20 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         let state = state.clone();
         zoom.connect_activate(move |_, _| zoom_by(&ui, &state, step));
         add(name, keys, zoom);
+    }
+
+    // Назад и вперёд — `Alt+←` / `Alt+→`, как в любом браузере и как
+    // на телефоне с клавиатурой (#47). Клавиши у приложения, а не у текста:
+    // из строки адреса и с полки они ходят так же, как из статьи.
+    for (name, backwards, key) in [
+        ("back", true, "<Alt>Left"),
+        ("forward", false, "<Alt>Right"),
+    ] {
+        let action = gio::SimpleAction::new(name, None);
+        let ui = ui.clone();
+        let state = state.clone();
+        action.connect_activate(move |_, _| step(&ui, &state, backwards));
+        add(name, &[key], action);
     }
 
     let close = gio::SimpleAction::new("close-tab", None);
@@ -3555,9 +3570,9 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
     // теперь ведёт, говорит подсказка. Погасшая (вкладка открыта снаружи)
     // на начальную не ведёт и так не подписывается.
     ui.back.set_tooltip_text(Some(if can_back && back_home {
-        "Back to the start page"
+        "Back to the start page (Alt+←)"
     } else {
-        "Back"
+        "Back (Alt+←)"
     }));
     ui.forward.set_sensitive(can_forward);
 

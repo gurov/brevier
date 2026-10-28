@@ -226,6 +226,7 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | arrows, `Home` / `End` | line, top, bottom |
 | `Tab` / `Shift+Tab` | mark the next / previous link |
 | `Enter` / `Ctrl+Enter` on a marked link | follow it / open it in a new tab |
+| `Alt+←` / `Alt+→` | back / forward |
 | `Ctrl+L` | go to the address bar |
 | `Ctrl+R`, `F5` | reload, downloading the page afresh |
 | `Ctrl+T` / `Ctrl+W` | new tab / close tab |
@@ -368,8 +369,7 @@ text — not in a WebView — with the same typography and colours as the window
 - **The bar slides away while you read**: it follows your finger up and down without moving
   the text, and stays put at the top and end of a page, on short pages, while you type,
   search or select, and with TalkBack or Switch Access on. A setting keeps it in place.
-- With a keyboard attached, the window's shortcuts work, and `Alt+←` / `Alt+→` go back and
-  forward.
+- With a keyboard attached, the window's shortcuts work, `Alt+←` / `Alt+→` included.
 
 The maintainer uses it every day. It hasn't been tested with TalkBack yet.
 
