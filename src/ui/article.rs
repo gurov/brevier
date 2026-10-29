@@ -43,6 +43,8 @@ mod imp {
         pub rule: Cell<gtk::gdk::RGBA>,
         /// Поле заметок вкладки — заводится при первом обращении.
         pub margin: OnceCell<Rc<Margin>>,
+        /// Ширина поля заметок сбоку; 0 — поля нет.
+        pub panel: Cell<i32>,
     }
 
     impl Default for Article {
@@ -50,6 +52,7 @@ mod imp {
             Self {
                 rule: Cell::new(gtk::gdk::RGBA::new(0.6, 0.6, 0.6, 1.0)),
                 margin: OnceCell::new(),
+                panel: Cell::new(0),
             }
         }
     }
@@ -62,7 +65,29 @@ mod imp {
     }
 
     impl ObjectImpl for Article {}
-    impl WidgetImpl for Article {}
+
+    impl WidgetImpl for Article {
+        // Поле заметок (#42) входит в естественную ширину статьи, а не
+        // в наименьшую: наименьшая — мера, и окно сужается до неё. Тогда
+        // поле не помещается, и заметки уходят под абзацы. GTK же кладёт
+        // правое поле текста и в наименьшую — поверх самого широкого
+        // виджета страницы (таблица, рамка картинки стоят во всю меру), —
+        // и поле держало бы окно шире, чем хочет читатель.
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let (min, natural, min_base, natural_base) = self.parent_measure(orientation, for_size);
+            if orientation != gtk::Orientation::Horizontal {
+                return (min, natural, min_base, natural_base);
+            }
+            let panel = self.panel.get();
+            let wanted = self.obj().width_request() + panel;
+            (
+                (min - panel).max(0),
+                natural.max(wanted),
+                min_base,
+                natural_base,
+            )
+        }
+    }
 
     impl TextViewImpl for Article {
         fn snapshot_layer(&self, layer: gtk::TextViewLayer, snapshot: gtk::Snapshot) {
@@ -111,6 +136,15 @@ impl Article {
             .margin
             .get_or_init(|| Margin::new(self.upcast_ref()))
             .clone()
+    }
+}
+
+/// Место под поле заметок справа от текста: столько вид просит сверх меры.
+pub fn widen(view: &gtk::TextView, panel: i32) {
+    if let Some(article) = view.downcast_ref::<Article>()
+        && article.imp().panel.replace(panel) != panel
+    {
+        article.queue_resize();
     }
 }
 

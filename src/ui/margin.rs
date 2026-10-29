@@ -124,8 +124,10 @@ pub const CARD_PADDING: i32 = 3 + 10 + 10;
 /// Между карточками и между абзацем и карточкой под ним.
 const SPACING: i32 = 8;
 
-/// Место кнопки меню справа от слов.
+/// Место кнопки меню справа от слов — не меньше; сколько на деле, решает тема.
 const MENU_WIDTH: i32 = 28;
+/// Между словами и кнопкой меню.
+const HEAD_SPACING: i32 = 2;
 
 /// Сколько строк слов видно на карточке; остальное — в правке. Карточка
 /// выше окна сломала бы весь текст (см. шапку).
@@ -228,6 +230,15 @@ impl Margin {
 
     pub fn form(&self) -> Form {
         self.form.get()
+    }
+
+    /// Заметка, которую сейчас правят в карточке.
+    pub fn editing(&self) -> Option<u64> {
+        self.placed
+            .borrow()
+            .iter()
+            .find(|placed| placed.editor.is_visible())
+            .map(|placed| placed.card.id)
     }
 
     /// Показать заметки страницы. Карточки тех же заметок остаются теми же
@@ -440,11 +451,6 @@ impl Margin {
             room.card
         };
         root.set_size_request(width, -1);
-        // Наименьшая ширина слов — вся их ширина в карточке (см. шапку),
-        // естественная — не больше: длинная заметка одной строкой иначе
-        // раздвигала бы весь текст.
-        let words_width = (room.inner(form) - MENU_WIDTH).max(16);
-
         let said = gtk::Label::builder()
             .xalign(0.0)
             .wrap(true)
@@ -453,7 +459,6 @@ impl Margin {
             .lines(SAID_LINES)
             .ellipsize(pango::EllipsizeMode::End)
             .build();
-        said.set_size_request(words_width, -1);
         said.set_attributes(Some(&font(room)));
         said.add_css_class("margin-note-said");
         let field = gtk::TextView::builder()
@@ -469,7 +474,6 @@ impl Margin {
             .min_content_height(EDITOR_HEIGHT)
             .visible(false)
             .build();
-        editor.set_size_request(words_width, -1);
         let tag = gtk::TextTag::builder()
             .name("say")
             .family(room.family.as_str())
@@ -483,7 +487,6 @@ impl Margin {
             .max_width_chars(1)
             .visible(false)
             .build();
-        hint.set_size_request(words_width, -1);
         hint.add_css_class("dim-label");
         hint.add_css_class("caption");
 
@@ -504,7 +507,7 @@ impl Margin {
         model.append_section(None, &last);
         menu.set_menu_model(Some(&model));
 
-        let head = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        let head = gtk::Box::new(gtk::Orientation::Horizontal, HEAD_SPACING);
         let words = gtk::Box::new(gtk::Orientation::Vertical, 2);
         words.append(&said);
         words.append(&editor);
@@ -518,6 +521,23 @@ impl Margin {
 
         let slot = self.slot(view);
         slot.append(&root);
+        // Наименьшая ширина слов — вся их ширина в карточке (см. шапку),
+        // естественная — не больше: длинная заметка одной строкой иначе
+        // раздвигала бы весь текст. Кнопку меряем уже в окне, с темой:
+        // шире расчётной, она раздвинула бы карточку, а под абзацем — и всю
+        // колонку, и окно не сужалось бы до меры.
+        let button = menu
+            .measure(gtk::Orientation::Horizontal, -1)
+            .0
+            .max(MENU_WIDTH);
+        let words_width = (room.inner(form) - button - HEAD_SPACING).max(16);
+        for words in [
+            said.upcast_ref::<gtk::Widget>(),
+            editor.upcast_ref(),
+            hint.upcast_ref(),
+        ] {
+            words.set_size_request(words_width, -1);
+        }
         let placed = Placed {
             card,
             slot,

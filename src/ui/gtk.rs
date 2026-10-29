@@ -3826,7 +3826,15 @@ fn fit_shelf(ui: &Ui) {
     // а не мельчает до переносов по слогам. Мера — обещание продукта,
     // полка — удобство; уступает удобство. Вернётся само, как только
     // масштаб или окно позволят.
-    let free = width - column_px();
+    // Колонка — не уже, чем позволяет она сама: делитель левее её
+    // наименьшей ширины GTK не пустит, а при следующем росте окна отдаст
+    // прибавку полке, и та запомнится выбором читателя.
+    let column = ui
+        .split
+        .start_child()
+        .map_or(0, |side| side.measure(gtk::Orientation::Horizontal, -1).0)
+        .max(column_px());
+    let free = width - column;
     if free < TOC_MIN {
         ui.shelf.set_visible(false);
         return;
@@ -4472,6 +4480,7 @@ fn fit_column(view: &gtk::TextView) {
     let gutter = text_px().round() as i32;
     view.set_width_request(measure_px());
     view.set_right_margin(0);
+    article::widen(view, 0);
     view.set_margin_start(gutter);
     view.set_margin_end(gutter);
 }
@@ -7052,7 +7061,8 @@ fn margin_form(state: &State, view: &gtk::TextView, room: &margin::Room) -> Form
 }
 
 /// Колонка под форму поля: сбоку виджет шире на поле, а текст — той же
-/// меры, поле справа — правое поле самого текста.
+/// меры, поле справа — правое поле самого текста. Шире — только
+/// естественной шириной (`article::widen`): наименьшая остаётся мерой.
 fn fit_margin(view: &gtk::TextView, room: &margin::Room, form: Form) {
     let panel = if form == Form::Side {
         room.gap + room.card
@@ -7060,7 +7070,7 @@ fn fit_margin(view: &gtk::TextView, room: &margin::Room, form: Form) {
         0
     };
     if view.right_margin() != panel {
-        view.set_width_request(measure_px() + panel);
+        article::widen(view, panel);
         view.set_right_margin(panel);
         view.set_margin_end(if form == Form::Side {
             MARGIN_END
@@ -7079,13 +7089,17 @@ fn lay_notes(state: &Rc<RefCell<State>>, id: u64, fresh: Option<u64>) {
     let Some(margin) = article::margin_of(&view) else {
         return;
     };
+    // Карточка в правке остаётся, даже пустая: новая заметка без слов
+    // иначе пропала бы при первой же перекладке — а первая заметка
+    // страницы её и вызывает, раздвигая колонку под поле.
+    let editing = margin.editing();
     let (cards, room, form) = {
         let borrowed = state.borrow();
         let Some(tab) = borrowed.tabs.iter().find(|tab| tab.id == id) else {
             return;
         };
         let room = margin_room(&borrowed, &view);
-        let form = if tab.progress.is_some() && tab.history.current().is_some() {
+        let mut form = if tab.progress.is_some() && tab.history.current().is_some() {
             margin_form(&borrowed, &view, &room)
         } else {
             Form::Hidden
@@ -7093,7 +7107,7 @@ fn lay_notes(state: &Rc<RefCell<State>>, id: u64, fresh: Option<u64>) {
         let cards: Vec<margin::Card> = tab
             .notes
             .iter()
-            .filter(|note| note.says() || Some(note.id) == fresh)
+            .filter(|note| note.says() || Some(note.id) == fresh || Some(note.id) == editing)
             .filter_map(|note| {
                 Some(margin::Card {
                     id: note.id,
@@ -7107,6 +7121,12 @@ fn lay_notes(state: &Rc<RefCell<State>>, id: u64, fresh: Option<u64>) {
                 })
             })
             .collect();
+        // Без карточек поля нет: колонка стоит посередине, как на любой
+        // странице без заметок, и сдвигается, только когда есть что
+        // показать.
+        if cards.is_empty() {
+            form = Form::Hidden;
+        }
         (cards, room, form)
     };
     fit_margin(&view, &room, form);
@@ -7447,10 +7467,10 @@ fn mark_selection(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, write: bool) {
     };
     // Выделение снимаем: отмеченное видно своей подложкой.
     buffer.place_cursor(&buffer.iter_at_offset(to));
-    // Поле заметок показано (#42) — слова пишут прямо в карточке на нём,
-    // как примечание в Word: пустая заметка встаёт с курсором.
-    let on_margin =
-        write && article::margin_of(&view).is_some_and(|margin| margin.form() != Form::Hidden);
+    // Поле заметок включено (#42), пусть пока и без карточек, — слова пишут
+    // прямо в карточке на нём, как примечание в Word: пустая заметка встаёт
+    // с курсором.
+    let on_margin = write && article::margin_of(&view).is_some() && state.borrow().show_notes;
     if on_margin {
         let note = state.borrow_mut().notes.add(
             &address,
