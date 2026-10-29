@@ -609,7 +609,7 @@ mod tests {
         assert_eq!((saved.images, saved.missed), (1, 0));
 
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
-        let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+        let names = names_in(&archive);
         assert!(names.contains(&"out.md".to_owned()), "{names:?}");
         assert!(
             names.contains(&"images/01-chart.png".to_owned()),
@@ -659,6 +659,14 @@ mod tests {
         assert_eq!(out.matches("images/01-a.png").count(), 2);
     }
 
+    /// Имена файлов архива: с zip 9 каждое — `Result`, имя не в UTF-8 — ошибка.
+    fn names_in<R: std::io::Read + std::io::Seek>(archive: &zip::ZipArchive<R>) -> Vec<String> {
+        archive
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect()
+    }
+
     #[cfg(feature = "typeset")]
     fn noted(dir: &Path) -> (Notes, u64, u64) {
         let mut store = Notes::at(dir.join("data/notes.tsv"));
@@ -704,7 +712,7 @@ mod tests {
         let saved = notes(&out, &pages, &store).unwrap();
         assert_eq!(saved.images, 1);
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
-        let mut names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+        let mut names = names_in(&archive);
         names.sort();
         let picture = format!("images/{}", store.get(one).unwrap().pictures[0]);
         assert_eq!(
@@ -760,6 +768,6 @@ mod tests {
         let saved = write_with(&out, &document, &attached, UserAgent::Honest).unwrap();
         assert_eq!((saved.images, saved.missed), (1, 0));
         let archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
-        assert!(archive.file_names().any(|name| name == attached[0].link));
+        assert!(names_in(&archive).contains(&attached[0].link));
     }
 }

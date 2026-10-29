@@ -88,7 +88,7 @@ roxmltree = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "gzip", "brotli"] }
 url = "2.5.8"
-zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"], optional = true }
 
 # Android: ядро едет в приложение общей библиотекой и разговаривает с ним
 # по JNI. Версию `jni` держим ту же, что тянет платформенный проверяющий
