@@ -4,7 +4,7 @@ What it does
 
 • Articles, blogs, documentation and long reads come out as clean text. The page's own contents, the feeds it offers and its navigation sit on a shelf at the side.
 • Long reads remember where you stopped and offer to continue from there.
-• Notes on a page: highlight a passage or write a few words beside it. The marks come back when you open the page again, even after the site has changed around them.
+• Notes on a page: highlight a passage or write a few words beside it, with pictures of your own if you like; they stand under their paragraph and go out as Markdown. The marks come back when you open the page again, even after the site has changed around them.
 • Every article you read is kept on the phone as your copy: it opens after the site has changed or gone, and "Search what you've read" looks through all of them.
 • Search from the address bar: words that are not an address go to DuckDuckGo Lite, and the results come back as a list of links.
 • RSS, Atom and JSON feeds, including feed files and feed:// links. A feed of comments on one page reads as a thread, and so do Hacker News, Lobsters and Discourse forums. Habr articles come with their comments.

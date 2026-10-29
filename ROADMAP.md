@@ -360,6 +360,9 @@ copies as plain `.md`, the header kept: those tools read it as properties.
 
 ### 16. Pictures in the archive (#42)
 
+Not yet. The reader's own pictures came first: since 0.19.0 a note can hold them, in a
+margin beside its passage or under its paragraph.
+
 A copy is Markdown: the text outlives the site, the pictures die with it. For most pages
 that is the right trade. A bookmark, though, promises a page kept for good, and in
 documentation the diagrams and screenshots are half of the page.

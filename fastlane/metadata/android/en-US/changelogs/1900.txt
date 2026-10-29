@@ -1,0 +1,3 @@
+• A note's words and pictures stand right under its paragraph. Add a picture from the photo picker; big camera photos are made smaller.
+• Share this page's notes, or all of them, as Markdown that Obsidian reads, each quote linked to its place on the page.
+• Notes under their paragraphs, in Settings, hides them.
