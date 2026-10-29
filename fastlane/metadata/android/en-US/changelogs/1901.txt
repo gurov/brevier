@@ -1,0 +1,1 @@
+• Nothing changes on the phone: this release fixes the notes margin of the desktop window, which kept a wide window from being made narrower.
