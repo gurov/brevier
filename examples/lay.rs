@@ -174,6 +174,7 @@ fn check_notes(page: &Page, broken: &mut Vec<String>) {
             quote: selection.quote,
             after: selection.after,
             text: String::new(),
+            pictures: Vec::new(),
         });
     }
     let refs: Vec<&notes::Note> = made.iter().collect();

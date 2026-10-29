@@ -486,6 +486,7 @@ class SettingsPage(
     private val changed: (dark: Boolean, images: Boolean) -> Unit,
     private val contrasted: (high: Boolean) -> Unit,
     private val slid: (on: Boolean) -> Unit,
+    private val notesUnder: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
     private val browser: () -> Unit,
@@ -506,7 +507,7 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType, slideBar: Boolean) {
+    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType, slideBar: Boolean, notes: Boolean) {
         this.dark = theme.dark
         this.theme = theme
         this.images = images
@@ -540,6 +541,11 @@ class SettingsPage(
             "Slide the bar away",
             "Reading down, the bar at the top moves out of the text's way as far as your finger goes; reading back up brings it back. Off: it stays put.",
             switch(palette, slideBar) { on -> slid(on) }, palette,
+        ))
+        column.addView(row(
+            "Notes under their paragraphs",
+            "Your words and pictures stand right under the passage they belong to, set apart by a green rule. Off: only the highlight stays, and a tap on it shows the note.",
+            switch(palette, notes) { on -> notesUnder(on) }, palette,
         ))
 
         typeSection(palette, reader)

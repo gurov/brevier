@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::fetch::UserAgent;
 use crate::media::{self, MAX_IMAGE, Source};
+use crate::notes::{self, Note, Notes};
 use crate::{Document, markdown};
 
 /// Папка с картинками внутри архива.
@@ -46,31 +47,87 @@ pub fn suggested_name(document: &Document) -> String {
     }
 }
 
+/// Картинка заметки, что едет с файлом (#42): ссылка на неё в тексте
+/// (`images/<имя>`) и сам файл на диске. Картинки статьи `save` достаёт
+/// сам, а эти — у читателя, и из сети их не скачать.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attached {
+    pub link: String,
+    pub path: PathBuf,
+}
+
+impl Attached {
+    /// Картинки этих заметок, по разу каждая.
+    pub fn of(notes: &[&Note], store: &Notes) -> Vec<Attached> {
+        let mut out: Vec<Attached> = Vec::new();
+        for name in notes.iter().flat_map(|note| &note.pictures) {
+            let link = format!("{}/{name}", notes::EXPORTED);
+            if out.iter().any(|known| known.link == link) {
+                continue;
+            }
+            if let Some(path) = store.picture(name) {
+                out.push(Attached { link, path });
+            }
+        }
+        out
+    }
+}
+
 /// Сохранить статью по указанному пути.
 ///
 /// Что писать, решает расширение: путь `…zip` — архив с картинками,
 /// любой другой — один файл markdown. Читатель мог переименовать файл
 /// в диалоге, и его выбор старше нашего предложения.
 pub fn write(path: &Path, document: &Document, ua: UserAgent) -> Result<Saved, Error> {
-    let zip = path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
+    write_with(path, document, &[], ua)
+}
 
-    if !zip {
+/// То же, со своими картинками заметок (`notes::appended` уже сослался
+/// на них в тексте). В `.zip` они ложатся рядом с картинками статьи;
+/// рядом с `.md` — в папку `images/`: иначе их ссылки вели бы в никуда.
+pub fn write_with(
+    path: &Path,
+    document: &Document,
+    attached: &[Attached],
+    ua: UserAgent,
+) -> Result<Saved, Error> {
+    if !is_zip(path) {
         std::fs::write(path, document.markdown.as_bytes()).map_err(Error::Convert)?;
+        let images = beside(path, attached)?;
         return Ok(Saved {
             path: path.to_path_buf(),
-            images: 0,
+            images,
             missed: 0,
         });
     }
 
-    let (markdown, images, missed) = gather(document, ua);
+    let (markdown, mut images, missed) = gather(document, attached, ua);
+    images.extend(read_attached(attached)?);
     let stem = path
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| slug(&document.title));
+    let files = [(format!("{stem}.md"), markdown.into_bytes())];
+    pack(path, &files, &images)?;
 
+    Ok(Saved {
+        path: path.to_path_buf(),
+        images: images.len(),
+        missed,
+    })
+}
+
+fn is_zip(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+}
+
+/// Архив: файлы markdown, затем картинки.
+fn pack(
+    path: &Path,
+    files: &[(String, Vec<u8>)],
+    images: &[(String, Vec<u8>)],
+) -> Result<(), Error> {
     let file = std::fs::File::create(path).map_err(Error::Convert)?;
     let mut archive = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
@@ -83,31 +140,124 @@ pub fn write(path: &Path, document: &Document, ua: UserAgent) -> Result<Saved, E
             .map_err(|e| Error::Convert(std::io::Error::other(e)))
     };
 
-    put(&mut archive, &format!("{stem}.md"), markdown.as_bytes())?;
-    for (name, bytes) in &images {
+    for (name, bytes) in files.iter().chain(images) {
         put(&mut archive, name, bytes)?;
     }
     archive
         .finish()
         .map_err(|e| Error::Convert(std::io::Error::other(e)))?;
+    Ok(())
+}
 
+/// Картинки заметок с диска — в архив под их ссылками.
+fn read_attached(attached: &[Attached]) -> Result<Vec<(String, Vec<u8>)>, Error> {
+    attached
+        .iter()
+        .map(|picture| {
+            let bytes = std::fs::read(&picture.path).map_err(Error::Convert)?;
+            Ok((picture.link.clone(), bytes))
+        })
+        .collect()
+}
+
+/// Картинки заметок — рядом с файлом `.md`, по их ссылкам. Имя у картинки —
+/// по содержимому, и такое же имя рядом — та же картинка: не переписываем.
+fn beside(path: &Path, attached: &[Attached]) -> Result<usize, Error> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    for picture in attached {
+        let target = dir.join(&picture.link);
+        if target.is_file() {
+            continue;
+        }
+        if let Some(folder) = target.parent() {
+            std::fs::create_dir_all(folder).map_err(Error::Convert)?;
+        }
+        std::fs::copy(&picture.path, &target).map_err(Error::Convert)?;
+    }
+    Ok(attached.len())
+}
+
+/// Как назвать выгрузку заметок: одна страница — по её заголовку,
+/// `.zip`, если есть картинки; несколько — архив, по файлу на страницу.
+pub fn notes_name(pages: &[Vec<&Note>]) -> String {
+    let pictures = pages.iter().flatten().any(|note| !note.pictures.is_empty());
+    match pages {
+        [one] => {
+            let title = one
+                .iter()
+                .max_by_key(|note| note.id)
+                .map(|note| note.title.as_str())
+                .unwrap_or_default();
+            let stem = format!("{} notes", if title.is_empty() { "Page" } else { title });
+            format!("{}.{}", slug(&stem), if pictures { "zip" } else { "md" })
+        }
+        _ => "Brevier-notes.zip".to_owned(),
+    }
+}
+
+/// Выгрузить заметки (#42), каждая страница — `notes::digest`. `.zip` —
+/// по файлу markdown на страницу и картинки в `images/`: распакованный
+/// в хранилище Obsidian, он читается как есть. Иначе — один файл markdown,
+/// страницы в нём подряд, а картинки — в папку `images/` рядом.
+pub fn notes(path: &Path, pages: &[Vec<&Note>], store: &Notes) -> Result<Saved, Error> {
+    let all: Vec<&Note> = pages.iter().flatten().copied().collect();
+    let attached = Attached::of(&all, store);
+    if !is_zip(path) {
+        let text = match pages {
+            [one] => notes::digest(one),
+            _ => notes::digest_pages(pages),
+        };
+        std::fs::write(path, text).map_err(Error::Convert)?;
+        let images = beside(path, &attached)?;
+        return Ok(Saved {
+            path: path.to_path_buf(),
+            images,
+            missed: 0,
+        });
+    }
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    for page in pages {
+        let title = page
+            .iter()
+            .max_by_key(|note| note.id)
+            .map(|note| note.title.as_str())
+            .unwrap_or_default();
+        let stem = slug(if title.is_empty() { "Page" } else { title });
+        let mut name = format!("{stem}.md");
+        let mut number = 1;
+        while files.iter().any(|(known, _)| known == &name) {
+            number += 1;
+            name = format!("{stem}-{number}.md");
+        }
+        files.push((name, notes::digest(page).into_bytes()));
+    }
+    let images = read_attached(&attached)?;
+    pack(path, &files, &images)?;
     Ok(Saved {
         path: path.to_path_buf(),
         images: images.len(),
-        missed,
+        missed: 0,
     })
 }
 
-/// Скачать картинки статьи и переписать ссылки на них.
+/// Скачать картинки статьи и переписать ссылки на них. Картинки заметок
+/// (`attached`) не трогаем: их кладут с диска.
 ///
 /// Что не отдалось — не беда: ссылка остаётся сетевой, а статья сохраняется
 /// всё равно. Потерять текст из-за одной битой картинки было бы обидно.
-fn gather(document: &Document, ua: UserAgent) -> (String, Vec<(String, Vec<u8>)>, usize) {
+fn gather(
+    document: &Document,
+    attached: &[Attached],
+    ua: UserAgent,
+) -> (String, Vec<(String, Vec<u8>)>, usize) {
     let mut markdown = document.markdown.clone();
     let mut images = Vec::new();
     let mut missed = 0;
 
     for (number, url) in markdown::images(&document.markdown).iter().enumerate() {
+        if attached.iter().any(|picture| &picture.link == url) {
+            continue;
+        }
         let Some(source) = media::resolve(&document.address, url) else {
             missed += 1;
             continue;
@@ -501,5 +651,105 @@ mod tests {
         let out = relink(md, "https://e.com/a.png", "images/01-a.png");
         assert!(!out.contains("https://e.com/a.png"), "{out}");
         assert_eq!(out.matches("images/01-a.png").count(), 2);
+    }
+
+    fn noted(dir: &Path) -> (Notes, u64, u64) {
+        let mut store = Notes::at(dir.join("data/notes.tsv"));
+        let quote = |text: &str| notes::select(text, 0, text.chars().count()).unwrap();
+        let stamp = crate::store::Stamp::of_unix(1_760_000_000, 0);
+        let one = store.add("https://e.com/a", "Lectures", quote("first"), "", stamp);
+        let two = store.add("https://e.org/b", "Lectures", quote("second"), "why", stamp);
+        let dot = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0";
+        store.attach(one, dot).unwrap();
+        (store, one, two)
+    }
+
+    #[test]
+    fn notes_go_out_as_markdown_with_their_pictures_beside() {
+        let dir = crate::scratch::Scratch::new("save-notes");
+        let (store, one, _) = noted(&dir);
+        let page = vec![store.get(one).unwrap()];
+        assert_eq!(
+            notes_name(std::slice::from_ref(&page)),
+            "Lectures-notes.zip"
+        );
+
+        let out = dir.join("vault/Lectures.md");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        let saved = notes(&out, &[page], &store).unwrap();
+        assert_eq!(saved.images, 1);
+        let text = std::fs::read_to_string(&out).unwrap();
+        let name = &store.get(one).unwrap().pictures[0];
+        assert!(text.starts_with("---\ntitle: \"Lectures\"\n"), "{text}");
+        assert!(text.contains(&format!("![](images/{name})")), "{text}");
+        assert!(dir.join("vault/images").join(name).is_file());
+    }
+
+    #[test]
+    fn all_notes_go_out_as_a_zip_with_a_file_for_each_page() {
+        let dir = crate::scratch::Scratch::new("save-notes-zip");
+        let (store, one, two) = noted(&dir);
+        let pages = vec![vec![store.get(one).unwrap()], vec![store.get(two).unwrap()]];
+        assert_eq!(notes_name(&pages), "Brevier-notes.zip");
+        let out = dir.join("notes.zip");
+        let saved = notes(&out, &pages, &store).unwrap();
+        assert_eq!(saved.images, 1);
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let mut names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+        names.sort();
+        let picture = format!("images/{}", store.get(one).unwrap().pictures[0]);
+        assert_eq!(
+            names,
+            vec![
+                "Lectures-2.md".to_owned(),
+                "Lectures.md".to_owned(),
+                picture
+            ]
+        );
+        let mut second = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("Lectures-2.md").unwrap(), &mut second)
+            .unwrap();
+        assert!(
+            second.contains(
+                "> second\n>\n> — [on the page](https://e.org/b#:~:text=second)\n\nwhy\n"
+            ),
+            "{second}"
+        );
+
+        // Одним файлом — разделами, свойства только у файла с одной страницей.
+        let out = dir.join("all.md");
+        notes(&out, &pages, &store).unwrap();
+        let text = std::fs::read_to_string(&out).unwrap();
+        assert!(
+            text.starts_with("# Your notes\n\n## [Lectures](https://e.com/a)\n"),
+            "{text}"
+        );
+        assert!(!text.contains("---\ntitle"), "{text}");
+    }
+
+    #[test]
+    fn a_saved_article_takes_the_pictures_of_its_notes_from_the_disk() {
+        let dir = crate::scratch::Scratch::new("save-noted");
+        let (store, one, _) = noted(&dir);
+        let list = vec![store.get(one).unwrap()];
+        let attached = Attached::of(&list, &store);
+        let document = Document {
+            address: crate::Address::Web("https://e.com/a".to_owned()),
+            title: "Lectures".to_owned(),
+            markdown: notes::appended("# Lectures\n\nfirst words\n", &list),
+            kind: crate::Kind::Article,
+            served: false,
+            site: Vec::new(),
+            feeds: Vec::new(),
+            lang: None,
+            next: None,
+            archived: None,
+        };
+        let out = dir.join("a.zip");
+        // Сети нет: картинка заметки берётся с диска, а не с e.com.
+        let saved = write_with(&out, &document, &attached, UserAgent::Honest).unwrap();
+        assert_eq!((saved.images, saved.missed), (1, 0));
+        let archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        assert!(archive.file_names().any(|name| name == attached[0].link));
     }
 }

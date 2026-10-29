@@ -21,10 +21,12 @@ use std::time::{Duration, Instant};
 
 mod article;
 mod formula;
+mod margin;
 mod sharp;
 
 use article::Article;
 use formula::Formula;
+use margin::{Ask, Form};
 use sharp::Sharp;
 
 use gtk::gio;
@@ -400,13 +402,22 @@ struct Tab {
 }
 
 /// Заметка на открытой странице (#39): номер, место в буфере (`None` —
-/// цитаты на странице больше нет), цитата строкой полки и приписанное.
+/// цитаты на странице больше нет), цитата строкой полки, приписанное
+/// и картинки читателя (#42) — имена файлов.
 #[derive(Clone)]
 struct Noted {
     id: u64,
     place: Option<(i32, i32)>,
     quote: String,
     text: String,
+    pictures: Vec<String>,
+}
+
+impl Noted {
+    /// Есть что показать на поле: слова или картинка.
+    fn says(&self) -> bool {
+        !self.text.is_empty() || !self.pictures.is_empty()
+    }
 }
 
 /// Сколько байтов картинок держим на вкладке, прежде чем вытеснять старые.
@@ -486,6 +497,9 @@ struct State {
     readings: Readings,
     /// Заметки к страницам (#39): `notes.tsv`.
     notes: Notes,
+    /// Показывать ли заметки рядом с текстом (#42): поле справа или под
+    /// абзацем. Выключено — только подложка.
+    show_notes: bool,
     /// Когда читатель последний раз что-то делал со страницей: листал,
     /// нажимал, водил мышью. Время чтения идёт, только пока это было
     /// недавно (`PRESENT`) и окно активно.
@@ -831,6 +845,10 @@ fn build(app: &Application, start: Vec<String>) {
 
     // Полоса прогресса (#19) — под статьёй, а не под полкой: она про текст.
     let reading_side = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    // Ширину места под статью поле заметок (#42) узнаёт от нулевого
+    // виджета рядом с ней: встать справа или под абзацами.
+    let width_watch = margin::Watch::new();
+    reading_side.append(&width_watch);
     reading_side.append(&ui.notebook);
     reading_side.append(&ui.bar);
     ui.notebook.set_vexpand(true);
@@ -869,6 +887,7 @@ fn build(app: &Application, start: Vec<String>) {
         marks: Marks::open(),
         readings: Readings::open(),
         notes: Notes::open(),
+        show_notes: settings.notes,
         last_input: Instant::now(),
         bars: Vec::new(),
         offered: None,
@@ -1166,9 +1185,13 @@ fn build(app: &Application, start: Vec<String>) {
                     }
                 }
                 Some(Row::Open(address)) => open_current(&ui, &state, address, true),
-                Some(Row::Note(_, Some(offset))) => {
+                Some(Row::Note(note, Some(offset))) => {
                     if let Some(view) = current(&ui, &state) {
                         settle(&view, offset, ANCHOR_ALIGN);
+                        // И её карточка на поле (#42) — у своей строки.
+                        if let Some(margin) = article::margin_of(&view) {
+                            margin.choose(note);
+                        }
                     }
                 }
                 // Цитаты на странице больше нет: меню скажет это и даст
@@ -1198,6 +1221,7 @@ fn build(app: &Application, start: Vec<String>) {
                 wake_tab(&ui, &state);
                 resume_place(&ui, &state);
                 rezoom_current(&ui, &state);
+                lay_current_notes(&ui, &state);
                 remember_session(&ui, &state);
             });
         });
@@ -1210,6 +1234,12 @@ fn build(app: &Application, start: Vec<String>) {
         ui.window.clone().connect_scale_factor_notify(move |_| {
             rezoom_current(&ui, &state);
         });
+    }
+
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        width_watch.set_on(move |_| lay_current_notes(&ui, &state));
     }
 
     keyboard(&ui, &state, app);
@@ -2025,14 +2055,68 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     }
     add("reload", &["<Control>r", "F5"], reload);
 
+    // Заметки рядом с текстом (#42): поле справа или под абзацем. Клавиша —
+    // как «показать примечания»; Ctrl+Alt+M — новая заметка к выделенному,
+    // как «вставить примечание» в Word.
+    let shown = gio::SimpleAction::new_stateful(
+        "show-notes",
+        None,
+        &state.borrow().show_notes.to_variant(),
+    );
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        shown.connect_activate(move |action, _| {
+            let now = !state.borrow().show_notes;
+            state.borrow_mut().show_notes = now;
+            action.set_state(&now.to_variant());
+            lay_current_notes(&ui, &state);
+            remember_settings(&ui, &state);
+            notice(
+                &ui,
+                if now {
+                    "Notes are shown beside the text"
+                } else {
+                    "Notes are hidden; the highlights stay"
+                },
+            );
+        });
+    }
+    add("show-notes", &["<Control><Shift>m"], shown);
+
+    let write = gio::SimpleAction::new("write-note", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        write.connect_activate(move |_, _| {
+            if let Some(id) = current_id(&ui, &state) {
+                mark_selection(&ui, &state, id, true);
+            }
+        });
+    }
+    add("write-note", &["<Control><Alt>m"], write);
+
+    for (name, all) in [("export-notes", false), ("export-all-notes", true)] {
+        let action = gio::SimpleAction::new(name, None);
+        let ui = ui.clone();
+        let state = state.clone();
+        action.connect_activate(move |_, _| export_notes(&ui, &state, all));
+        add(name, &[], action);
+    }
+
     // Само меню под кнопкой в шапке. Сверху — про открытую страницу, под
     // чертой — места программы в том порядке, как просили: настройки,
     // история, закладки. Архива списком нет (13 октября 2026): он — история
     // плюс закладки, только с текстом, и третьим списком лишь путал; от него
     // в меню — поиск по прочитанному, а копии — ссылками в тех двух списках.
+    // Между ними — заметки (#42): показать рядом с текстом и выгрузить.
     let page = gio::Menu::new();
     page.append(Some("Reload"), Some("app.reload"));
     page.append(Some("Check this page"), Some("app.check"));
+    let noting = gio::Menu::new();
+    noting.append(Some("Show notes beside the text"), Some("app.show-notes"));
+    noting.append(Some("Export this page's notes…"), Some("app.export-notes"));
+    noting.append(Some("Export all notes…"), Some("app.export-all-notes"));
     let places = gio::Menu::new();
     places.append(Some("Settings"), Some("app.settings"));
     places.append(Some("History"), Some("app.history"));
@@ -2041,6 +2125,7 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     places.append(Some("Search what you've read"), Some("app.search-archive"));
     let menu = gio::Menu::new();
     menu.append_section(None, &page);
+    menu.append_section(None, &noting);
     menu.append_section(None, &places);
     ui.menu.set_menu_model(Some(&menu));
 
@@ -2264,6 +2349,21 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         corner.add_controller(middle);
     }
 
+    if let Some(margin) = article::margin_of(&view) {
+        // Поле заметок (#42): просьбы карточек — окну; высота документа
+        // поменялась (догрузилась картинка, GTK досчитал строки) — карточки
+        // на свои места.
+        let ui = ui.clone();
+        let state2 = state.clone();
+        margin.set_ask(move |ask| answer_card(&ui, &state2, id, ask));
+        margin.set_color(rgba(colors(state.borrow().theme()).note_rule));
+        let weak = Rc::downgrade(&margin);
+        scroller.vadjustment().connect_changed(move |_| {
+            if let Some(margin) = weak.upgrade() {
+                margin.queue();
+            }
+        });
+    }
     {
         // Читатель прокрутил страницу — полка отмечает, куда он доехал.
         let ui = ui.clone();
@@ -2330,7 +2430,14 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                 let Some(tab) = borrowed.find(id) else { return };
                 note_at(&view, &tab.notes, x, y).map(|note| note.id)
             };
-            if let Some(note) = note {
+            // Карточка на поле есть — щелчок выбирает её (#42), меню у неё
+            // своё; нет — меню у отмеченного, как было.
+            let chosen = note.is_some_and(|note| {
+                article::margin_of(&view).is_some_and(|margin| margin.choose(note))
+            });
+            if let Some(note) = note
+                && !chosen
+            {
                 note_menu(&ui, &state, id, note, view.upcast_ref(), Some((x, y)));
             }
         });
@@ -2375,13 +2482,23 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         // для сервера: трогаем, только когда ссылка появилась или кончилась.
         let was_over = Cell::new(false);
         hover.connect_motion(move |_, x, y| {
-            let over = {
+            let (over, note) = {
                 let mut borrowed = state.borrow_mut();
                 let Some(tab) = borrowed.find(id) else { return };
-                link_at(&view, &tab.links, x, y).is_some()
+                (
+                    link_at(&view, &tab.links, x, y).is_some(),
+                    note_at(&view, &tab.notes, x, y).map(|note| note.id),
+                )
             };
             if over != was_over.replace(over) {
                 view.set_cursor_from_name(Some(if over { "pointer" } else { "text" }));
+            }
+            // Над отмеченным — его линия к карточке в полный цвет (#42).
+            // Над самой карточкой решает она: сюда доходит и её движение.
+            if in_text(&view, x)
+                && let Some(margin) = article::margin_of(&view)
+            {
+                margin.hover(note);
             }
         });
     }
@@ -2407,8 +2524,11 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                         link_at(&view, &tab.links, x as f64, y as f64)
                             .map(|link| link.target.clone())
                             .or_else(|| {
+                                // Слова на поле видны и так (#42).
+                                let shown = article::margin_of(&view)
+                                    .is_some_and(|margin| margin.form() != Form::Hidden);
                                 note_at(&view, &tab.notes, x as f64, y as f64)
-                                    .filter(|note| !note.text.is_empty())
+                                    .filter(|note| !note.text.is_empty() && !shown)
                                     .map(|note| note.text.clone())
                             })
                     })
@@ -2832,6 +2952,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         plain_archive: borrowed.plain_archive,
         // Шапка, что уезжает, — у телефона (#45); у окна её нет.
         slide_bar: Settings::default().slide_bar,
+        notes: borrowed.show_notes,
         typography: borrowed.typography,
     }
     .save();
@@ -3512,6 +3633,7 @@ fn show_document(
     }
     drop(borrowed);
     place_notes(state, id);
+    lay_notes(state, id, None);
     sync(ui, state, None);
     resume_place(ui, state);
     remember_session(ui, state);
@@ -3804,11 +3926,13 @@ fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
         recolor(&tab.view.buffer(), theme);
         if let Some(article) = tab.view.downcast_ref::<Article>() {
             article.set_rule_color(rule_color(theme));
+            article.margin().set_color(rgba(colors(theme).note_rule));
         }
     }
     // Картинки с прозрачным легли на бумагу прежнего контраста: открытую
     // вкладку перерисовываем сразу, фоновые — при показе.
     rezoom_current(ui, state);
+    lay_current_notes(ui, state);
 }
 
 /// Высокий контраст, о котором просит система (#44): пока читатель сам
@@ -4003,6 +4127,7 @@ fn page_css(theme: Theme) -> String {
     let (paper, ink, shelf) = (colors.paper, colors.ink, colors.shelf);
     let (dim, rule) = (colors.dim, colors.rule);
     let (chosen, touched) = (colors.chosen, colors.touched);
+    let note_rule = colors.note_rule;
 
     format!(
         // Шапка и окно — в тот же тёплый ряд, что и бумага. Иначе слоновая
@@ -4035,7 +4160,18 @@ fn page_css(theme: Theme) -> String {
          .formula {{ padding: 0 2px; min-height: 0; min-width: 0; color: {dim}; }}\n\
          .table {{ margin: 10px 0 14px 0; }}\n\
          .table separator {{ background-color: {rule}; min-height: 1px; }}\n\
-         .th {{ font-weight: 500; }}\n"
+         .th {{ font-weight: 500; }}\n\
+         .margin-note {{ background-color: {shelf}; border-left: 3px solid {note_rule}; \
+                         border-radius: 0 6px 6px 0; padding: 6px 10px; }}\n\
+         .margin-note.active {{ background-color: {chosen}; }}\n\
+         .margin-note.editing {{ background-color: {paper}; \
+                                 box-shadow: inset 0 0 0 1px {note_rule}; }}\n\
+         .margin-note-said {{ color: {ink}; }}\n\
+         .margin-note-field, .margin-note-field text {{ background-color: transparent; \
+                                                        color: {ink}; }}\n\
+         .margin-note-menu {{ min-height: 0; min-width: 0; padding: 0 2px; opacity: 0.55; }}\n\
+         .margin-note-menu:hover {{ opacity: 1; }}\n\
+         .margin-note-picture {{ border-radius: 3px; }}\n"
     )
 }
 
@@ -4067,7 +4203,7 @@ fn recolor(buffer: &gtk::TextBuffer, theme: Theme) {
     paint("lit", "foreground", colors.literal);
     paint("num", "foreground", colors.number);
     paint("com", "foreground", colors.comment);
-    paint("note", "background", colors.note);
+    paint("highlight", "background", colors.note);
     if let Some(tag) = table.lookup("noted") {
         tag.set_property("underline-rgba", rgba(colors.note_rule));
     }
@@ -4214,6 +4350,9 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.contrast_seen = high;
         }
     }
+    // Подложки заметок ушли вместе с текстом, поле — под новую меру.
+    place_notes(state, id);
+    lay_notes(state, id, None);
     sync(ui, state, None);
 
     // Картинки декодируются под меру, а мера уехала: заглушки ставим заново
@@ -4332,6 +4471,7 @@ fn measure_px() -> i32 {
 fn fit_column(view: &gtk::TextView) {
     let gutter = text_px().round() as i32;
     view.set_width_request(measure_px());
+    view.set_right_margin(0);
     view.set_margin_start(gutter);
     view.set_margin_end(gutter);
 }
@@ -4791,6 +4931,9 @@ fn link_at<'a>(
     x: f64,
     y: f64,
 ) -> Option<&'a page::Link> {
+    if !in_text(view, x) {
+        return None;
+    }
     let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
     let (iter, _) = view.iter_at_position(bx, by)?;
     let offset = iter.offset() as usize;
@@ -4811,6 +4954,10 @@ fn link_at<'a>(
 fn wipe(view: &gtk::TextView) {
     if view.focus_child().is_some() {
         view.grab_focus();
+    }
+    // Поле заметок (#42) — тоже дети текста, и их теги — в его буфере.
+    if let Some(margin) = article::margin_of(view) {
+        margin.clear();
     }
     let buffer = view.buffer();
     let mut at = buffer.start_iter();
@@ -5178,8 +5325,11 @@ fn tags(buffer: &gtk::TextBuffer, theme: Theme, scale: f32, typography: &Type) {
 
     // Заметки читателя (#39): подложка отмеченного и черта под тем, к чему
     // приписаны слова. До отметки клавиатуры и подсветки поиска: те важнее
-    // в ту минуту, когда они есть, и ложатся поверх.
-    style(buffer, "note", &[("background", &colors.note)]);
+    // в ту минуту, когда они есть, и ложатся поверх. Имя — не «note»: так
+    // зовётся сноска (выше), и до 29 октября 2026 подложка была с ней одним
+    // тегом — отмеченное с начала абзаца брало отступ и кегль сноски,
+    // а сноски — зелёную подложку.
+    style(buffer, "highlight", &[("background", &colors.note)]);
     style(
         buffer,
         "noted",
@@ -6427,12 +6577,14 @@ fn ask_where_to_save(ui: &Ui, state: &Rc<RefCell<State>>) {
         notice(ui, "Nothing to save yet");
         return;
     };
-    // Заметки едут в файл вместе со статьёй (#39): в конце, своим разделом.
-    {
+    // Заметки едут в файл вместе со статьёй (#39): в конце, своим разделом,
+    // а их картинки (#42) — рядом с картинками статьи.
+    let attached = {
         let borrowed = state.borrow();
         let notes = borrowed.notes.of(&document.address.display());
         document.markdown = notes::appended(&document.markdown, &notes);
-    }
+        save::Attached::of(&notes, &borrowed.notes)
+    };
 
     let chooser = gtk::FileDialog::builder()
         .title("Save article")
@@ -6449,7 +6601,7 @@ fn ask_where_to_save(ui: &Ui, state: &Rc<RefCell<State>>) {
         let Some(path) = answer.ok().and_then(|file| file.path()) else {
             return;
         };
-        save_to(&ui, path, document.clone());
+        save_to(&ui, path, document.clone(), attached.clone());
     });
 }
 
@@ -6457,12 +6609,14 @@ fn ask_where_to_save(ui: &Ui, state: &Rc<RefCell<State>>) {
 ///
 /// Картинки для архива качаются здесь же, поэтому работа уходит в отдельный
 /// поток: десяток иллюстраций — это десяток сетевых запросов.
-fn save_to(ui: &Ui, path: std::path::PathBuf, document: Document) {
+fn save_to(ui: &Ui, path: std::path::PathBuf, document: Document, attached: Vec<save::Attached>) {
     notice(ui, "Saving…");
     let ui = ui.clone();
 
     glib::spawn_future_local(async move {
-        let done = off_main(move || save::write(&path, &document, UserAgent::Honest)).await;
+        let done =
+            off_main(move || save::write_with(&path, &document, &attached, UserAgent::Honest))
+                .await;
 
         match done {
             Ok(Ok(saved)) => {
@@ -6793,7 +6947,7 @@ fn place_notes(state: &Rc<RefCell<State>>, id: u64) {
     };
     let buffer = view.buffer();
     let (start, end) = buffer.bounds();
-    buffer.remove_tag_by_name("note", &start, &end);
+    buffer.remove_tag_by_name("highlight", &start, &end);
     buffer.remove_tag_by_name("noted", &start, &end);
     let list: Vec<notes::Note> = {
         let mut borrowed = state.borrow_mut();
@@ -6818,6 +6972,7 @@ fn place_notes(state: &Rc<RefCell<State>>, id: u64) {
                 place: spot.place.map(|(from, to)| (from as i32, to as i32)),
                 quote: notes::preview(&note.quote),
                 text: note.text.clone(),
+                pictures: note.pictures.clone(),
             });
         }
         noted.sort_by_key(|note| note.place.map_or(i32::MAX, |(from, _)| from));
@@ -6826,7 +6981,7 @@ fn place_notes(state: &Rc<RefCell<State>>, id: u64) {
                 continue;
             };
             let (from, to) = (buffer.iter_at_offset(from), buffer.iter_at_offset(to));
-            buffer.apply_tag_by_name("note", &from, &to);
+            buffer.apply_tag_by_name("highlight", &from, &to);
             if !note.text.is_empty() {
                 buffer.apply_tag_by_name("noted", &from, &to);
             }
@@ -6837,17 +6992,414 @@ fn place_notes(state: &Rc<RefCell<State>>, id: u64) {
     }
 }
 
-/// Заметки поменялись: закрасить заново, полка и полоса — следом.
+/// Заметки поменялись: закрасить заново, поле, полка и полоса — следом.
 fn after_notes(ui: &Ui, state: &Rc<RefCell<State>>, id: u64) {
+    after_notes_with(ui, state, id, None);
+}
+
+/// То же, а `fresh` — только что заведённая заметка: её карточка на поле
+/// встаёт и пустой, с курсором (#42).
+fn after_notes_with(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, fresh: Option<u64>) {
     place_notes(state, id);
+    lay_notes(state, id, fresh);
     if current_id(ui, state) == Some(id) {
         sync(ui, state, None);
         ui.bar.queue_draw();
     }
 }
 
+// ── поле заметок (#42) ──────────────────────────────────────────────────────
+
+/// Ширина карточки сбоку, в кеглях текста: около 30 знаков её кегля.
+/// Уже не стоит — поле перестаёт помещаться рядом с полкой в окне 1400.
+const MARGIN_CARD: f32 = 12.0;
+/// Справа от карточки — узкая полоса, а не поле колонки: у карточки свои
+/// поля, а место нужнее ей.
+const MARGIN_END: i32 = 8;
+/// Кегль слов заметки — доля кегля текста: это поля, а не текст.
+const MARGIN_TYPE: f64 = 0.82;
+
+/// Размеры и вид поля под нынешние ступень, набор и тему.
+fn margin_room(state: &State, view: &gtk::TextView) -> margin::Room {
+    set_scale(state);
+    let text = text_px();
+    margin::Room {
+        text: measure_px(),
+        gap: text.round() as i32,
+        card: (text * MARGIN_CARD).round() as i32,
+        points: f64::from(TEXT_SIZE) * zoom() * MARGIN_TYPE,
+        family: state.typography.face.family().to_owned(),
+        paper: picture_paper(state.theme()),
+        density: view.scale_factor().max(1) as f32,
+        font_px: text,
+    }
+}
+
+/// Где показывать заметки вкладки: решает настройка, а потом место.
+/// Справа — если влезают колонка с полями и поле; иначе — под абзацем:
+/// колонку уже меры не ужимаем, полку не прячем.
+fn margin_form(state: &State, view: &gtk::TextView, room: &margin::Room) -> Form {
+    if !state.show_notes {
+        return Form::Hidden;
+    }
+    let room_for = view.parent().map_or(0, |scroller| scroller.width());
+    let gutter = text_px().round() as i32;
+    if room_for >= measure_px() + gutter + room.gap + room.card + MARGIN_END {
+        Form::Side
+    } else {
+        Form::Under
+    }
+}
+
+/// Колонка под форму поля: сбоку виджет шире на поле, а текст — той же
+/// меры, поле справа — правое поле самого текста.
+fn fit_margin(view: &gtk::TextView, room: &margin::Room, form: Form) {
+    let panel = if form == Form::Side {
+        room.gap + room.card
+    } else {
+        0
+    };
+    if view.right_margin() != panel {
+        view.set_width_request(measure_px() + panel);
+        view.set_right_margin(panel);
+        view.set_margin_end(if form == Form::Side {
+            MARGIN_END
+        } else {
+            text_px().round() as i32
+        });
+    }
+}
+
+/// Показать заметки вкладки на поле. Карточка — у заметки со словами или
+/// картинкой и местом на странице; просто отметка остаётся подложкой.
+fn lay_notes(state: &Rc<RefCell<State>>, id: u64, fresh: Option<u64>) {
+    let Some(view) = view_of(state, id) else {
+        return;
+    };
+    let Some(margin) = article::margin_of(&view) else {
+        return;
+    };
+    let (cards, room, form) = {
+        let borrowed = state.borrow();
+        let Some(tab) = borrowed.tabs.iter().find(|tab| tab.id == id) else {
+            return;
+        };
+        let room = margin_room(&borrowed, &view);
+        let form = if tab.progress.is_some() && tab.history.current().is_some() {
+            margin_form(&borrowed, &view, &room)
+        } else {
+            Form::Hidden
+        };
+        let cards: Vec<margin::Card> = tab
+            .notes
+            .iter()
+            .filter(|note| note.says() || Some(note.id) == fresh)
+            .filter_map(|note| {
+                Some(margin::Card {
+                    id: note.id,
+                    place: note.place?,
+                    text: note.text.clone(),
+                    pictures: note
+                        .pictures
+                        .iter()
+                        .filter_map(|name| Some((name.clone(), borrowed.notes.picture(name)?)))
+                        .collect(),
+                })
+            })
+            .collect();
+        (cards, room, form)
+    };
+    fit_margin(&view, &room, form);
+    margin.show(cards, form, room, fresh);
+}
+
+/// Поле открытой вкладки — заново: сменилась ширина окна, тема, вкладка.
+fn lay_current_notes(ui: &Ui, state: &Rc<RefCell<State>>) {
+    if let Some(id) = current_id(ui, state) {
+        lay_notes(state, id, None);
+    }
+}
+
+/// Ответить карточке поля.
+fn answer_card(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, ask: Ask) {
+    match ask {
+        Ask::Edit(note, words) => {
+            state.borrow_mut().notes.edit(note, &words);
+            after_notes(ui, state, id);
+        }
+        Ask::Remove(note) => {
+            state.borrow_mut().notes.remove(note);
+            after_notes(ui, state, id);
+            notice(ui, "Note removed");
+        }
+        Ask::Attach(_, bytes) if bytes.is_empty() => {
+            notice(ui, "There is no picture to paste");
+        }
+        Ask::Attach(note, bytes) => attach_picture(ui, state, id, note, bytes),
+        Ask::AttachFile(note, path) => attach_file(ui, state, id, note, path),
+        Ask::Pick(note) => pick_picture(ui, state, id, note),
+        Ask::Detach(note, name) => {
+            state.borrow_mut().notes.detach(note, &name);
+            after_notes(ui, state, id);
+            notice(ui, "Picture removed");
+        }
+        Ask::Show(path) => show_picture(ui, state, &path),
+    }
+}
+
+/// Самая большая картинка, которую вообще читаем с диска для заметки:
+/// больше — это уже не картинка к абзацу, а что-то не то.
+const PICTURE_FILE: u64 = 64 * 1024 * 1024;
+
+/// Картинку — в заметку: уменьшить, если совсем большая, и положить.
+/// Разбор картинки — не в главном потоке.
+fn attach_picture(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, note: u64, bytes: Vec<u8>) {
+    let ui = ui.clone();
+    let state = state.clone();
+    glib::spawn_future_local(async move {
+        let fitted = off_main(move || notes::fitted(&bytes, media::Shrink::WINDOW)).await;
+        let fitted = match fitted {
+            Ok(Ok(fitted)) => fitted,
+            Ok(Err(unkept)) => return notice(&ui, unkept.headline()),
+            Err(_) => return notice(&ui, notes::Unkept::NotAPicture.headline()),
+        };
+        let kept = state.borrow_mut().notes.attach(note, &fitted);
+        match kept {
+            Ok(_) => {
+                after_notes(&ui, &state, id);
+                notice(&ui, "Picture added to the note");
+            }
+            Err(unkept) => notice(&ui, unkept.headline()),
+        }
+    });
+}
+
+/// Картинку из файла — в заметку.
+fn attach_file(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, note: u64, path: std::path::PathBuf) {
+    let ui = ui.clone();
+    let state = state.clone();
+    glib::spawn_future_local(async move {
+        let read = off_main(move || {
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            if size > PICTURE_FILE {
+                return Err(notes::Unkept::TooLarge);
+            }
+            std::fs::read(&path).map_err(|_| notes::Unkept::Nowhere)
+        })
+        .await;
+        match read {
+            Ok(Ok(bytes)) => attach_picture(&ui, &state, id, note, bytes),
+            Ok(Err(unkept)) => notice(&ui, unkept.headline()),
+            Err(_) => notice(&ui, notes::Unkept::Nowhere.headline()),
+        }
+    });
+}
+
+/// Выбрать картинку к заметке диалогом.
+fn pick_picture(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, note: u64) {
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some("Pictures"));
+    for kind in ["image/png", "image/jpeg", "image/gif", "image/webp"] {
+        filter.add_mime_type(kind);
+    }
+    for pattern in ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"] {
+        filter.add_pattern(pattern);
+    }
+    let filters = gio::ListStore::new::<gtk::FileFilter>();
+    filters.append(&filter);
+    let chooser = gtk::FileDialog::builder()
+        .title("Add a picture to the note")
+        .filters(&filters)
+        .default_filter(&filter)
+        .modal(true)
+        .build();
+    let ui2 = ui.clone();
+    let state = state.clone();
+    chooser.open(Some(&ui.window), gio::Cancellable::NONE, move |answer| {
+        if let Some(path) = answer.ok().and_then(|file| file.path()) {
+            attach_file(&ui2, &state, id, note, path);
+        }
+    });
+}
+
+/// Картинка заметки крупно — отдельным окном поверх, Escape или щелчок
+/// закрывают. Разбирает её ядро, как и всё остальное: декодеры свои.
+fn show_picture(ui: &Ui, state: &Rc<RefCell<State>>, path: &std::path::Path) {
+    let (width, height) = (ui.window.width().max(400), ui.window.height().max(300));
+    let window = gtk::Window::builder()
+        .title("Your picture")
+        .transient_for(&ui.window)
+        .modal(true)
+        .default_width(width * 4 / 5)
+        .default_height(height * 4 / 5)
+        .build();
+    window.add_css_class("page");
+    // Мельче окна — как есть: растянутая картинка — мыло.
+    let picture = gtk::Picture::builder()
+        .can_shrink(true)
+        .content_fit(gtk::ContentFit::ScaleDown)
+        .build();
+    picture.add_css_class("page");
+    window.set_child(Some(&picture));
+    let keys = gtk::EventControllerKey::new();
+    {
+        let window = window.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                window.close();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    window.add_controller(keys);
+    let click = gtk::GestureClick::new();
+    {
+        let window = window.clone();
+        click.connect_released(move |_, _, _, _| window.close());
+    }
+    picture.add_controller(click);
+    window.present();
+
+    let look = media::Look {
+        width: (width * 4 / 5).max(1) as u32,
+        paper: picture_paper(state.borrow().theme()),
+        font_size: text_px(),
+        fit: media::Fit::Column,
+        density: density(ui) as f32,
+    };
+    let path = path.to_path_buf();
+    glib::spawn_future_local(async move {
+        let raster = off_main(move || {
+            let bytes = std::fs::read(&path).map_err(brevier::Error::Convert)?;
+            media::decode(&bytes, None, look)
+        })
+        .await;
+        if let Ok(Ok(raster)) = raster {
+            let texture = gtk::gdk::MemoryTexture::new(
+                raster.width as i32,
+                raster.height as i32,
+                gtk::gdk::MemoryFormat::R8g8b8a8,
+                &glib::Bytes::from_owned(raster.rgba),
+                raster.width as usize * 4,
+            );
+            picture.set_paintable(Some(&Sharp::new(texture.upcast_ref(), raster.density)));
+        }
+    });
+}
+
+/// Выгрузить заметки (#42): открытой страницы или все. Имя и вид файла
+/// предлагает ядро (`save::notes_name`); `.zip` — по файлу на страницу,
+/// `.md` — картинки в папку `images/` рядом.
+fn export_notes(ui: &Ui, state: &Rc<RefCell<State>>, all: bool) {
+    let addresses: Vec<String> = {
+        let borrowed = state.borrow();
+        if all {
+            // Свежие страницы — первыми, как на странице заметок.
+            let mut addresses: Vec<String> = Vec::new();
+            for note in borrowed.notes.all().iter().rev() {
+                if !addresses.contains(&note.address) {
+                    addresses.push(note.address.clone());
+                }
+            }
+            addresses
+        } else {
+            let index = ui.notebook.current_page().map(|page| page as usize);
+            index
+                .and_then(|index| borrowed.tabs.get(index))
+                .and_then(|tab| tab.progress.as_ref())
+                .map(|progress| progress.address.clone())
+                .filter(|address| !borrowed.notes.of(address).is_empty())
+                .into_iter()
+                .collect()
+        }
+    };
+    if addresses.is_empty() {
+        notice(
+            ui,
+            if all {
+                "No notes yet"
+            } else {
+                "No notes on this page"
+            },
+        );
+        return;
+    }
+    let name = {
+        let borrowed = state.borrow();
+        let pages: Vec<Vec<&notes::Note>> = addresses
+            .iter()
+            .map(|address| borrowed.notes.of(address))
+            .collect();
+        save::notes_name(&pages)
+    };
+    let chooser = gtk::FileDialog::builder()
+        .title(if all {
+            "Export all notes"
+        } else {
+            "Export the notes"
+        })
+        .initial_name(name)
+        .modal(true)
+        .build();
+    let ui2 = ui.clone();
+    chooser.save(Some(&ui.window), gio::Cancellable::NONE, move |answer| {
+        let Some(path) = answer.ok().and_then(|file| file.path()) else {
+            return;
+        };
+        notice(&ui2, "Exporting…");
+        let ui = ui2.clone();
+        let addresses = addresses.clone();
+        glib::spawn_future_local(async move {
+            // Заметки — с диска, как их записало окно: состояние окна
+            // в другой поток не уходит.
+            let done = off_main(move || {
+                let store = Notes::open();
+                let pages: Vec<Vec<&notes::Note>> = addresses
+                    .iter()
+                    .map(|address| store.of(address))
+                    .filter(|page| !page.is_empty())
+                    .collect();
+                save::notes(&path, &pages, &store)
+            })
+            .await;
+            match done {
+                Ok(Ok(saved)) => {
+                    let name = saved
+                        .path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let mut said = format!("Notes exported as {name}");
+                    if saved.images > 0 {
+                        said.push_str(&format!(
+                            " · {}",
+                            count(saved.images, "picture", "pictures")
+                        ));
+                    }
+                    notice(&ui, &said);
+                }
+                Ok(Err(error)) => {
+                    notice(&ui, &format!("Not exported: {}", describe(&error).headline));
+                }
+                Err(_) => notice(&ui, "Not exported: the write was interrupted"),
+            }
+        });
+    });
+}
+
+/// Точка окна — над текстом, а не над полем заметок справа (#42): там
+/// строка «продолжается» до карточки, и ближайшим знаком вышла бы
+/// ссылка в конце строки.
+fn in_text(view: &gtk::TextView, x: f64) -> bool {
+    x < f64::from(view.width() - view.right_margin())
+}
+
 /// Заметка под точкой окна: нажатое отмеченное.
 fn note_at<'a>(view: &gtk::TextView, notes: &'a [Noted], x: f64, y: f64) -> Option<&'a Noted> {
+    if !in_text(view, x) {
+        return None;
+    }
     let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
     let (iter, _) = view.iter_at_position(bx, by)?;
     let offset = iter.offset();
@@ -6895,6 +7447,21 @@ fn mark_selection(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, write: bool) {
     };
     // Выделение снимаем: отмеченное видно своей подложкой.
     buffer.place_cursor(&buffer.iter_at_offset(to));
+    // Поле заметок показано (#42) — слова пишут прямо в карточке на нём,
+    // как примечание в Word: пустая заметка встаёт с курсором.
+    let on_margin =
+        write && article::margin_of(&view).is_some_and(|margin| margin.form() != Form::Hidden);
+    if on_margin {
+        let note = state.borrow_mut().notes.add(
+            &address,
+            &title,
+            selection,
+            "",
+            store::Stamp::now(local_offset()),
+        );
+        after_notes_with(ui, state, id, Some(note));
+        return;
+    }
     let keep = {
         let ui = ui.clone();
         let state = state.clone();
@@ -7085,8 +7652,18 @@ fn note_menu(
     } else {
         "Edit the note…"
     });
+    let picture = item("Add a picture…");
     let remove = item("Remove");
     popover.set_child(Some(&column));
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let popover = popover.clone();
+        picture.connect_clicked(move |_| {
+            popover.popdown();
+            pick_picture(&ui, &state, id, note);
+        });
+    }
     {
         let ui = ui.clone();
         let state = state.clone();

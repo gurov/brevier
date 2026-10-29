@@ -29,6 +29,18 @@
 //! и закладки. Страница с заметками держит свою последнюю копию в архиве
 //! навсегда — как страница из закладок: у заметок всегда есть текст,
 //! к которому они написаны.
+//!
+//! **Картинки — тоже заметка читателя** (#42, 28 октября 2026): карту
+//! или схему, найденную где-то ещё, кладут к абзацу. В статью она
+//! не встаёт: слова и картинки автора остаются авторскими. Модель
+//! W3C Web Annotation это и позволяет — тело заметки бывает картинкой.
+//! Файл — в папке [`PICTURES`] рядом с `notes.tsv`, имя — по содержимому,
+//! в строке заметки — только имя. Живёт, пока на него ссылается хоть одна
+//! заметка; «забыть всё» его не трогает, как и сами заметки.
+//!
+//! **Выгрузка** — [`digest`]: заметки страницы конспектом в markdown,
+//! который Obsidian и Affine читают как есть, со ссылкой на место цитаты
+//! в обычном браузере.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -47,6 +59,17 @@ pub const MAX_QUOTE: usize = 4000;
 /// Сколько знаков цитаты показывать строкой полки.
 pub const PREVIEW: usize = 90;
 
+/// Папка картинок заметок — рядом с `notes.tsv`.
+pub const PICTURES: &str = "notes";
+
+/// Потолок картинки в заметке — уже после уменьшения: тот же, что
+/// у картинки со страницы (`media::MAX_IMAGE`).
+pub const MAX_PICTURE: usize = 8 * 1024 * 1024;
+
+/// Ссылка на место цитаты: длинная цитата — столько слов с начала
+/// и столько с конца.
+const FRAGMENT_WORDS: usize = 4;
+
 /// Заметка: где она и что в ней.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
@@ -64,6 +87,16 @@ pub struct Note {
     pub after: String,
     /// Что приписал читатель. Пусто — просто отметка.
     pub text: String,
+    /// Картинки читателя: имена файлов в папке [`PICTURES`], по порядку.
+    pub pictures: Vec<String>,
+}
+
+impl Note {
+    /// Есть что показать рядом с текстом: слова или картинка. Без них
+    /// заметка — просто отметка, и место ей — подложка в самом тексте.
+    pub fn says(&self) -> bool {
+        !self.text.is_empty() || !self.pictures.is_empty()
+    }
 }
 
 /// Выделенное, готовое стать заметкой.
@@ -92,6 +125,88 @@ impl Refusal {
             Refusal::TooLong => "Select less: a note marks a passage, not a page",
         }
     }
+}
+
+/// Почему картинка в заметку не легла.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unkept {
+    /// Не PNG, JPEG, GIF или WebP — или не картинка вовсе.
+    NotAPicture,
+    /// Больше [`MAX_PICTURE`] и после уменьшения.
+    TooLarge,
+    /// Заметки уже нет или файл не записался.
+    Nowhere,
+}
+
+impl Unkept {
+    /// Что сказать читателю.
+    pub fn headline(self) -> &'static str {
+        match self {
+            Unkept::NotAPicture => "A note takes PNG, JPEG, GIF and WebP pictures",
+            Unkept::TooLarge => "The picture is too large for a note",
+            Unkept::Nowhere => "The picture could not be kept",
+        }
+    }
+}
+
+/// Тип картинки по подписи в первых байтах — расширение файла. Только
+/// растр, который разбирает `media`: svg из буфера обмена — редкость,
+/// а вектор — своя поверхность атаки (`media::vector`).
+pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
+    let starts = |magic: &[u8]| bytes.starts_with(magic);
+    if starts(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if starts(b"\xff\xd8\xff") {
+        Some("jpg")
+    } else if starts(b"GIF87a") || starts(b"GIF89a") {
+        Some("gif")
+    } else if starts(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
+/// Имя картинки — по содержимому: та же картинка у двух заметок — один
+/// файл, и имя не выдаёт ничего, кроме себя.
+fn picture_name(bytes: &[u8], kind: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}.{kind}")
+}
+
+/// Наше ли это имя: шестнадцать цифр и расширение картинки. Строку
+/// `notes.tsv` правят руками, и `../` из неё не должно увести из папки.
+pub fn is_picture_name(name: &str) -> bool {
+    let Some((stem, kind)) = name.split_once('.') else {
+        return false;
+    };
+    stem.len() == 16
+        && stem.bytes().all(|b| b.is_ascii_hexdigit())
+        && matches!(kind, "png" | "jpg" | "gif" | "webp")
+}
+
+/// Картинка для заметки — уменьшенная, если «совсем большая» (решение
+/// мейнтейнера 29 октября 2026: только такие). Что такое «совсем» —
+/// у окна и телефона своё: [`media::Shrink`]. Не картинка или не влезла
+/// и после — отказ.
+#[cfg(feature = "images")]
+pub fn fitted(bytes: &[u8], limit: crate::media::Shrink) -> Result<Vec<u8>, Unkept> {
+    if picture_kind(bytes).is_none() {
+        return Err(Unkept::NotAPicture);
+    }
+    let bytes = match crate::media::shrink(bytes, limit) {
+        Ok(Some(smaller)) => smaller,
+        Ok(None) => bytes.to_vec(),
+        Err(_) => return Err(Unkept::NotAPicture),
+    };
+    if bytes.len() > MAX_PICTURE {
+        return Err(Unkept::TooLarge);
+    }
+    Ok(bytes)
 }
 
 /// Где заметка на открытой странице: `[from, to)` в знаках текста страницы.
@@ -311,6 +426,84 @@ impl Notes {
         self.entries.iter().find(|note| note.id == id)
     }
 
+    /// Папка картинок заметок.
+    pub fn pictures_dir(&self) -> Option<PathBuf> {
+        Some(self.path.as_ref()?.parent()?.join(PICTURES))
+    }
+
+    /// Файл картинки по имени из заметки. Чужое имя — `None`.
+    pub fn picture(&self, name: &str) -> Option<PathBuf> {
+        if !is_picture_name(name) {
+            return None;
+        }
+        Some(self.pictures_dir()?.join(name))
+    }
+
+    /// Положить картинку к заметке. Байты — как есть: уменьшает, если
+    /// надо, [`fitted`]. Ответ — имя файла.
+    pub fn attach(&mut self, id: u64, bytes: &[u8]) -> Result<String, Unkept> {
+        let kind = picture_kind(bytes).ok_or(Unkept::NotAPicture)?;
+        if bytes.len() > MAX_PICTURE {
+            return Err(Unkept::TooLarge);
+        }
+        if self.get(id).is_none() {
+            return Err(Unkept::Nowhere);
+        }
+        let name = picture_name(bytes, kind);
+        let path = self.picture(&name).ok_or(Unkept::Nowhere)?;
+        // Та же картинка уже лежит — у другой заметки или от прошлого раза.
+        if !path.is_file() {
+            let dir = path.parent().ok_or(Unkept::Nowhere)?;
+            fs::create_dir_all(dir).map_err(|_| Unkept::Nowhere)?;
+            // Сначала рядом, потом под своё имя: оборванная запись
+            // не оставит полкартинки под настоящим именем.
+            let part = dir.join(format!("{name}.part"));
+            if fs::write(&part, bytes)
+                .and_then(|()| fs::rename(&part, &path))
+                .is_err()
+            {
+                let _ = fs::remove_file(&part);
+                return Err(Unkept::Nowhere);
+            }
+        }
+        let Some(note) = self.entries.iter_mut().find(|note| note.id == id) else {
+            return Err(Unkept::Nowhere);
+        };
+        if !note.pictures.contains(&name) {
+            note.pictures.push(name.clone());
+        }
+        self.write();
+        Ok(name)
+    }
+
+    /// Убрать картинку из заметки. Файл уходит, если больше ни у кого.
+    pub fn detach(&mut self, id: u64, name: &str) -> bool {
+        let Some(note) = self.entries.iter_mut().find(|note| note.id == id) else {
+            return false;
+        };
+        let before = note.pictures.len();
+        note.pictures.retain(|known| known != name);
+        if note.pictures.len() == before {
+            return false;
+        }
+        self.write();
+        self.forget_unused(&[name.to_owned()]);
+        true
+    }
+
+    /// Стереть файлы картинок, на которые больше не ссылается ни одна
+    /// заметка.
+    fn forget_unused(&self, names: &[String]) {
+        for name in names {
+            if self.entries.iter().any(|note| note.pictures.contains(name)) {
+                continue;
+            }
+            if let Some(path) = self.picture(name) {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
     /// Новая заметка. Ответ — её номер.
     pub fn add(
         &mut self,
@@ -331,6 +524,7 @@ impl Notes {
             quote: selection.quote,
             after: selection.after,
             text: text.trim().to_owned(),
+            pictures: Vec::new(),
         });
         self.write();
         id
@@ -347,13 +541,13 @@ impl Notes {
     }
 
     pub fn remove(&mut self, id: u64) -> bool {
-        let before = self.entries.len();
-        self.entries.retain(|note| note.id != id);
-        let removed = self.entries.len() != before;
-        if removed {
-            self.write();
-        }
-        removed
+        let Some(index) = self.entries.iter().position(|note| note.id == id) else {
+            return false;
+        };
+        let gone = self.entries.remove(index);
+        self.write();
+        self.forget_unused(&gone.pictures);
+        true
     }
 
     /// Адреса страниц с заметками: архив держит их копии.
@@ -410,7 +604,9 @@ impl Notes {
                 ));
             }
             out.push_str(&format!("{line}\n\n"));
-            out.push_str(&entries(&notes));
+            // Картинки — из своей папки: `media::resolve` пускает к ним
+            // только эту страницу.
+            out.push_str(&entries(&notes, PICTURES));
         }
         if let Some(path) = &self.path {
             out.push_str(&format!(
@@ -433,30 +629,51 @@ impl Notes {
     }
 }
 
-/// Заметки markdown-ом: цитата цитатой, приписанное — абзацем под ней.
-/// Читается где угодно; Obsidian и Logseq берут такое как есть.
-pub fn entries(notes: &[&Note]) -> String {
+/// Заметки markdown-ом: цитата цитатой, приписанное — абзацем под ней,
+/// картинки — ссылками в папку `folder`. Читается где угодно; Obsidian
+/// и Logseq берут такое как есть.
+pub fn entries(notes: &[&Note], folder: &str) -> String {
     let mut out = String::new();
     for note in notes {
-        let lines: Vec<String> = note
-            .quote
-            .split('\n')
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(|line| format!("> {}", crate::feed::block(line)))
-            .collect();
-        out.push_str(&lines.join("\n>\n"));
+        out.push_str(&quoted(&note.quote, None));
+        out.push_str(&said(note, folder));
+    }
+    out
+}
+
+/// Цитата цитатой markdown, а под ней, если есть, ссылка на её место.
+fn quoted(quote: &str, place: Option<&str>) -> String {
+    let mut lines: Vec<String> = quote
+        .split('\n')
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| format!("> {}", crate::feed::block(line)))
+        .collect();
+    if let Some(place) = place {
+        lines.push(format!(
+            "> — [on the page]({})",
+            crate::feed::destination(place)
+        ));
+    }
+    lines.join("\n>\n") + "\n\n"
+}
+
+/// Что читатель приписал: слова абзацем, картинки — каждая своим.
+fn said(note: &Note, folder: &str) -> String {
+    let mut out = String::new();
+    if !note.text.is_empty() {
+        out.push_str(&note.text);
         out.push_str("\n\n");
-        if !note.text.is_empty() {
-            out.push_str(&note.text);
-            out.push_str("\n\n");
-        }
+    }
+    for name in &note.pictures {
+        out.push_str(&format!("![]({folder}/{name})\n\n"));
     }
     out
 }
 
 /// Статья с заметками в конце — для сохранения: файл несёт заметки в себе,
-/// и показать их можно без Brevier. Без заметок — как была.
+/// и показать их можно без Brevier. Без заметок — как была. Картинки
+/// заметок — ссылками в `images/`, куда их кладёт `save`.
 pub fn appended(markdown: &str, notes: &[&Note]) -> String {
     if notes.is_empty() {
         return markdown.to_owned();
@@ -466,13 +683,134 @@ pub fn appended(markdown: &str, notes: &[&Note]) -> String {
     format!(
         "{}\n\n---\n\n## Your notes\n\n{}",
         markdown.trim_end(),
-        entries(&notes).trim_end()
+        entries(&notes, EXPORTED).trim_end()
     ) + "\n"
+}
+
+/// Папка картинок рядом с выгруженным или сохранённым файлом — та же,
+/// куда `save` кладёт картинки статьи.
+pub const EXPORTED: &str = "images";
+
+/// Заметки одной страницы конспектом (#42): свойства для Obsidian сверху,
+/// заголовок, затем заметки в порядке текста — цитата со ссылкой на своё
+/// место на странице, слова, картинки (`images/…`). Заметки без места
+/// идут тоже: цитата у них своя.
+pub fn digest(notes: &[&Note]) -> String {
+    let Some((title, address)) = named(notes) else {
+        return String::new();
+    };
+    let first = notes.iter().map(|note| note.stamp.days).min().unwrap_or(0);
+    let (year, month, day) = store::civil_from_days(first);
+    let head = format!(
+        "---\ntitle: {}\nsource: {}\ncreated: {year:04}-{month:02}-{day:02}\n---\n\n# {}\n\n",
+        yaml(title),
+        yaml(address),
+        crate::feed::heading(title),
+    );
+    head + &digested(notes)
+}
+
+/// Заметки нескольких страниц одним файлом: свойства у файла markdown
+/// одни, поэтому страница — разделом со ссылкой, как на `brevier:notes`.
+pub fn digest_pages(pages: &[Vec<&Note>]) -> String {
+    let mut out = String::from("# Your notes\n\n");
+    for notes in pages {
+        let Some((title, address)) = named(notes) else {
+            continue;
+        };
+        out.push_str(&format!("## {}\n\n", store::link(title, address)));
+        out.push_str(&digested(notes));
+        out.push('\n');
+    }
+    out.trim_end().to_owned() + "\n"
+}
+
+/// Заголовок и адрес страницы заметок: заголовок — у самой свежей.
+fn named<'a>(notes: &[&'a Note]) -> Option<(&'a str, &'a str)> {
+    let last = notes.iter().max_by_key(|note| note.id)?;
+    let title = if last.title.is_empty() {
+        last.address.as_str()
+    } else {
+        last.title.as_str()
+    };
+    Some((title, last.address.as_str()))
+}
+
+/// Сами заметки конспекта, в порядке текста.
+fn digested(notes: &[&Note]) -> String {
+    let mut notes = notes.to_vec();
+    notes.sort_by_key(|note| note.at);
+    let mut out = String::new();
+    for note in &notes {
+        let place = fragment_link(&note.address, &note.quote);
+        out.push_str(&quoted(&note.quote, place.as_deref()));
+        out.push_str(&said(note, EXPORTED));
+    }
+    out.trim_end().to_owned() + "\n"
+}
+
+/// Строка YAML в кавычках: заголовок с двоеточием или `#` иначе
+/// сломал бы свойства.
+fn yaml(text: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            ch if ch.is_control() => out.push(' '),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Ссылка на место цитаты в обычном браузере: `#:~:text=` (Text Fragments —
+/// Chrome, Safari, Firefox со 131-го). Короткая цитата — целиком, длинная —
+/// началом и концом по [`FRAGMENT_WORDS`] слов: браузер сверяет слова
+/// со страницей, и цитата в абзац ломалась бы на первом расхождении нашего
+/// текста с сайтом. Не нашёл — откроет страницу сначала, ничего не сломав.
+/// Только для сайтов: у файла и своих страниц браузера нет.
+pub fn fragment_link(address: &str, quote: &str) -> Option<String> {
+    if !(address.starts_with("https://") || address.starts_with("http://")) {
+        return None;
+    }
+    // Маркеры пунктов и тире по краям — наши или из CSS, в тексте
+    // страницы их нет.
+    let words: Vec<&str> = quote.split_whitespace().collect();
+    let worded = |word: &&str| word.chars().any(char::is_alphanumeric);
+    let start = words.iter().position(worded)?;
+    let end = words.iter().rposition(worded)? + 1;
+    let words = &words[start..end];
+    let directive = if words.len() <= 2 * FRAGMENT_WORDS {
+        directive_text(&words.join(" "))
+    } else {
+        format!(
+            "{},{}",
+            directive_text(&words[..FRAGMENT_WORDS].join(" ")),
+            directive_text(&words[words.len() - FRAGMENT_WORDS..].join(" ")),
+        )
+    };
+    Some(format!("{address}#:~:text={directive}"))
+}
+
+/// Текст для `#:~:text=`: дефис, запятая и `&` в нём — синтаксис, скобки
+/// оборвали бы ссылку markdown. Кодируем всё, кроме букв и цифр ASCII.
+fn directive_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 fn line_of(note: &Note) -> String {
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
         note.stamp.text(),
         note.id,
         store::escape(&note.address),
@@ -482,6 +820,7 @@ fn line_of(note: &Note) -> String {
         store::escape(&note.quote),
         store::escape(&note.after),
         store::escape(&note.text),
+        note.pictures.join(" "),
     )
 }
 
@@ -496,6 +835,14 @@ fn parse_line(line: &str) -> Option<Note> {
     let quote = store::unescape(fields.next()?);
     let after = store::unescape(fields.next()?);
     let text = store::unescape(fields.next().unwrap_or_default());
+    // Десятое поле — с картинками (#42); у строк постарше его нет.
+    let pictures = fields
+        .next()
+        .unwrap_or_default()
+        .split(' ')
+        .filter(|name| is_picture_name(name))
+        .map(str::to_owned)
+        .collect();
     (!address.is_empty() && !quote.is_empty()).then_some(Note {
         id,
         stamp,
@@ -506,6 +853,7 @@ fn parse_line(line: &str) -> Option<Note> {
         quote,
         after,
         text,
+        pictures,
     })
 }
 
@@ -525,6 +873,7 @@ mod tests {
             quote: selection.quote,
             after: selection.after,
             text: String::new(),
+            pictures: Vec::new(),
         }
     }
 
@@ -689,5 +1038,111 @@ mod tests {
         let shown = preview(&long);
         assert!(shown.ends_with("word…"), "{shown}");
         assert!(shown.chars().count() <= PREVIEW + 1);
+    }
+
+    /// PNG в один пиксель: подписи хватает, чтобы назваться картинкой.
+    const DOT: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0";
+
+    #[test]
+    fn a_picture_lives_as_long_as_a_note_needs_it() {
+        let dir = Scratch::new("notes-pictures");
+        let path = dir.join("notes.tsv");
+        let mut notes = Notes::at(&path);
+        let stamp = Stamp::of_unix(1_760_000_000, 0);
+        let quote = |text: &str| select(text, 0, text.chars().count()).unwrap();
+        let one = notes.add("https://e.com/a", "A", quote("first"), "", stamp);
+        let two = notes.add("https://e.com/a", "A", quote("second"), "", stamp);
+
+        assert_eq!(notes.attach(one, b"GIF but not"), Err(Unkept::NotAPicture));
+        assert_eq!(notes.attach(99, DOT), Err(Unkept::Nowhere));
+        let name = notes.attach(one, DOT).unwrap();
+        assert!(is_picture_name(&name), "{name}");
+        assert!(name.ends_with(".png"));
+        let file = dir.join(PICTURES).join(&name);
+        assert_eq!(fs::read(&file).unwrap(), DOT);
+        // Та же картинка у второй заметки — тот же файл.
+        assert_eq!(notes.attach(two, DOT).unwrap(), name);
+        // Без заметки картинка не бывает отметкой.
+        assert!(notes.get(one).unwrap().says());
+
+        let again = Notes::at(&path);
+        assert_eq!(again.get(one).unwrap().pictures, vec![name.clone()]);
+        assert_eq!(again.picture(&name), Some(file.clone()));
+
+        // Первая заметка ушла — файл остался у второй; ушла и картинка
+        // второй — файла нет.
+        assert!(notes.remove(one));
+        assert!(file.is_file());
+        assert!(notes.detach(two, &name));
+        assert!(!file.exists());
+        assert!(!notes.get(two).unwrap().says());
+        assert!(!notes.detach(two, &name));
+    }
+
+    #[test]
+    fn only_our_own_names_lead_to_a_picture() {
+        assert!(is_picture_name("0123456789abcdef.jpg"));
+        assert!(!is_picture_name("../../0123456789abcdef.jpg"));
+        assert!(!is_picture_name("0123456789abcdef.svg"));
+        assert!(!is_picture_name("0123456789abcdef.png/x"));
+        assert!(!is_picture_name("notes.tsv"));
+        let notes = Notes::at("/nowhere/notes.tsv");
+        assert_eq!(notes.picture("../secret.png"), None);
+    }
+
+    #[test]
+    fn a_line_from_before_pictures_still_reads() {
+        let old = "2026-10-17T10:00:00+03:00\t3\thttps://e.com/a\t5\tA\t\tquote\t\tsaid";
+        let note = parse_line(old).unwrap();
+        assert_eq!(note.text, "said");
+        assert!(note.pictures.is_empty());
+        let mut note = note;
+        note.pictures = vec!["0123456789abcdef.jpg".to_owned()];
+        assert_eq!(parse_line(line_of(&note).trim_end()), Some(note));
+    }
+
+    #[test]
+    fn a_digest_links_each_quote_to_its_place() {
+        let page = "Литовские племена жили к западу. Короткая.";
+        let mut long = note(select(page, 0, 32).unwrap(), 1);
+        long.text = "Карта — ниже.".to_owned();
+        long.pictures = vec!["0123456789abcdef.jpg".to_owned()];
+        long.title = "Платонов: лекции".to_owned();
+        let mut short = note(select(page, 33, 42).unwrap(), 2);
+        short.at = 33;
+        short.title = "Платонов: \"лекции\"".to_owned();
+        let digest = digest(&[&short, &long]);
+        assert_eq!(
+            digest,
+            "---\ntitle: \"Платонов: \\\"лекции\\\"\"\nsource: \"https://e.com/a\"\n\
+             created: 1970-01-01\n---\n\n# Платонов: \"лекции\"\n\n\
+             > Литовские племена жили к западу.\n>\n\
+             > — [on the page](https://e.com/a#:~:text=%D0%9B%D0%B8%D1%82%D0%BE%D0%B2%D1%81%D0%BA%D0%B8%D0%B5%20%D0%BF%D0%BB%D0%B5%D0%BC%D0%B5%D0%BD%D0%B0%20%D0%B6%D0%B8%D0%BB%D0%B8%20%D0%BA%20%D0%B7%D0%B0%D0%BF%D0%B0%D0%B4%D1%83.)\n\n\
+             Карта — ниже.\n\n![](images/0123456789abcdef.jpg)\n\n\
+             > Короткая.\n>\n> — [on the page](https://e.com/a#:~:text=%D0%9A%D0%BE%D1%80%D0%BE%D1%82%D0%BA%D0%B0%D1%8F.)\n"
+        );
+    }
+
+    #[test]
+    fn a_long_quote_links_by_its_first_and_last_words() {
+        let quote = "• one two three four five six seven eight nine-ten, eleven —";
+        assert_eq!(
+            fragment_link("https://e.com/a", quote).unwrap(),
+            "https://e.com/a#:~:text=one%20two%20three%20four,\
+             seven%20eight%20nine%2Dten%2C%20eleven"
+        );
+        assert_eq!(fragment_link("file:///home/a.md", "one"), None);
+        assert_eq!(fragment_link("https://e.com/a", "— •"), None);
+    }
+
+    #[test]
+    fn a_saved_article_links_the_pictures_of_its_notes() {
+        let mut first = note(select("Some text.", 0, 4).unwrap(), 1);
+        first.pictures = vec!["0123456789abcdef.png".to_owned()];
+        let saved = appended("# Title\n", &[&first]);
+        assert!(
+            saved.ends_with("> Some\n\n![](images/0123456789abcdef.png)\n"),
+            "{saved}"
+        );
     }
 }

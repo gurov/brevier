@@ -98,10 +98,11 @@ object Core {
      * `contrast` — выбор читателя (#44); `null` — не выбирал, решает система.
      * `slideBar` — уезжает ли шапка, пока читают (#45).
      */
-    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean) {
+    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean, notes: Boolean) {
         val flags = listOf(dark, images, archive).map { if (it) "1" else "0" } +
             when (contrast) { true -> "1"; false -> "0"; null -> "" } +
-            if (slideBar) "1" else "0"
+            (if (slideBar) "1" else "0") +
+            if (notes) "1" else "0"
         ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 
@@ -151,6 +152,16 @@ object Core {
 
     fun editNote(id: Long, text: String): Boolean = obj("notes.edit", id, text).optBoolean("ok")
     fun removeNote(id: Long): Boolean = obj("notes.remove", id).optBoolean("ok")
+
+    /**
+     * Картинку из файла `path` — в заметку (#42); файл ядро потом стирает.
+     * Ответ — `ok` или `headline`.
+     */
+    fun attachPicture(id: Long, path: String): JSONObject = obj("notes.attach", id, path)
+    fun detachPicture(id: Long, path: String): Boolean = obj("notes.detach", id, path).optBoolean("ok")
+
+    /** Заметки страницы `address` (пусто — все) — файлом в папке `dir`: `ok` и `path` или `headline`. */
+    fun exportNotes(address: String, dir: String): JSONObject = obj("notes.export", address, dir)
 
     private fun utcOffset(): Int = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000
 }

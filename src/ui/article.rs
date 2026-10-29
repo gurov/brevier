@@ -8,9 +8,12 @@
 //! фон абзаца у пустых строк, который GTK не рисует сам (#28).
 //!
 //! Рисуем слоем ниже текста (`snapshot_layer`) — это штатный способ GTK
-//! дописать что-то к отрисовке `GtkTextView`, не переписывая её.
+//! дописать что-то к отрисовке `GtkTextView`, не переписывая её. Третья
+//! забота — поле заметок (#42, `margin.rs`): статья держит его карточки
+//! и рисует линии от цитат к ним тем же слоем.
 
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell};
+use std::rc::Rc;
 
 use gtk::glib;
 use gtk::prelude::*;
@@ -25,6 +28,8 @@ const RULES: [&str; 3] = ["rule1", "rule2", "rule3"];
 // Толщина линейки, её место в левом поле цитаты и шаг уровня — в ядре,
 // вместе с остальной типографской моделью: телефон рисует ту же линейку.
 use brevier::outline::{INDENT as RULE_STEP, RULE_INSET, RULE_WIDTH, RULE_X};
+
+use crate::margin::Margin;
 /// Сколько GTK оставляет справа под курсор: фон абзаца кончается на столько
 /// левее полной ширины текста (`SPACE_FOR_CURSOR` в gtktextview.c). Фон
 /// пустой строки обязан кончаться там же, иначе у панели кода справа зубец.
@@ -36,12 +41,15 @@ mod imp {
     pub struct Article {
         /// Цвет линейки. Меняется вместе с темой, поэтому не константа.
         pub rule: Cell<gtk::gdk::RGBA>,
+        /// Поле заметок вкладки — заводится при первом обращении.
+        pub margin: OnceCell<Rc<Margin>>,
     }
 
     impl Default for Article {
         fn default() -> Self {
             Self {
                 rule: Cell::new(gtk::gdk::RGBA::new(0.6, 0.6, 0.6, 1.0)),
+                margin: OnceCell::new(),
             }
         }
     }
@@ -62,6 +70,9 @@ mod imp {
                 let view = self.obj();
                 draw_empty_paragraphs(view.upcast_ref(), &snapshot);
                 draw_quote_rules(view.upcast_ref(), &snapshot, self.rule.get());
+                if let Some(margin) = self.margin.get() {
+                    margin.draw(view.upcast_ref(), &snapshot);
+                }
             }
             self.parent_snapshot_layer(layer, snapshot);
         }
@@ -93,6 +104,19 @@ impl Article {
         self.imp().rule.set(color);
         self.queue_draw();
     }
+
+    /// Поле заметок этой статьи (#42).
+    pub fn margin(&self) -> Rc<Margin> {
+        self.imp()
+            .margin
+            .get_or_init(|| Margin::new(self.upcast_ref()))
+            .clone()
+    }
+}
+
+/// Поле заметок вида статьи; у прочих видов (вкладка настроек) его нет.
+pub fn margin_of(view: &gtk::TextView) -> Option<Rc<Margin>> {
+    view.downcast_ref::<Article>().map(Article::margin)
 }
 
 /// Линейка слева от каждой строки, помеченной тегом цитаты.

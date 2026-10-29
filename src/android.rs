@@ -295,6 +295,10 @@ fn call(method: &str, arg: &str) -> String {
             if !field(4).is_empty() {
                 settings.slide_bar = field(4) == "1";
             }
+            // Заметки под абзацами (#42) — так же.
+            if !field(5).is_empty() {
+                settings.notes = field(5) == "1";
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -373,6 +377,17 @@ fn call(method: &str, arg: &str) -> String {
             let done = core().notes.remove(field(0).parse().unwrap_or(0));
             format!("{{\"ok\":{done}}}")
         }
+        "notes.attach" => attach_picture(field(0).parse().unwrap_or(0), field(1)),
+        "notes.detach" => {
+            // Kotlin знает картинку по пути: имя — его хвост.
+            let name = std::path::Path::new(field(1))
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let done = core().notes.detach(field(0).parse().unwrap_or(0), &name);
+            format!("{{\"ok\":{done}}}")
+        }
+        "notes.export" => export_notes(field(0), field(1)),
         other => {
             let mut out = String::from("{\"error\":");
             json_string(&mut out, &format!("unknown call: {other}"));
@@ -862,7 +877,7 @@ fn settings() -> String {
         })
         .collect();
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"type\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"notes\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
         settings.dark,
@@ -874,6 +889,7 @@ fn settings() -> String {
         settings.images,
         settings.archive,
         settings.slide_bar,
+        settings.notes,
         type_json(&chosen),
         styles.join(","),
         chosen.style().map_or(-1, |index| index as i64),
@@ -988,13 +1004,20 @@ fn save(key: &str, path: &str) -> String {
     let Some(mut document) = document(key) else {
         return "{\"ok\":false,\"headline\":\"Nothing to save yet\"}".to_owned();
     };
-    // Заметки едут в файл вместе со статьёй (#39): в конце, своим разделом.
-    {
+    // Заметки едут в файл вместе со статьёй (#39): в конце, своим разделом,
+    // а их картинки (#42) — рядом с картинками статьи.
+    let attached = {
         let core = core();
         let notes = core.notes.of(key);
         document.markdown = notes::appended(&document.markdown, &notes);
-    }
-    match save::write(std::path::Path::new(path), &document, UserAgent::Honest) {
+        save::Attached::of(&notes, &core.notes)
+    };
+    match save::write_with(
+        std::path::Path::new(path),
+        &document,
+        &attached,
+        UserAgent::Honest,
+    ) {
         Ok(saved) => format!(
             "{{\"ok\":true,\"images\":{},\"missed\":{}}}",
             saved.images, saved.missed
@@ -1055,10 +1078,88 @@ fn notes_of(address: &str) -> String {
         json_string(&mut out, &notes::preview(&note.quote));
         out.push_str(",\"text\":");
         json_string(&mut out, &note.text);
-        out.push('}');
+        // Картинки (#42) — путями: разбирает их тот же `Core.image`.
+        out.push_str(",\"pictures\":[");
+        let paths: Vec<PathBuf> = note
+            .pictures
+            .iter()
+            .filter_map(|name| core.notes.picture(name))
+            .collect();
+        for (index, path) in paths.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            json_string(&mut out, &path.to_string_lossy());
+        }
+        out.push_str("]}");
     }
     out.push(']');
     out
+}
+
+/// Картинку — в заметку (#42). Kotlin копирует выбранную в свой кэш
+/// (из галереи она приходит адресом `content://`, ядро его не читает),
+/// ядро уменьшает её, если она совсем большая (`media::Shrink::PHONE`:
+/// копия приложения у Google — до 25 МБ на всё), и кладёт рядом с заметками.
+/// Копия в кэше уходит в любом случае.
+fn attach_picture(id: u64, path: &str) -> String {
+    let path = std::path::Path::new(path);
+    let read = std::fs::read(path);
+    let _ = std::fs::remove_file(path);
+    let kept = read
+        .map_err(|_| notes::Unkept::Nowhere)
+        .and_then(|bytes| notes::fitted(&bytes, media::Shrink::PHONE))
+        .and_then(|bytes| core().notes.attach(id, &bytes));
+    match kept {
+        Ok(_) => "{\"ok\":true}".to_owned(),
+        Err(unkept) => {
+            let mut out = String::from("{\"ok\":false,\"headline\":");
+            json_string(&mut out, unkept.headline());
+            out.push('}');
+            out
+        }
+    }
+}
+
+/// Выгрузить заметки (#42) в папку `dir` — страницы `address` или все,
+/// если адреса нет. Имя и вид файла — `save::notes_name`; дальше, в
+/// «Поделиться», его несёт Kotlin.
+fn export_notes(address: &str, dir: &str) -> String {
+    let core = core();
+    let addresses: Vec<String> = if address.is_empty() {
+        let mut addresses: Vec<String> = Vec::new();
+        for note in core.notes.all().iter().rev() {
+            if !addresses.contains(&note.address) {
+                addresses.push(note.address.clone());
+            }
+        }
+        addresses
+    } else {
+        vec![address.split('#').next().unwrap_or(address).to_owned()]
+    };
+    let pages: Vec<Vec<&notes::Note>> = addresses
+        .iter()
+        .map(|address| core.notes.of(address))
+        .filter(|page| !page.is_empty())
+        .collect();
+    if pages.is_empty() {
+        return "{\"ok\":false,\"headline\":\"No notes yet\"}".to_owned();
+    }
+    let path = std::path::Path::new(dir).join(save::notes_name(&pages));
+    match save::notes(&path, &pages, &core.notes) {
+        Ok(saved) => {
+            let mut out = String::from("{\"ok\":true,\"path\":");
+            json_string(&mut out, &saved.path.to_string_lossy());
+            out.push_str(&format!(",\"images\":{}}}", saved.images));
+            out
+        }
+        Err(error) => {
+            let mut out = String::from("{\"ok\":false,\"headline\":");
+            json_string(&mut out, describe(&error).headline);
+            out.push('}');
+            out
+        }
+    }
 }
 
 /// Новая заметка по выделению `[from, to)` в UTF-16 (#39). Только у статьи:

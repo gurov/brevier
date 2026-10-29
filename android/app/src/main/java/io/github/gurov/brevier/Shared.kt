@@ -45,6 +45,9 @@ class Shared : ContentProvider() {
         "webp" -> "image/webp"
         "avif" -> "image/avif"
         "svg" -> "image/svg+xml"
+        // Выгрузка заметок (#42).
+        "zip" -> "application/zip"
+        "md" -> "text/markdown"
         else -> "application/octet-stream"
     }
 

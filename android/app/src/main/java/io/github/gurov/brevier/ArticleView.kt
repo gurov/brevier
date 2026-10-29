@@ -30,6 +30,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -65,6 +66,9 @@ interface ArticleHost {
 
     /** Нажали отмеченное: что сделать с заметкой. `x`, `y` — точка на экране. */
     fun noteMenu(id: Long, x: Int, y: Int)
+
+    /** Нажали картинку заметки (#42): показать её крупно. */
+    fun notePicture(id: Long, path: String)
 
     /** Страницу прокрутили: полка отмечает, где читатель. */
     fun scrolled()
@@ -131,6 +135,18 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     private var notes: List<NoteSpot> = emptyList()
 
     /**
+     * Карточки заметок под абзацами (#42): слова и картинки читателя
+     * под абзацем, где кончается цитата. Места справа от колонки на телефоне
+     * нет, а в окне так же встают заметки, когда поле справа не влезает.
+     * Колонка режется по концу такого абзаца — тем же разрезом, что длинный
+     * текст (#22), — и карточка встаёт между кусками: текст страницы
+     * и его смещения не меняются. Выключено настройкой — только подложка.
+     */
+    var cards = true
+    /** По каким карточкам нарезана колонка: конец абзаца и его заметки. */
+    private var laidCards: List<Pair<Int, List<NoteSpot>>> = emptyList()
+
+    /**
      * Шапка лежит поверх статьи (#45): сверху у статьи поле в её рост
      * (`reserve`), текст под шапку уходит, не сдвигаясь, когда она уезжает.
      * `covered` — сколько сверху закрыто шапкой сейчас: место чтения, прыжки
@@ -164,14 +180,30 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         eager: Boolean,
         offer: String? = null,
         ways: List<Entry> = emptyList(),
+        notes: List<NoteSpot> = emptyList(),
     ) {
-        generation += 1
         this.page = page
         this.metrics = metrics
         this.theme = theme
         palette = metrics.type.palette(theme)
         setBackgroundColor(palette.paper)
         if (hasFocus()) requestFocus()
+        marks = null
+        markHere = -1
+        this.notes = notes
+        laidCards = cardsOf(page, notes)
+        this.eager = eager
+        this.offer = offer
+        this.ways = ways
+        fitColumn(width)
+        build()
+        jump { scrollTo(0, 0) }
+    }
+
+    /** Собрать колонку заново из страницы — при показе и когда сменились карточки. */
+    private fun build() {
+        val page = page ?: return
+        generation += 1
         column.removeAllViews()
         proses.clear()
         images.clear()
@@ -179,23 +211,14 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         formulas.clear()
         pending.clear()
         laid = 0
-        marks = null
-        markHere = -1
-        notes = emptyList()
-        this.eager = eager
-        this.offer = offer
-        this.ways = ways
-        fitColumn(width)
 
         // Первый экран — сразу и целиком, остальное — по куску за кадр.
         // Последний кусок `append` закрывает сам (`finish`); здесь — только
         // страница без кусков вовсе, иначе кнопка отказа вставала дважды.
-        pending.addAll(pieces(page, metrics.justify))
+        pending.addAll(withCards(pieces(page, metrics.justify), laidCards))
         if (pending.isEmpty()) finish()
         while (pending.isNotEmpty() && laid < FIRST_CHARS) append()
         if (pending.isNotEmpty()) drip(generation)
-
-        jump { scrollTo(0, 0) }
         if (eager) loadAll()
     }
 
@@ -219,6 +242,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 marks?.let { hits -> tables.last().mark(hits, markHere) }
                 laid = item.at + 1
             }
+            is CardSlot -> item.notes.forEach { addCard(item.at, it) }
         }
         if (pending.isEmpty()) finish()
     }
@@ -372,6 +396,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 }
                 is ImageFrame -> child.block.at
                 is TableFrame -> child.block.at
+                is NoteCard -> child.at
                 else -> null
             }
         }
@@ -515,10 +540,92 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     // ── заметки (#39) ───────────────────────────────────────────────────────
 
-    /** Закрасить заметки страницы. Зовётся после показа и после каждой правки. */
+    /**
+     * Закрасить заметки страницы. Зовётся после каждой правки. Сменились
+     * карточки под абзацами — колонка собирается заново на том же месте.
+     */
     fun notes(list: List<NoteSpot>) {
         notes = list
+        val page = page
+        val wanted = if (page != null) cardsOf(page, list) else emptyList()
+        if (page != null && key(wanted) != key(laidCards)) {
+            val place = place()
+            laidCards = wanted
+            build()
+            settle(place, 0f)
+            return
+        }
         for (view in proses) noteView(view)
+    }
+
+    /** Включить или выключить карточки под абзацами. */
+    fun showCards(on: Boolean) {
+        if (cards == on) return
+        cards = on
+        notes(notes)
+    }
+
+    /** Карточки страницы: конец абзаца, где кончается цитата, и заметки под ним. */
+    private fun cardsOf(page: Page, list: List<NoteSpot>): List<Pair<Int, List<NoteSpot>>> {
+        if (!cards) return emptyList()
+        val text = page.text
+        return list.filter { it.placed && it.says && it.to <= text.length }
+            .groupBy { note ->
+                val end = text.indexOf('\n', max(note.from, note.to - 1))
+                if (end < 0) text.length else end + 1
+            }
+            .toSortedMap()
+            .map { (at, notes) -> at to notes.sortedBy { it.from } }
+    }
+
+    /** Что в карточках видно: по нему решаем, собирать ли колонку заново. */
+    private fun key(laid: List<Pair<Int, List<NoteSpot>>>) =
+        laid.map { (at, notes) -> at to notes.map { Triple(it.id, it.text, it.pictures) } }
+
+    /** Место карточки в очереди кусков: после абзаца `at`. */
+    private class CardSlot(val at: Int, val notes: List<NoteSpot>)
+
+    /**
+     * Разрезать куски по концам абзацев с карточками и поставить карточки
+     * после них. Разрез — как у длинного текста (`prose`): кусок кончается
+     * переводом строки абзаца. Перед объектом этот перевод строки кусок
+     * уже потерял (`pieces`), поэтому и конец на знак раньше — свой.
+     */
+    private fun withCards(items: List<Any>, laid: List<Pair<Int, List<NoteSpot>>>): List<Any> {
+        if (laid.isEmpty()) return items
+        val out = mutableListOf<Any>()
+        var next = 0
+        for (item in items) {
+            if (item !is Piece) {
+                out += item
+                continue
+            }
+            var piece: Piece = item
+            while (next < laid.size && laid[next].first > piece.start && laid[next].first < piece.end) {
+                val at = laid[next].first
+                out += Piece(piece.start, at, piece.justified)
+                out += CardSlot(at, laid[next].second)
+                piece = Piece(at, piece.end, piece.justified)
+                next += 1
+            }
+            out += piece
+            while (next < laid.size && laid[next].first <= piece.end + 1) {
+                out += CardSlot(laid[next].first, laid[next].second)
+                next += 1
+            }
+        }
+        while (next < laid.size) {
+            out += CardSlot(laid[next].first, laid[next].second)
+            next += 1
+        }
+        return out
+    }
+
+    private fun addCard(at: Int, note: NoteSpot) {
+        column.addView(NoteCard(context, at, note), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = metrics.px(2f).toInt()
+            bottomMargin = metrics.extra.toInt() + metrics.px(4f).toInt()
+        })
     }
 
     /** Заметки в одном куске: подложка, а у приписанного — ещё и черта. */
@@ -894,6 +1001,84 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     }
 
     /**
+     * Карточка заметки под абзацем (#42): слова и картинки читателя, черта
+     * цвета заметки слева — чтобы не спутать с текстом автора. Нажатие —
+     * то же меню, что у отмеченного; нажатие на картинку — она крупно.
+     * `at` — конец абзаца: место чтения на карточке — там.
+     */
+    @SuppressLint("ViewConstructor")
+    inner class NoteCard(context: Context, val at: Int, val note: NoteSpot) : LinearLayout(context) {
+        init {
+            orientation = HORIZONTAL
+            val rule = View(context).apply { setBackgroundColor(palette.noteRule) }
+            addView(rule, LayoutParams(max(2, metrics.px(3f).toInt()), LayoutParams.MATCH_PARENT))
+            val body = LinearLayout(context).apply {
+                orientation = VERTICAL
+                val side = metrics.px(10f).toInt()
+                setPadding(side, metrics.px(6f).toInt(), side, metrics.px(8f).toInt())
+            }
+            addView(body, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            background = GradientDrawable().apply {
+                setColor(palette.shelf)
+                val round = metrics.px(6f)
+                cornerRadii = floatArrayOf(0f, 0f, round, round, round, round, 0f, 0f)
+            }
+            clipToOutline = true
+            if (note.text.isNotEmpty()) {
+                body.addView(TextView(context).apply {
+                    text = note.text
+                    setTextColor(palette.ink)
+                    typeface = fonts.pick(false, 400, false, metrics.face).typeface
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.text * NOTE_TYPE)
+                    setLineSpacing(0f, 1.25f)
+                })
+            }
+            val inner = columnWidth() - max(2, metrics.px(3f).toInt()) - 2 * metrics.px(10f).toInt()
+            for (path in note.pictures) body.addView(picture(path, inner))
+            contentDescription = "Your note: " + note.text.ifEmpty { "a picture" }
+            var x = 0
+            var y = 0
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    x = event.rawX.toInt()
+                    y = event.rawY.toInt()
+                }
+                false
+            }
+            setOnClickListener { host.noteMenu(note.id, x, y) }
+        }
+
+        /** Картинка заметки: место — сразу, по ширине, пиксели — из фона. */
+        private fun picture(path: String, inner: Int): View {
+            val image = ImageView(context).apply {
+                adjustViewBounds = true
+                scaleType = ImageView.ScaleType.FIT_START
+                contentDescription = "Your picture"
+                setOnClickListener { host.notePicture(note.id, path) }
+            }
+            val holder = FrameLayout(context)
+            holder.addView(image, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            val look = Look(inner, look(false).paper, metrics.text, natural = false)
+            fetch(path, look) { decoded ->
+                val bitmap = decoded.bitmap ?: return@fetch
+                // Как у картинки статьи: пиксели монитора — множителем кегля,
+                // не шире карточки и не выше доли экрана.
+                var w = min((bitmap.width * metrics.unit).toInt(), inner)
+                var h = (bitmap.height.toLong() * w / max(1, bitmap.width)).toInt()
+                val tall = (metrics.text * PICTURE_LINES).toInt()
+                if (h > tall) {
+                    w = max(1, (w.toLong() * tall / h).toInt())
+                    h = tall
+                }
+                image.setImageBitmap(bitmap)
+                image.layoutParams = FrameLayout.LayoutParams(w, h)
+            }
+            holder.setPadding(0, metrics.px(6f).toInt(), 0, 0)
+            return holder
+        }
+    }
+
+    /**
      * Кусок текста. Выделяется и копируется; ссылка открывается нажатием,
      * новой вкладкой — долгим нажатием через меню.
      */
@@ -1069,6 +1254,12 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
         /** Сколько знаков кладём в колонку сразу: первый экран с запасом. */
         const val FIRST_CHARS = 2 * CHUNK_CHARS
+
+        /** Кегль слов заметки под абзацем — доля кегля текста: это поля, а не текст. */
+        const val NOTE_TYPE = 0.85f
+
+        /** Выше скольких строк текста картинка заметки не встаёт: крупно — по нажатию. */
+        const val PICTURE_LINES = 18f
 
         /** Пункты меню выделения (#39): отметить и приписать. */
         private const val MARK = 0x4e01

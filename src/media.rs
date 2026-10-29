@@ -148,10 +148,113 @@ pub fn resolve(base: &Address, src: &str) -> Option<Source> {
             let dir = path.parent().unwrap_or_else(|| Path::new("."));
             Some(Source::File(dir.join(src)))
         }
-        // Страницу программы пишем мы сами, и относительных картинок
-        // в ней нет — разворачивать нечего.
+        // Страница заметок показывает картинки читателя (#42) — из своей
+        // папки и только по нашему имени файла.
+        Address::Internal(crate::address::Internal::Notes) => {
+            let name = src
+                .strip_prefix(crate::notes::PICTURES)?
+                .strip_prefix('/')?;
+            crate::notes::is_picture_name(name).then_some(())?;
+            Some(Source::File(
+                crate::store::data_dir()?
+                    .join(crate::notes::PICTURES)
+                    .join(name),
+            ))
+        }
+        // Прочие страницы программы пишем мы сами, и относительных картинок
+        // в них нет — разворачивать нечего.
         Address::Internal(_) => None,
     }
+}
+
+/// Когда картинка для заметки «совсем большая» (#42): тяжелее `bytes`
+/// и длиннее `side` по большей стороне. Такую сводим к `side`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shrink {
+    pub bytes: usize,
+    pub side: u32,
+}
+
+impl Shrink {
+    /// Телефон: снимок камеры (4000×3000, 3–6 МБ) — до 2560 по большей
+    /// стороне, а снимок экрана (1080×2400) остаётся байт в байт. Копия
+    /// приложения у Google — до 25 МБ на всё, с закладками и заметками.
+    pub const PHONE: Shrink = Shrink {
+        bytes: 2 * 1024 * 1024,
+        side: 2560,
+    };
+    /// Окно: только то, что иначе не влезло бы в заметку вовсе.
+    pub const WINDOW: Shrink = Shrink {
+        bytes: crate::notes::MAX_PICTURE,
+        side: 4096,
+    };
+}
+
+/// Размер картинки, как она встанет (с поворотом из EXIF), — по заголовку,
+/// не разбирая пикселей: окно ставит место под картинку заметки до того,
+/// как она разобрана, и соседние заметки не прыгают.
+pub fn size(bytes: &[u8]) -> Option<(u32, u32)> {
+    use image::ImageDecoder;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    reader.limits(limits());
+    let mut decoder = reader.into_decoder().ok()?;
+    let (w, h) = decoder.dimensions();
+    let turned = matches!(
+        decoder.orientation().ok()?,
+        image::metadata::Orientation::Rotate90
+            | image::metadata::Orientation::Rotate270
+            | image::metadata::Orientation::Rotate90FlipH
+            | image::metadata::Orientation::Rotate270FlipH
+    );
+    Some(if turned { (h, w) } else { (w, h) })
+}
+
+/// Уменьшить картинку, если она совсем большая: `None` — оставить как есть.
+/// Непрозрачная едет в JPEG, с прозрачностью — в PNG; поворот из EXIF
+/// применяем сразу, потому что заново записанный файл его теряет.
+pub fn shrink(bytes: &[u8], limit: Shrink) -> Result<Option<Vec<u8>>, Error> {
+    use image::ImageDecoder;
+
+    let over = |len: usize| len > limit.bytes || len > crate::notes::MAX_PICTURE;
+    if !over(bytes.len()) {
+        return Ok(None);
+    }
+    let fail = |e: image::ImageError| Error::Media(e.to_string());
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| Error::Media(e.to_string()))?;
+    reader.limits(limits());
+    let mut decoder = reader.into_decoder().map_err(fail)?;
+    let (w, h) = decoder.dimensions();
+    let longest = w.max(h);
+    // Тяжёлая, но не длинная — снимок экрана в PNG: оставить, если влезает.
+    if longest <= limit.side && bytes.len() <= crate::notes::MAX_PICTURE {
+        return Ok(None);
+    }
+    let orientation = decoder.orientation().map_err(fail)?;
+    let mut picture = image::DynamicImage::from_decoder(decoder).map_err(fail)?;
+    if longest > limit.side {
+        picture = picture.resize(
+            limit.side,
+            limit.side,
+            image::imageops::FilterType::Lanczos3,
+        );
+    }
+    picture.apply_orientation(orientation);
+    let mut out = std::io::Cursor::new(Vec::new());
+    let clear = picture.color().has_alpha() && picture.to_rgba8().pixels().any(|p| p[3] < 255);
+    if clear {
+        picture
+            .write_to(&mut out, image::ImageFormat::Png)
+            .map_err(fail)?;
+    } else {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88)
+            .encode_image(&picture.to_rgb8())
+            .map_err(fail)?;
+    }
+    Ok(Some(out.into_inner()))
 }
 
 fn has_scheme(src: &str) -> bool {
@@ -218,7 +321,13 @@ fn raster(bytes: &[u8], look: Look) -> Result<Raster, Error> {
         .map_err(|e| Error::Media(e.to_string()))?;
     reader.limits(limits());
 
-    let source = reader.decode().map_err(|e| Error::Media(e.to_string()))?;
+    // Поворот из EXIF — как у браузеров (`image-orientation: from-image`):
+    // снимок с телефона иначе лежит на боку, а такие кладут в заметки (#42).
+    let fail = |e: image::ImageError| Error::Media(e.to_string());
+    let mut decoder = reader.into_decoder().map_err(fail)?;
+    let orientation = image::ImageDecoder::orientation(&mut decoder).map_err(fail)?;
+    let mut source = image::DynamicImage::from_decoder(decoder).map_err(fail)?;
+    source.apply_orientation(orientation);
     let (w, h) = (source.width().max(1), source.height().max(1));
 
     // В колонке картинка не шире меры и не крупнее своей натуры — как её
@@ -487,6 +596,87 @@ mod tests {
 
     fn web(url: &str) -> Address {
         Address::Web(url.to_owned())
+    }
+
+    /// Шум не сжимается: такая картинка весит, сколько в ней пикселей.
+    fn noise(w: u32, h: u32) -> Vec<u8> {
+        let mut seed: u32 = 7;
+        let picture = image::RgbImage::from_fn(w, h, |_, _| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let [_, r, g, b] = seed.to_le_bytes();
+            image::Rgb([r, g, b])
+        });
+        let mut out = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    fn sides(bytes: &[u8]) -> (u32, u32) {
+        let picture = image::load_from_memory(bytes).unwrap();
+        (picture.width(), picture.height())
+    }
+
+    #[test]
+    fn only_a_very_large_picture_is_made_smaller() {
+        // Пороги поменьше настоящих: в отладочной сборке шум в мегапиксели
+        // сжимается долго, а правило то же.
+        let limit = Shrink {
+            bytes: 100_000,
+            side: 256,
+        };
+        let photo = noise(600, 400);
+        assert!(photo.len() > limit.bytes);
+        let smaller = shrink(&photo, limit).unwrap().unwrap();
+        assert!(smaller.starts_with(b"\xff\xd8\xff"), "непрозрачная — JPEG");
+        assert_eq!(sides(&smaller), (256, 171));
+        // Тяжёлая, но не длинная — как снимок экрана: как есть.
+        let screen = noise(200, 250);
+        assert!(screen.len() > limit.bytes);
+        assert_eq!(shrink(&screen, limit).unwrap(), None);
+        // Лёгкая — как есть, какой бы длинной ни была.
+        assert_eq!(shrink(&photo, Shrink::WINDOW).unwrap(), None);
+        assert_eq!(shrink(b"not a picture at all", limit).unwrap(), None);
+    }
+
+    /// Снимок с телефона лежит в файле боком, а стоять велит EXIF:
+    /// браузеры его слушают, и мы тоже.
+    #[test]
+    fn a_photo_stands_the_way_its_exif_says() {
+        use image::ImageEncoder;
+        let picture = image::RgbImage::from_pixel(4, 2, image::Rgb([200, 30, 30]));
+        let mut bytes = Vec::new();
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new(&mut bytes);
+        // TIFF с одним полем: Orientation = 6, повернуть на 90° по часовой.
+        let exif = b"II\x2a\x00\x08\x00\x00\x00\x01\x00\x12\x01\x03\x00\x01\x00\x00\x00\
+                     \x06\x00\x00\x00\x00\x00\x00\x00"
+            .to_vec();
+        encoder.set_exif_metadata(exif).unwrap();
+        encoder
+            .write_image(&picture, 4, 2, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let raster = decode(&bytes, None, look(100, Fit::Column)).unwrap();
+        assert_eq!((raster.width, raster.height), (2, 4));
+        assert_eq!(size(&bytes), Some((2, 4)));
+        // И уменьшенная копия стоит так же, уже без EXIF.
+        let limit = Shrink { bytes: 10, side: 2 };
+        let smaller = shrink(&bytes, limit).unwrap().unwrap();
+        assert_eq!(sides(&smaller), (1, 2));
+    }
+
+    #[test]
+    fn the_notes_page_shows_only_the_pictures_of_notes() {
+        let notes = Address::Internal(crate::address::Internal::Notes);
+        let history = Address::Internal(crate::address::Internal::History);
+        let own = "notes/0123456789abcdef.png";
+        match resolve(&notes, own) {
+            Some(Source::File(path)) => assert!(path.ends_with(own), "{path:?}"),
+            // Без папки данных показывать нечего.
+            None => assert!(crate::store::data_dir().is_none()),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(resolve(&notes, "notes/../settings.tsv"), None);
+        assert_eq!(resolve(&notes, "../notes/0123456789abcdef.png"), None);
+        assert_eq!(resolve(&history, own), None);
     }
 
     #[test]

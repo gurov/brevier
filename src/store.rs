@@ -652,6 +652,10 @@ pub struct Settings {
     /// и строку не пишет. По умолчанию уезжает (мейнтейнер, 25 октября 2026);
     /// в файл — только `bar stays`.
     pub slide_bar: bool,
+    /// Показывать ли заметки рядом с текстом (#42): на поле справа, а где
+    /// места нет — под абзацем. Выключено — только подложка в тексте.
+    /// По умолчанию показываем; в файл — только `notes hidden`.
+    pub notes: bool,
     /// Набор читателя (#4). В файл пишется только то, что отличается
     /// от умолчания, — по той же причине, что у `shelf_width`: иначе наше
     /// нынешнее умолчание застыло бы в файле как выбор читателя.
@@ -674,6 +678,7 @@ impl Default for Settings {
             archive: true,
             plain_archive: false,
             slide_bar: true,
+            notes: true,
             typography: Type::default(),
         }
     }
@@ -720,6 +725,7 @@ impl Settings {
                 "archive" => settings.archive = value == "on",
                 "archive-files" => settings.plain_archive = value == "plain",
                 "bar" => settings.slide_bar = value != "stays",
+                "notes" => settings.notes = value != "hidden",
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
                         settings.typography.face = face;
@@ -777,6 +783,9 @@ impl Settings {
         }
         if !self.slide_bar {
             text.push_str("bar\tstays\n");
+        }
+        if !self.notes {
+            text.push_str("notes\thidden\n");
         }
         let (chosen, usual) = (self.typography, Type::default());
         if chosen.face != usual.face {
@@ -1745,6 +1754,7 @@ mod tests {
             archive: false,
             plain_archive: true,
             slide_bar: false,
+            notes: false,
             typography: Type {
                 face: Face::Serif,
                 size: 18.0,
@@ -1770,6 +1780,7 @@ mod tests {
         // не по умолчанию.
         assert!(!text.contains("bar"), "{text}");
         assert!(!text.contains("archive-files"), "{text}");
+        assert!(!text.contains("notes"), "{text}");
 
         fs::write(&path, "size 17\nmeasure 900\nface comic\nleading 1.4\n").unwrap();
         let typography = Settings::at(&path).typography;

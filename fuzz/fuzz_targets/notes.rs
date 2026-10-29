@@ -32,6 +32,7 @@ fuzz_target!(|data: &[u8]| {
         quote: selection.quote,
         after: selection.after,
         text: String::new(),
+        pictures: Vec::new(),
     };
     let spots = notes::place(&text, &[&note]);
     let placed = spots[0].place;
