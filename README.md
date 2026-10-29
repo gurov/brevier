@@ -353,6 +353,14 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   **the Wayback copy**: the latest one the Wayback Machine saved of the page itself, not
   of its 404.
 
+Notes in the margin of the essay at the top of this page, one with a sketch of the reader's own:
+
+![Dan Luu's essay on keyboard latency with three passages highlighted; between the text and
+the shelf stand two notes, each level with its passage and joined to it by a thin line, the
+first with the reader's sketch of where the milliseconds of a key press go; the passage
+highlighted without words has no note beside it; the shelf lists the page's notes above its
+contents](assets/screenshot-notes.png)
+
 A feed in Brevier — the Rust blog's, `blog.rust-lang.org/feed.xml`:
 
 ![The Rust blog's feed in Brevier: each entry's title as a link, its date and author in
