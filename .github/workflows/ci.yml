@@ -25,6 +25,9 @@ jobs:
           rustup default stable
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      # cli одним файлом собирается с одной `save` (packaging/cli.sh), без
+      # `typeset`: заметки и модель страницы в нём не нужны и не должны ему мешать.
+      - run: cargo clippy --all-targets --features save -- -D warnings
       - run: cargo test
 
   ui:

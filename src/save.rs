@@ -18,6 +18,9 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::fetch::UserAgent;
 use crate::media::{self, MAX_IMAGE, Source};
+// Заметки живут с моделью страницы, за `typeset`; cli собирается с одной
+// `save` (`packaging/cli.sh`), и выгрузки заметок в нём нет.
+#[cfg(feature = "typeset")]
 use crate::notes::{self, Note, Notes};
 use crate::{Document, markdown};
 
@@ -56,6 +59,7 @@ pub struct Attached {
     pub path: PathBuf,
 }
 
+#[cfg(feature = "typeset")]
 impl Attached {
     /// Картинки этих заметок, по разу каждая.
     pub fn of(notes: &[&Note], store: &Notes) -> Vec<Attached> {
@@ -179,6 +183,7 @@ fn beside(path: &Path, attached: &[Attached]) -> Result<usize, Error> {
 
 /// Как назвать выгрузку заметок: одна страница — по её заголовку,
 /// `.zip`, если есть картинки; несколько — архив, по файлу на страницу.
+#[cfg(feature = "typeset")]
 pub fn notes_name(pages: &[Vec<&Note>]) -> String {
     let pictures = pages.iter().flatten().any(|note| !note.pictures.is_empty());
     match pages {
@@ -199,6 +204,7 @@ pub fn notes_name(pages: &[Vec<&Note>]) -> String {
 /// по файлу markdown на страницу и картинки в `images/`: распакованный
 /// в хранилище Obsidian, он читается как есть. Иначе — один файл markdown,
 /// страницы в нём подряд, а картинки — в папку `images/` рядом.
+#[cfg(feature = "typeset")]
 pub fn notes(path: &Path, pages: &[Vec<&Note>], store: &Notes) -> Result<Saved, Error> {
     let all: Vec<&Note> = pages.iter().flatten().copied().collect();
     let attached = Attached::of(&all, store);
@@ -653,6 +659,7 @@ mod tests {
         assert_eq!(out.matches("images/01-a.png").count(), 2);
     }
 
+    #[cfg(feature = "typeset")]
     fn noted(dir: &Path) -> (Notes, u64, u64) {
         let mut store = Notes::at(dir.join("data/notes.tsv"));
         let quote = |text: &str| notes::select(text, 0, text.chars().count()).unwrap();
@@ -665,6 +672,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "typeset")]
     fn notes_go_out_as_markdown_with_their_pictures_beside() {
         let dir = crate::scratch::Scratch::new("save-notes");
         let (store, one, _) = noted(&dir);
@@ -686,6 +694,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "typeset")]
     fn all_notes_go_out_as_a_zip_with_a_file_for_each_page() {
         let dir = crate::scratch::Scratch::new("save-notes-zip");
         let (store, one, two) = noted(&dir);
@@ -728,6 +737,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "typeset")]
     fn a_saved_article_takes_the_pictures_of_its_notes_from_the_disk() {
         let dir = crate::scratch::Scratch::new("save-noted");
         let (store, one, _) = noted(&dir);

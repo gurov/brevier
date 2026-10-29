@@ -150,6 +150,7 @@ pub fn resolve(base: &Address, src: &str) -> Option<Source> {
         }
         // Страница заметок показывает картинки читателя (#42) — из своей
         // папки и только по нашему имени файла.
+        #[cfg(feature = "typeset")]
         Address::Internal(crate::address::Internal::Notes) => {
             let name = src
                 .strip_prefix(crate::notes::PICTURES)?
@@ -168,13 +169,16 @@ pub fn resolve(base: &Address, src: &str) -> Option<Source> {
 }
 
 /// Когда картинка для заметки «совсем большая» (#42): тяжелее `bytes`
-/// и длиннее `side` по большей стороне. Такую сводим к `side`.
+/// и длиннее `side` по большей стороне. Такую сводим к `side`. Как и сами
+/// заметки, за `typeset`: cli собирается с одной `save`.
+#[cfg(feature = "typeset")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shrink {
     pub bytes: usize,
     pub side: u32,
 }
 
+#[cfg(feature = "typeset")]
 impl Shrink {
     /// Телефон: снимок камеры (4000×3000, 3–6 МБ) — до 2560 по большей
     /// стороне, а снимок экрана (1080×2400) остаётся байт в байт. Копия
@@ -214,6 +218,7 @@ pub fn size(bytes: &[u8]) -> Option<(u32, u32)> {
 /// Уменьшить картинку, если она совсем большая: `None` — оставить как есть.
 /// Непрозрачная едет в JPEG, с прозрачностью — в PNG; поворот из EXIF
 /// применяем сразу, потому что заново записанный файл его теряет.
+#[cfg(feature = "typeset")]
 pub fn shrink(bytes: &[u8], limit: Shrink) -> Result<Option<Vec<u8>>, Error> {
     use image::ImageDecoder;
 
@@ -599,6 +604,7 @@ mod tests {
     }
 
     /// Шум не сжимается: такая картинка весит, сколько в ней пикселей.
+    #[cfg(feature = "typeset")]
     fn noise(w: u32, h: u32) -> Vec<u8> {
         let mut seed: u32 = 7;
         let picture = image::RgbImage::from_fn(w, h, |_, _| {
@@ -611,12 +617,14 @@ mod tests {
         out.into_inner()
     }
 
+    #[cfg(feature = "typeset")]
     fn sides(bytes: &[u8]) -> (u32, u32) {
         let picture = image::load_from_memory(bytes).unwrap();
         (picture.width(), picture.height())
     }
 
     #[test]
+    #[cfg(feature = "typeset")]
     fn only_a_very_large_picture_is_made_smaller() {
         // Пороги поменьше настоящих: в отладочной сборке шум в мегапиксели
         // сжимается долго, а правило то же.
@@ -658,12 +666,16 @@ mod tests {
         assert_eq!((raster.width, raster.height), (2, 4));
         assert_eq!(size(&bytes), Some((2, 4)));
         // И уменьшенная копия стоит так же, уже без EXIF.
-        let limit = Shrink { bytes: 10, side: 2 };
-        let smaller = shrink(&bytes, limit).unwrap().unwrap();
-        assert_eq!(sides(&smaller), (1, 2));
+        #[cfg(feature = "typeset")]
+        {
+            let limit = Shrink { bytes: 10, side: 2 };
+            let smaller = shrink(&bytes, limit).unwrap().unwrap();
+            assert_eq!(sides(&smaller), (1, 2));
+        }
     }
 
     #[test]
+    #[cfg(feature = "typeset")]
     fn the_notes_page_shows_only_the_pictures_of_notes() {
         let notes = Address::Internal(crate::address::Internal::Notes);
         let history = Address::Internal(crate::address::Internal::History);
