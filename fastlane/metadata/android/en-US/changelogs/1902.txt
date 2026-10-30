@@ -1,0 +1,1 @@
+• Targets Android 16, as Google Play requires. Back and the back gesture now reach Brevier the way Android 16 expects; they work as before: close what is open over the page, then step back through the tab's pages.

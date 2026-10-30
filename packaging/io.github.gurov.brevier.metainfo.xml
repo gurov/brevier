@@ -98,6 +98,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.19.2" date="2026-10-30" type="development">
+      <description>
+        <p>The Android app now targets Android 16, as Google Play
+          requires; back and the back gesture work as before. Saved
+          archives are written with a newer zip library.</p>
+      </description>
+    </release>
     <release version="0.19.1" date="2026-10-29" type="development">
       <description>
         <p>The notes margin no longer keeps a wide window from being made
