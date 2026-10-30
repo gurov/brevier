@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Brevier</title>
+<meta name="description" content="Brevier collects nothing: no account, no analytics, no crash reports, no server of its own. What stays on your device, and what goes to the sites you open.">
+<link rel="canonical" href="https://brevier.bizibah.com/privacy.html">
+<link rel="icon" href="brevier.svg" type="image/svg+xml">
+<link rel="alternate" type="application/atom+xml" title="Brevier releases" href="https://github.com/gurov/brevier/releases.atom">
+<link rel="alternate" type="text/markdown" href="privacy.md">
+<style>
+  :root {
+    --paper: #faf5ea;
+    --ink: #23201c;
+    --dim: #70685c;
+    --link: #0d6a9e;
+    --panel: #f2ead9;
+    --rule: #e2d9c6;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1d1b19;
+      --ink: #ded8cf;
+      --dim: #958c80;
+      --link: #8ec4d4;
+      --panel: #26231f;
+      --rule: #3d3833;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Noto Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 1.125rem;
+    line-height: 1.6;
+    hyphens: auto;
+  }
+  main, header, footer { padding: 0 16px; }
+  .column { max-width: 38rem; margin: 0 auto; }
+
+  a { color: var(--link); text-underline-offset: 0.15em; }
+  h1, h2 { font-weight: 300; line-height: 1.2; hyphens: manual; }
+  h1 { font-size: 2.6rem; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 1.6rem; margin: 2.5rem 0 1rem; }
+  p, ul { margin: 0 0 1rem; }
+  li { margin-bottom: 0.5rem; }
+  strong { font-weight: 600; }
+  code {
+    font-family: "Noto Sans Mono", ui-monospace, monospace;
+    font-size: 0.9em;
+    background: var(--panel);
+    padding: 0.05em 0.3em;
+    border-radius: 3px;
+  }
+
+  header { padding-top: 3rem; }
+  .home { font-size: 0.95rem; margin-bottom: 1.5rem; }
+  .lead { font-size: 1.2rem; margin-top: 1rem; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    padding-bottom: 3rem;
+    color: var(--dim);
+    font-size: 0.95rem;
+  }
+</style>
+</head>
+<body>
+
+<header class="column">
+  <p class="home"><a href="./">Brevier</a></p>
+  <h1>Privacy</h1>
+  <p class="lead">Brevier collects nothing. There is no account, no analytics, no crash
+    reports and no advertising, and the app has no server of its own to talk to. What you
+    read, keep and write stays on your device.</p>
+</header>
+
+<main class="column">
+
+<h2>What stays on your device</h2>
+
+<p>Your history, open tabs and bookmarks, a copy of every article you read, where you
+  stopped in long pages, your highlights and notes with their pictures, your settings, and
+  a week's cache of pages. They are plain files in the app's own storage on Android, and in
+  your user folders on Linux and Windows. Nobody else receives them.</p>
+
+<p><strong>Forget everything</strong>, in Settings, clears the history, the cache and the
+  archive; your bookmarks and notes stay until you remove them. Uninstalling the app on
+  Android removes all of it.</p>
+
+<h2>What leaves your device</h2>
+
+<p>Brevier is a browser. To show you a page, it asks the site for it, directly from your
+  device. The site sees what it sees from any browser: your IP address, the address you
+  asked for, the time, and the name <code>Brevier/0.1</code>. Brevier runs no scripts and
+  keeps no cookies, but a site can still log requests, and the pictures on a page may come
+  from other servers, counters among them. What they do with that is up to their own
+  privacy policies: Brevier does not hide you from the sites you open.</p>
+
+<p>Besides the pages you open:</p>
+<ul>
+  <li>Words typed into the address bar that are not an address are sent to
+    <strong>DuckDuckGo</strong> as a search.</li>
+  <li>Reading documentation from a repository asks <strong>GitHub</strong>,
+    <strong>GitLab</strong> or <strong>Codeberg</strong> for its files.</li>
+  <li>An article on Habr with comments asks <strong>habr.com</strong> for them.</li>
+  <li>The <strong>Wayback Machine</strong> (archive.org) is asked only when you press its
+    button on a page that is gone.</li>
+  <li><strong>Open in your browser</strong> and <strong>Share</strong> hand the address
+    to the app you choose.</li>
+</ul>
+
+<h2>Backups on Android</h2>
+
+<p>Brevier lets Android back up its data. If backup is on in your phone's settings,
+  Android may copy the app's files — history, bookmarks, notes, the archive — to your
+  Google account, as it does for other apps. That is between your phone and Google, under
+  Google's terms; turn backup off in the system settings to keep them on the phone only.</p>
+
+<h2>Where you got it</h2>
+
+<p>Stores keep their own records. If you installed Brevier from Google Play, Google shows
+  the developer overall numbers, such as installs and ratings, and reports of crashes from
+  phones that share usage and diagnostics with Google, under
+  <a href="https://policies.google.com/privacy">Google's privacy policy</a>. F-Droid and
+  GitHub, where Brevier is also published, have policies of their own. Brevier adds nothing
+  to any of them.</p>
+
+<h2>Questions</h2>
+
+<p>Brevier is made and published by Pavel Gurov. Ask in an issue at
+  <a href="https://github.com/gurov/brevier/issues">github.com/gurov/brevier</a>.
+  If this page changes, the date below changes with it, and the history of every change is
+  in the same repository.</p>
+
+</main>
+
+<footer class="column">
+  <p>Brevier is made by <a rel="author" href="https://github.com/gurov">Pavel Gurov</a> ·
+    this page updated <time datetime="2026-10-30">30 October 2026</time></p>
+</footer>
+
+</body>
+</html>

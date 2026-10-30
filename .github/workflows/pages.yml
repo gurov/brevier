@@ -1,5 +1,5 @@
-# Сайт на GitHub Pages: `site/` как есть плюс `index.md`, собранный самим
-# Brevier из той же страницы. Ниже 100 в `--check` страница не выходит.
+# Сайт на GitHub Pages: `site/` как есть плюс `index.md` и `privacy.md`, собранные самим
+# Brevier из тех же страниц. Ниже 100 в `--check` страницы не выходят.
 # В `flatpak/repo/` — репозиторий flatpak из бандла последнего релиза
 # (packaging/flatpak-repo.sh): Pages заменяет сайт целиком, поэтому
 # репозиторий собирается при каждой выкладке, а после релиза выкладку
@@ -32,6 +32,8 @@ jobs:
           cp -r site _site
           target/release/brevier --stdin https://brevier.bizibah.com/ < site/index.html > _site/index.md
           target/release/brevier --check --min 100 --stdin https://brevier.bizibah.com/ < site/index.html
+          target/release/brevier --stdin https://brevier.bizibah.com/privacy.html < site/privacy.html > _site/privacy.md
+          target/release/brevier --check --min 100 --stdin https://brevier.bizibah.com/privacy.html < site/privacy.html
       # Подписывает тот ключ, чья открытая половина лежит на сайте: секрет
       # с другим ключом роняет выкладку, а не тихо ломает обновления у всех.
       # Бандла нет — выкладка падает тоже: сайт без репозитория отвечал бы
