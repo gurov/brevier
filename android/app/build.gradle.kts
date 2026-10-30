@@ -78,14 +78,14 @@ val buildCore by tasks.registering(Exec::class) {
 
 android {
     namespace = "io.github.gurov.brevier"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.gurov.brevier"
         // API 24 — та же нижняя граница, что у канарейки в CI: ниже системный
         // проверяющий сертификаты не знает отзыва.
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionName = coreVersion
         versionCode = 1901
         check(versionCode == derivedVersionCode) {

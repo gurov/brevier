@@ -13,9 +13,12 @@
         </intent>
     </queries>
 
+    <!-- `enableOnBackInvokedCallback`: «назад» с Android 13 приходит в диспетчер
+         (`MainActivity.onBack`), как на Android 16, где иначе уже нельзя. -->
     <application
         android:name=".App"
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="Brevier"
         android:supportsRtl="true"

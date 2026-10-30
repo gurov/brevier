@@ -153,6 +153,14 @@ class MainActivity : Activity(), ArticleHost {
 
         build()
         applyTheme()
+        // «Назад» с Android 13 — через диспетчер (`enableOnBackInvokedCallback`
+        // в манифесте): на Android 16 при target 36 `onBackPressed` система уже
+        // не зовёт. Ниже 13 диспетчера нет — там `onBackPressed`.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            ) { onBack() }
+        }
         // На старте клавиатуру не поднимаем: программу открыли читать, а не печатать.
         if (!restoreSession()) newTab(null, ask = false)
         handle(intent)
@@ -436,7 +444,7 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
-     * Под edge-to-edge (target 35) системные панели лежат поверх окна:
+     * Под edge-to-edge (с target 35) системные панели лежат поверх окна:
      * отступаем от них сами, и от клавиатуры тоже.
      */
     private fun fitInsets(view: View, insets: WindowInsets): WindowInsets {
@@ -2288,7 +2296,10 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
+    override fun onBackPressed() = onBack()
+
+    /** «Назад»: сперва закрыть то, что поверх статьи, потом шаг по истории, потом уйти. */
+    private fun onBack() {
         when {
             hints.isShowing -> hints.dismiss()
             settings.visibility == View.VISIBLE -> settings.visibility = View.GONE
