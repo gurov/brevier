@@ -114,6 +114,11 @@ F-Droid builds Brevier from source and publishes this same APK, signed with this
 when its build matches ours byte for byte. So an install from either place updates from the
 other. A new version reaches F-Droid a few days after it appears in Releases.
 
+Google Play comes next. Before a new developer's app goes public there, Google wants a
+closed test: 12 testers for 14 days in a row. If you would like to be one,
+[#48](https://github.com/gurov/brevier/issues/48) says how. The Play build is signed with the
+same key, so it installs over the one from F-Droid or Releases, history and notes included.
+
 **The command line alone**, one file with nothing to install beside it: no GTK, no OpenSSL,
 on Linux statically linked, so any distribution will do. From 0.15.0 on, every release has
 an archive for Linux on x86_64 and on 64-bit ARM, for macOS (one file for Apple silicon and
