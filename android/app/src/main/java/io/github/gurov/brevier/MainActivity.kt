@@ -63,6 +63,11 @@ class MainActivity : Activity(), ArticleHost {
     private var systemHigh = false
     /** Уезжает ли шапка, пока читают (#45): настройка, по умолчанию — да. */
     private var slideBar = true
+    /**
+     * Полный экран (#60): панели системы прячутся, пока читают. Настройка,
+     * по умолчанию выключена.
+     */
+    private var fullScreen = false
     /** Бумага светлой и тёмной темы (#53), именем: `ivory`, `warm`… */
     private var paper = "ivory"
     private var darkPaper = "warm"
@@ -147,6 +152,7 @@ class MainActivity : Activity(), ArticleHost {
         }
         systemHigh = systemContrast()
         slideBar = stored.optBoolean("slideBar", true)
+        fullScreen = stored.optBoolean("fullScreen", false)
         paper = stored.optString("paper", "ivory")
         darkPaper = stored.optString("darkPaper", "warm")
         notesShown = stored.optBoolean("notes", true)
@@ -199,6 +205,7 @@ class MainActivity : Activity(), ArticleHost {
         // Контраст и дикторов включают в настройках системы — и возвращаются сюда.
         assisted = assistance()
         if (assisted) showBar()
+        fitSystemBars()
         val high = systemContrast()
         if (high != systemHigh) {
             val was = theme
@@ -345,8 +352,9 @@ class MainActivity : Activity(), ArticleHost {
             contrasted = { on -> changeContrast(on) },
             papered = { name -> changePaper(name) },
             slid = { on -> changeSlideBar(on) },
+            fullScreened = { on -> changeFullScreen(on) },
             notesUnder = { on -> changeNotesShown(on) },
-            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper) },
+            keepCopies = { on -> archive = on; saveSettings() },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
             typeChanged = { chosen -> changeType(chosen) },
@@ -389,6 +397,7 @@ class MainActivity : Activity(), ArticleHost {
                 }
             })
             setOnFocusChangeListener { _, focused ->
+                fitSystemBars()
                 if (focused) {
                     showBar()
                     showCard()
@@ -447,6 +456,16 @@ class MainActivity : Activity(), ArticleHost {
 
         setContentView(root)
         root.setOnApplyWindowInsetsListener { view, insets -> fitInsets(view, insets) }
+        // Полный экран (#60): поверх статьи открылось или закрылось своё —
+        // настройки, вкладки, полка, клавиатура, — и раскладка пересчиталась.
+        root.viewTreeObserver.addOnGlobalLayoutListener { fitSystemBars() }
+        // Под вырез камеры окно заходит, когда панели спрятаны: бумага до края,
+        // а текст от выреза отодвигает `fitInsets`. С Android 15 так и так.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
     }
 
     /**
@@ -457,12 +476,35 @@ class MainActivity : Activity(), ArticleHost {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             val ime = insets.getInsets(WindowInsets.Type.ime())
-            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            // Панели спрятаны (#60) — у края экрана скруглённые углы: строку
+            // у края колонки они не должны срезать.
+            val (top, bottom) = corners(insets)
+            view.setPadding(bars.left, maxOf(bars.top, top), bars.right, maxOf(bars.bottom, ime.bottom, bottom))
         } else {
             @Suppress("DEPRECATION")
             view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
         }
         return insets
+    }
+
+    /**
+     * Насколько скруглённые углы экрана заходят сверху и снизу туда, где
+     * начинается строка: поле колонки — кегль от края (`fit_column`), и угол
+     * радиуса больше поля срезал бы первые буквы. Только с Android 12: раньше
+     * углов система не называла.
+     */
+    private fun corners(insets: WindowInsets): Pair<Int, Int> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !barsAway) return 0 to 0
+        val margin = metrics().text.toDouble()
+        fun rise(position: Int): Int {
+            val radius = insets.getRoundedCorner(position)?.radius?.toDouble() ?: return 0
+            if (margin >= radius) return 0
+            val across = radius - margin
+            return Math.ceil(radius - Math.sqrt(radius * radius - across * across)).toInt()
+        }
+        val top = maxOf(rise(android.view.RoundedCorner.POSITION_TOP_LEFT), rise(android.view.RoundedCorner.POSITION_TOP_RIGHT))
+        val bottom = maxOf(rise(android.view.RoundedCorner.POSITION_BOTTOM_LEFT), rise(android.view.RoundedCorner.POSITION_BOTTOM_RIGHT))
+        return top to bottom
     }
 
     /** Панель: назад, адрес, полка, вкладки, меню. Значки перекрашиваются с темой. */
@@ -560,10 +602,7 @@ class MainActivity : Activity(), ArticleHost {
                 android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             window.insetsController?.setSystemBarsAppearance(if (dark) 0 else light, light)
         } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                if (dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            legacySystemBars()
         }
         sync()
     }
@@ -1323,7 +1362,7 @@ class MainActivity : Activity(), ArticleHost {
     /** Карточки заметок под абзацами (#42) — включить или выключить. */
     private fun changeNotesShown(on: Boolean) {
         notesShown = on
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
+        saveSettings()
         for (tab in tabs) tab.view?.showCards(on)
     }
 
@@ -1907,13 +1946,13 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun showSettings() {
         showBar()
-        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown)
+        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, fullScreen)
     }
 
     /** Шапке — уезжать или стоять (#45). */
     private fun changeSlideBar(on: Boolean) {
         slideBar = on
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
+        saveSettings()
         if (!on) showBar()
     }
 
@@ -1979,7 +2018,7 @@ class MainActivity : Activity(), ArticleHost {
         val imagesOn = images && !this.images
         this.dark = dark
         this.images = images
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
+        saveSettings()
         if (themeChanged) retheme()
         if (imagesOn) currentTab()?.view?.loadAll()
     }
@@ -1988,15 +2027,26 @@ class MainActivity : Activity(), ArticleHost {
     private fun changeContrast(high: Boolean) {
         val was = theme
         contrast = high
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
+        saveSettings()
         if (theme != was) retheme()
+    }
+
+    /** Все настройки разом — на диск, в `settings.tsv`. */
+    private fun saveSettings() =
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper, fullScreen)
+
+    /** Полный экран (#60): включили — панели уходят, как только читатель вернётся к статье. */
+    private fun changeFullScreen(on: Boolean) {
+        fullScreen = on
+        saveSettings()
+        fitSystemBars()
     }
 
     /** Бумага текущей темы (#53): у светлой и тёмной — каждая своя. */
     private fun changePaper(name: String) {
         val was = theme
         if (dark) darkPaper = name else paper = name
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
+        saveSettings()
         if (theme != was) retheme()
     }
 
@@ -2042,9 +2092,13 @@ class MainActivity : Activity(), ArticleHost {
     // страницы и в её конце она на месте, на коротких и своих страницах
     // не уезжает вовсе.
 
-    /** Где шапке стоять на месте: всё, что не чтение длинной статьи. */
+    /**
+     * Где шапке стоять на месте: всё, что не чтение длинной статьи. В полном
+     * экране (#60) она уезжает и без своей настройки: место для чтения —
+     * ровно то, о чём просили, включив его.
+     */
     private fun barPinned(): Boolean {
-        if (!slideBar || selecting || assisted) return true
+        if ((!slideBar && !fullScreen) || selecting || assisted) return true
         if (address.hasFocus() || findBar.visibility == View.VISIBLE) return true
         if (shelf.open || tabList.visibility == View.VISIBLE || settings.visibility == View.VISIBLE) return true
         val tab = currentTab() ?: return true
@@ -2129,6 +2183,59 @@ class MainActivity : Activity(), ArticleHost {
         barMotion?.cancel()
         barMotion = null
         placeBar(0f)
+    }
+
+    // ── полный экран (#60) ──────────────────────────────────────────────────
+    //
+    // Панели системы прячутся, пока читают статью; свайп от края показывает
+    // их на миг поверх текста (`BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`),
+    // и страница под ними не сдвигается. Возвращаются они, пока поверх статьи
+    // что-то своё: адрес с клавиатурой, поиск, настройки, вкладки, полка, —
+    // и с TalkBack и Switch Access, как шапка (#45). Диалогам — сами: у диалога
+    // своё окно, и панели при нём показывает система. Текст от выреза камеры отодвигает
+    // `fitInsets`: отступ — от выреза, а не от панелей, которых нет.
+
+    /** Читают ли статью: ничего своего поверх неё нет. */
+    private fun readingOnly(): Boolean =
+        !address.hasFocus() && findBar.visibility != View.VISIBLE &&
+            settings.visibility != View.VISIBLE && tabList.visibility != View.VISIBLE && !shelf.open
+
+    /** Последнее, о чём попросили систему: прятать панели или нет. */
+    private var barsAway = false
+
+    private fun fitSystemBars() {
+        if (!::findBar.isInitialized) return
+        // Фокус окна здесь не спрашиваем: у диалога своё окно, и пока он
+        // в фокусе, панели показывает сама система. А подсказка системы
+        // «Viewing full screen» тоже окно — с проверкой фокуса панели
+        // прятались и показывались по кругу, раз в полторы секунды.
+        val away = fullScreen && !assisted && readingOnly()
+        if (away == barsAway) return
+        barsAway = away
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = window.insetsController ?: return
+            if (away) {
+                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsets.Type.systemBars())
+            } else {
+                controller.show(WindowInsets.Type.systemBars())
+            }
+        } else {
+            legacySystemBars()
+        }
+    }
+
+    /** До Android 11 панели и их вид — одним набором флагов. */
+    @Suppress("DEPRECATION")
+    private fun legacySystemBars() {
+        var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        if (!dark) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        if (barsAway) {
+            flags = flags or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+        }
+        window.decorView.systemUiVisibility = flags
     }
 
     /** Шапка сменила рост (поворот, кегль системы): статья оставляет под неё поле заново. */

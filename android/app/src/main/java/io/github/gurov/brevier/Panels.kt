@@ -595,6 +595,7 @@ class SettingsPage(
     private val contrasted: (high: Boolean) -> Unit,
     private val papered: (name: String) -> Unit,
     private val slid: (on: Boolean) -> Unit,
+    private val fullScreened: (on: Boolean) -> Unit,
     private val notesUnder: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
@@ -616,7 +617,10 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType, slideBar: Boolean, notes: Boolean) {
+    fun show(
+        palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType,
+        slideBar: Boolean, notes: Boolean, fullScreen: Boolean,
+    ) {
         this.dark = theme.dark
         this.theme = theme
         this.images = images
@@ -667,6 +671,11 @@ class SettingsPage(
             "Slide the bar away",
             "Reading down, the bar at the top moves out of the text's way as far as your finger goes; reading back up brings it back. Off: it stays put.",
             switch(palette, slideBar) { on -> slid(on) }, palette,
+        ))
+        column.addView(row(
+            "Full screen",
+            "While you read, the system's status and navigation bars go away and the bar at the top slides away with them. A swipe from the edge brings them back for a moment.",
+            switch(palette, fullScreen) { on -> fullScreened(on) }, palette,
         ))
         column.addView(row(
             "Notes under their paragraphs",

@@ -3052,6 +3052,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         plain_archive: borrowed.plain_archive,
         // Шапка, что уезжает, — у телефона (#45); у окна её нет.
         slide_bar: Settings::default().slide_bar,
+        full_screen: Settings::default().full_screen,
         notes: borrowed.show_notes,
         typography: borrowed.typography,
         paper: borrowed.paper,

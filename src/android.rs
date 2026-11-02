@@ -299,6 +299,10 @@ fn call(method: &str, arg: &str) -> String {
             if !field(5).is_empty() {
                 settings.notes = field(5) == "1";
             }
+            // Полный экран (#60); поля нет — переключатель не трогали.
+            if !field(8).is_empty() {
+                settings.full_screen = field(8) == "1";
+            }
             // Бумага светлой и тёмной темы (#53); чужое имя — не трогаем.
             if let Some(paper) = palette::Paper::from_name(field(6), false) {
                 settings.paper = paper;
@@ -927,7 +931,7 @@ fn settings() -> String {
         format!("[{}]", items.join(","))
     };
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"notes\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"fullScreen\":{},\"notes\":{},\
          \"paper\":\"{}\",\"darkPaper\":\"{}\",\"papers\":{},\"darkPapers\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{},\"paragraphs\":{}}}",
@@ -940,6 +944,7 @@ fn settings() -> String {
         settings.images,
         settings.archive,
         settings.slide_bar,
+        settings.full_screen,
         settings.notes,
         settings.paper.name(false),
         settings.dark_paper.name(true),

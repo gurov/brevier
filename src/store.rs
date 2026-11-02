@@ -653,6 +653,10 @@ pub struct Settings {
     /// и строку не пишет. По умолчанию уезжает (мейнтейнер, 25 октября 2026);
     /// в файл — только `bar stays`.
     pub slide_bar: bool,
+    /// Полный экран телефона (#60): панели системы прячутся, пока читают.
+    /// Окно этого не умеет и строку не пишет. По умолчанию выключен;
+    /// в файл — только `screen full`.
+    pub full_screen: bool,
     /// Показывать ли заметки рядом с текстом (#42): на поле справа, а где
     /// места нет — под абзацем. Выключено — только подложка в тексте.
     /// По умолчанию показываем; в файл — только `notes hidden`.
@@ -683,6 +687,7 @@ impl Default for Settings {
             archive: true,
             plain_archive: false,
             slide_bar: true,
+            full_screen: false,
             notes: true,
             typography: Type::default(),
             paper: Paper::Usual,
@@ -733,6 +738,7 @@ impl Settings {
                 "archive" => settings.archive = value == "on",
                 "archive-files" => settings.plain_archive = value == "plain",
                 "bar" => settings.slide_bar = value != "stays",
+                "screen" => settings.full_screen = value == "full",
                 "notes" => settings.notes = value != "hidden",
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
@@ -811,6 +817,9 @@ impl Settings {
         }
         if !self.slide_bar {
             text.push_str("bar\tstays\n");
+        }
+        if self.full_screen {
+            text.push_str("screen\tfull\n");
         }
         if !self.notes {
             text.push_str("notes\thidden\n");
@@ -1791,6 +1800,7 @@ mod tests {
             archive: false,
             plain_archive: true,
             slide_bar: false,
+            full_screen: true,
             notes: false,
             typography: Type {
                 face: Face::Serif,
@@ -1853,6 +1863,7 @@ mod tests {
         // Шапка телефона (#45) и простые копии архива (#43) — тоже только
         // не по умолчанию.
         assert!(!text.contains("bar"), "{text}");
+        assert!(!text.contains("screen"), "{text}");
         assert!(!text.contains("archive-files"), "{text}");
         assert!(!text.contains("notes"), "{text}");
         assert!(!text.contains("paper"), "{text}");
