@@ -4279,7 +4279,11 @@ fn zoom_by(ui: &Ui, state: &Rc<RefCell<State>>, step: i32) {
     // её увидеть хуже, чем не увеличить.
     let typography = state.borrow().typography;
     if now > was && !fits_on_screen(ui, ZOOM_STEPS[now] * typography.scale(), &typography) {
-        notice(ui, "That step would not fit on this screen");
+        // Мера в кеглях: строка покороче освобождает место следующей ступени.
+        notice(
+            ui,
+            "That step would not fit on this screen; a shorter line length in Settings makes room",
+        );
         return;
     }
     state.borrow_mut().zoom = now;
