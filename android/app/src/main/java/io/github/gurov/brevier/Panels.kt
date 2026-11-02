@@ -8,7 +8,10 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Build
 import android.text.Layout
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.LeadingMarginSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -659,6 +662,11 @@ class SettingsPage(
             palette,
         ))
         fine.addView(row(
+            "Paragraph spacing", "Space between paragraphs, in lines. Or none, the way books do it: each new paragraph starts a little to the right instead.",
+            numbers(palette, "Paragraph spacing", stored.getJSONArray("paragraphs"), reader.paragraphs) { value -> typeChanged(reader.copy(paragraphs = value)) },
+            palette,
+        ))
+        fine.addView(row(
             "Justified text", "Even right edges. Bearable only with hyphenation, which Brevier does when the page names its language.",
             switch(palette, reader.justify) { on -> typeChanged(reader.copy(justify = on)) }, palette,
         ))
@@ -693,8 +701,16 @@ class SettingsPage(
             setTextColor(palette.ink)
             setPadding(0, 0, 0, m.extra.toInt())
         }
-        val body = TextView(context).apply {
-            text = SAMPLE
+        // Два абзаца — чтобы видно было и воздух между ними (#59).
+        fun paragraph(words: String, continued: Boolean) = TextView(context).apply {
+            text = if (continued && m.indent > 0f) {
+                SpannableString(words).apply {
+                    setSpan(LeadingMarginSpan.Standard(m.indent.toInt(), 0), 0, length, Spanned.SPAN_PARAGRAPH)
+                }
+            } else {
+                words
+            }
+            if (!continued) setPadding(0, 0, 0, (m.extra + m.gap).toInt())
             typeface = fonts.pick(false, 400, false, reader.face).typeface
             setTextSize(TypedValue.COMPLEX_UNIT_PX, m.text)
             setTextColor(palette.ink)
@@ -712,7 +728,8 @@ class SettingsPage(
             }
         }
         box.addView(heading)
-        box.addView(body)
+        box.addView(paragraph(SAMPLE[0], continued = false))
+        box.addView(paragraph(SAMPLE[1], continued = true))
         return box.also {
             it.layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
                 topMargin = context.dp(4f)
@@ -782,9 +799,11 @@ class SettingsPage(
 }
 
 /** Образец набора в настройках — тот же, что в окне. */
-private const val SAMPLE = "Choose the face, the size, the length of the line and the space between lines once, " +
-    "and every page you open is set the same way: a news site, a blog, the documentation of a library. " +
-    "The site decides what to say; how it reads is up to you."
+private val SAMPLE = listOf(
+    "Choose the face, the size, the length of the line and the space between lines once, " +
+        "and every page you open is set the same way: a news site, a blog, the documentation of a library.",
+    "The site decides what to say; how it reads is up to you.",
+)
 
 /**
  * Меню под «⋮»: ряд значков для того, что трогают часто, и список — для

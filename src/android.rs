@@ -302,7 +302,8 @@ fn call(method: &str, arg: &str) -> String {
             settings.save();
             "{}".to_owned()
         }
-        // Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж, выключка.
+        // Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж, выключка,
+        // воздух между абзацами (#59).
         "type.save" => {
             let mut settings = Settings::load();
             let chosen = &mut settings.typography;
@@ -319,6 +320,9 @@ fn call(method: &str, arg: &str) -> String {
                 chosen.leading = leading;
             }
             chosen.justify = field(4) == "1";
+            if let Some(lines) = outline::Type::paragraphs_from(field(5)) {
+                chosen.paragraphs = lines;
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -879,7 +883,7 @@ fn settings() -> String {
     format!(
         "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"notes\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
-         \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
+         \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{},\"paragraphs\":{}}}",
         settings.dark,
         match settings.high_contrast {
             Some(true) => "high",
@@ -897,18 +901,24 @@ fn settings() -> String {
         choices(&outline::SIZES, chosen.size, outline::size_label),
         choices(&outline::MEASURES, chosen.measure, outline::measure_label),
         choices(&outline::LEADINGS, chosen.leading, outline::leading_label),
+        choices(
+            &outline::PARAGRAPHS,
+            chosen.paragraphs,
+            outline::paragraphs_label
+        ),
     )
 }
 
 /// Набор читателя для Kotlin (`ReaderType.of`).
 fn type_json(set: &outline::Type) -> String {
     format!(
-        "{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{}}}",
+        "{{\"face\":\"{}\",\"size\":{},\"measure\":{},\"leading\":{},\"justify\":{},\"paragraphs\":{}}}",
         set.face.name(),
         set.size,
         set.measure,
         set.leading,
         set.justify,
+        set.paragraphs,
     )
 }
 

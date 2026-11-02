@@ -702,6 +702,7 @@ impl Settings {
     pub fn at(path: impl AsRef<Path>) -> Self {
         let text = fs::read_to_string(path.as_ref()).unwrap_or_default();
         let mut settings = Self::default();
+        let mut paragraphs = false;
         for line in text.lines() {
             if line.starts_with('#') {
                 continue;
@@ -747,8 +748,18 @@ impl Settings {
                     }
                 }
                 "justify" => settings.typography.justify = value == "on",
+                "paragraphs" => {
+                    if let Some(lines) = Type::paragraphs_from(value) {
+                        settings.typography.paragraphs = lines;
+                        paragraphs = true;
+                    }
+                }
                 _ => {}
             }
+        }
+        // Файл до #59: воздух между абзацами — у готового набора свой.
+        if !paragraphs {
+            settings.typography = settings.typography.with_paragraphs_of_its_style();
         }
         settings
     }
@@ -802,6 +813,9 @@ impl Settings {
         }
         if chosen.justify != usual.justify {
             text.push_str(&format!("justify\t{}\n", switch(chosen.justify)));
+        }
+        if chosen.paragraphs != usual.paragraphs {
+            text.push_str(&format!("paragraphs\t{}\n", chosen.paragraphs_name()));
         }
         let _ = fs::write(path, text);
     }
@@ -1761,10 +1775,45 @@ mod tests {
                 measure: 32.0,
                 leading: 1.65,
                 justify: true,
+                paragraphs: 0.0,
             },
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("paragraphs\tindent")
+        );
+    }
+
+    /// Воздух между абзацами (#59): числом или красной строкой; вне пределов —
+    /// умолчание. Файл до #59 с готовым набором получает воздух этого набора,
+    /// и набор горит, как горел.
+    #[test]
+    fn paragraph_spacing_is_read_and_older_files_keep_their_style() {
+        let dir = temporary("paragraphs");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.tsv");
+        fs::write(&path, "paragraphs 0.75\n").unwrap();
+        assert_eq!(Settings::at(&path).typography.paragraphs, 0.75);
+        fs::write(&path, "paragraphs 9\n").unwrap();
+        assert_eq!(Settings::at(&path).typography, Type::USUAL);
+
+        let book = crate::outline::STYLES[1].set;
+        fs::write(
+            &path,
+            "face serif\nsize 18\nmeasure 34\nleading 1.45\njustify on\n",
+        )
+        .unwrap();
+        let typography = Settings::at(&path).typography;
+        assert_eq!(typography, book);
+        assert_eq!(typography.style(), Some(1));
+        // Свой набор остаётся своим, с воздухом по умолчанию.
+        fs::write(&path, "size 18\n").unwrap();
+        let own = Settings::at(&path).typography;
+        assert_eq!(own.paragraphs, Type::USUAL.paragraphs);
+        assert_eq!(own.style(), None);
     }
 
     /// Не тронутый набор в файл не пишется; вписанное руками вне пределов

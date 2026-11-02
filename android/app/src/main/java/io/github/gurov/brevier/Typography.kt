@@ -104,6 +104,8 @@ data class ReaderType(
     val measure: Float,
     val leading: Float,
     val justify: Boolean,
+    /** Воздух между абзацами в строках (#59); ноль — красная строка вместо него. */
+    val paragraphs: Float,
 ) {
     companion object {
         fun of(json: JSONObject) = ReaderType(
@@ -112,6 +114,7 @@ data class ReaderType(
             measure = json.getDouble("measure").toFloat(),
             leading = json.getDouble("leading").toFloat(),
             justify = json.optBoolean("justify"),
+            paragraphs = json.optDouble("paragraphs", 0.5).toFloat(),
         )
     }
 }
@@ -134,6 +137,13 @@ class Metrics(context: Context, val type: Typography, val zoom: Float, val reade
     val unit: Float = text / type.textPx
     /** Воздух между строками и абзацами — та же величина, что `extra` в окне. */
     val extra: Float = (reader.leading - 1f) * type.textSize * unit
+    /**
+     * Воздух под абзацем прозы сверх межстрочного (#59): строки набора —
+     * кегль на интерлиньяж, как `Type::paragraph_gap` в ядре.
+     */
+    val gap: Float = reader.paragraphs * text * reader.leading
+    /** Красная строка — кегль, когда воздуха между абзацами нет (`Type::first_line_indent`). */
+    val indent: Float = if (reader.paragraphs < 0.001f) text else 0f
     /** Мера: колонка не шире этого. На телефоне она обычно — весь экран. */
     val measure: Float = reader.measure * text
     /** Гарнитура текста: `noto`, `serif` или `sans`. */

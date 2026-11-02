@@ -122,6 +122,11 @@ pub struct Type {
     /// Выключка по ширине. Терпима только с переносами, а переносы есть
     /// лишь у страницы, объявившей язык (`typeset`), — решает читатель.
     pub justify: bool,
+    /// Воздух между абзацами прозы сверх межстрочного (#59), в строках
+    /// набора. Ноль — по-книжному: без воздуха, с красной строкой у абзаца,
+    /// продолжающего прозу (`page::Style::Continued`). Числом, а не
+    /// перечислением: выбор тот же ряд значений, что у кегля и меры.
+    pub paragraphs: f32,
 }
 
 impl Default for Type {
@@ -136,6 +141,13 @@ pub const SIZES: [f32; 7] = [13.5, 15.0, 16.5, 18.0, 19.5, 21.0, 22.5];
 pub const MEASURES: [f32; 8] = [28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0, 44.0];
 /// Интерлиньяж на выбор.
 pub const LEADINGS: [f32; 6] = [1.35, 1.45, 1.55, 1.65, 1.75, 1.9];
+/// Воздух между абзацами на выбор, в строках (#59). До него был один
+/// на всех — около четверти строки, и абзацы на телефоне сливались:
+/// письмо читателя, 2 ноября 2026. Ноль — красная строка вместо воздуха.
+pub const PARAGRAPHS: [f32; 6] = [0.0, 0.25, 0.5, 0.75, 1.0, 1.5];
+/// Воздух между абзацами по умолчанию: полстроки — заметно, а страница
+/// не рассыпается на отдельные абзацы.
+pub const PARAGRAPH_GAP: f32 = 0.5;
 
 /// Готовые наборы (13 октября 2026, мейнтейнер): пять настроек подряд
 /// пугают, поэтому сверху — четыре набора, а тонкая настройка свёрнута
@@ -149,13 +161,14 @@ pub const STYLES: [Style; 4] = [
     },
     Style {
         name: "Book",
-        note: "Your system's serif, 18 pt, justified",
+        note: "Your system's serif, 18 pt, justified, paragraphs indented",
         set: Type {
             face: Face::Serif,
             size: 18.0,
             measure: 34.0,
             leading: 1.45,
             justify: true,
+            paragraphs: 0.0,
         },
     },
     Style {
@@ -167,6 +180,7 @@ pub const STYLES: [Style; 4] = [
             measure: 30.0,
             leading: 1.65,
             justify: false,
+            paragraphs: 0.75,
         },
     },
     Style {
@@ -178,6 +192,7 @@ pub const STYLES: [Style; 4] = [
             measure: 40.0,
             leading: 1.45,
             justify: false,
+            paragraphs: 0.25,
         },
     },
 ];
@@ -195,6 +210,7 @@ pub struct Style {
 const SIZE_LIMITS: (f32, f32) = (9.0, 36.0);
 const MEASURE_LIMITS: (f32, f32) = (16.0, 60.0);
 const LEADING_LIMITS: (f32, f32) = (1.0, 2.5);
+const PARAGRAPH_LIMITS: (f32, f32) = (0.0, 3.0);
 
 impl Type {
     /// Набор, каким его задумал Brevier.
@@ -204,6 +220,7 @@ impl Type {
         measure: MEASURE_IN_EMS,
         leading: LINE_HEIGHT,
         justify: false,
+        paragraphs: PARAGRAPH_GAP,
     };
 
     /// Готовый набор, с которым этот совпадает, — его кнопка горит.
@@ -217,7 +234,43 @@ impl Type {
                 && near(set.measure, self.measure)
                 && near(set.leading, self.leading)
                 && set.justify == self.justify
+                && near(set.paragraphs, self.paragraphs)
         })
+    }
+
+    /// Набор из файла, писанного до #59: строки `paragraphs` в нём нет.
+    /// Совпал без неё с готовым набором — значит, выбран был он, и воздух
+    /// между абзацами — его: иначе «Book» читателя после обновления
+    /// погас бы и стал «своим». Не совпал — умолчание, как у любой строки.
+    pub fn with_paragraphs_of_its_style(self) -> Type {
+        STYLES
+            .iter()
+            .enumerate()
+            .find_map(|(index, style)| {
+                let candidate = Type {
+                    paragraphs: style.set.paragraphs,
+                    ..self
+                };
+                (candidate.style() == Some(index)).then_some(candidate)
+            })
+            .unwrap_or(self)
+    }
+
+    /// Красная строка вместо воздуха (#59).
+    pub fn indents(&self) -> bool {
+        self.paragraphs < 0.001
+    }
+
+    /// Воздух под абзацем прозы сверх межстрочного — в пикселях десктопа
+    /// при нашем кегле, как отступы выше; интерфейс множит его, как и их.
+    /// Строка — кегль на интерлиньяж.
+    pub fn paragraph_gap(&self) -> f32 {
+        self.paragraphs * TEXT_PX * self.leading
+    }
+
+    /// Красная строка в тех же пикселях: кегль, книжная норма. Без неё — ноль.
+    pub fn first_line_indent(&self) -> f32 {
+        if self.indents() { TEXT_PX } else { 0.0 }
     }
 
     /// Во сколько раз кегль читателя больше нашего: на столько множится
@@ -237,6 +290,23 @@ impl Type {
 
     pub fn leading_from(text: &str) -> Option<f32> {
         within(text, LEADING_LIMITS)
+    }
+
+    /// Воздух между абзацами: число строк или `indent`.
+    pub fn paragraphs_from(text: &str) -> Option<f32> {
+        if text.trim() == "indent" {
+            return Some(0.0);
+        }
+        within(text, PARAGRAPH_LIMITS)
+    }
+
+    /// Он же в файл: красная строка — словом, остальное числом.
+    pub fn paragraphs_name(&self) -> String {
+        if self.indents() {
+            "indent".to_owned()
+        } else {
+            self.paragraphs.to_string()
+        }
     }
 }
 
@@ -321,6 +391,21 @@ pub fn measure_label(measure: f32) -> String {
 /// Подпись интерлиньяжа: «1.55».
 pub fn leading_label(leading: f32) -> String {
     short(leading)
+}
+
+/// Подпись воздуха между абзацами: «½ line», «1½ lines»; ноль — красная
+/// строка. Вписанное руками — числом.
+pub fn paragraphs_label(lines: f32) -> String {
+    let near = |value: f32| (lines - value).abs() < 0.001;
+    match () {
+        _ if near(0.0) => "Indented, no space".to_owned(),
+        _ if near(0.25) => "¼ line".to_owned(),
+        _ if near(0.5) => "½ line".to_owned(),
+        _ if near(0.75) => "¾ line".to_owned(),
+        _ if near(1.0) => "1 line".to_owned(),
+        _ if near(1.5) => "1½ lines".to_owned(),
+        _ => format!("{} lines", short(lines)),
+    }
 }
 
 /// Число без лишних нулей: 16.5, 18, 1.55.

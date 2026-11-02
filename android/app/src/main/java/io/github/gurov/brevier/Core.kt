@@ -108,7 +108,10 @@ object Core {
 
     /** Набор читателя (#4) — в `settings.tsv` рядом с темой. */
     fun saveType(type: ReaderType) {
-        val fields = listOf(type.face, type.size.toString(), type.measure.toString(), type.leading.toString(), if (type.justify) "1" else "0")
+        val fields = listOf(
+            type.face, type.size.toString(), type.measure.toString(), type.leading.toString(),
+            if (type.justify) "1" else "0", type.paragraphs.toString(),
+        )
         ask("type.save", fields.joinToString(FIELD.toString()))
     }
 

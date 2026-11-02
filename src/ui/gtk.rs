@@ -1612,6 +1612,8 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
     let measure = number_choice(&measures, chosen.measure, outline::measure_label);
     let leadings = outline::choices(&outline::LEADINGS, chosen.leading);
     let leading = number_choice(&leadings, chosen.leading, outline::leading_label);
+    let paragraphs = outline::choices(&outline::PARAGRAPHS, chosen.paragraphs);
+    let spacing = number_choice(&paragraphs, chosen.paragraphs, outline::paragraphs_label);
     let justify = gtk::Switch::builder()
         .valign(gtk::Align::Center)
         .active(chosen.justify)
@@ -1716,6 +1718,7 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         ),
         (&measure, measures, |next, value| next.measure = value),
         (&leading, leadings, |next, value| next.leading = value),
+        (&spacing, paragraphs, |next, value| next.paragraphs = value),
     ];
     for (control, values, set) in numbers {
         let change = change.clone();
@@ -1746,11 +1749,12 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         let change = change.clone();
         let mark = mark.clone();
         let state = state.clone();
-        let (face, size, measure, leading, justify) = (
+        let (face, size, measure, leading, spacing, justify) = (
             face.clone(),
             size.clone(),
             measure.clone(),
             leading.clone(),
+            spacing.clone(),
             justify.clone(),
         );
         let set = style.set;
@@ -1767,6 +1771,7 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
                 (&size, &outline::SIZES[..], set.size),
                 (&measure, &outline::MEASURES[..], set.measure),
                 (&leading, &outline::LEADINGS[..], set.leading),
+                (&spacing, &outline::PARAGRAPHS[..], set.paragraphs),
             ] {
                 let values = outline::choices(values, value);
                 if let Some(index) = values.iter().position(|v| *v == value) {
@@ -1804,6 +1809,12 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
         &leading,
     ));
     rows.append(&setting_row(
+        "Paragraph spacing",
+        "Space between paragraphs, in lines. Or none, the way books do it: \
+         each new paragraph starts a little to the right instead.",
+        &spacing,
+    ));
+    rows.append(&setting_row(
         "Justified text",
         "Even right edges. Bearable only with hyphenation, which Brevier \
          does when the page names its language.",
@@ -1835,21 +1846,31 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
     page.append(&fine);
 }
 
-/// Образец набора в настройках: заголовок и абзац, по-английски, с переносами.
+/// Образец набора в настройках: заголовок и два абзаца, по-английски,
+/// с переносами. Два — чтобы видно было и воздух между ними (#59).
 fn fill_sample(buffer: &gtk::TextBuffer) {
     buffer.set_text("");
     let mut end = buffer.end_iter();
     buffer.insert_with_tags_by_name(&mut end, "The type is yours\n", &["h3"]);
+    let [first, second] = SAMPLE;
     buffer.insert_with_tags_by_name(
         &mut end,
-        &brevier::typeset::typeset(SAMPLE, "en"),
+        &format!("{}\n", brevier::typeset::typeset(first, "en")),
         &["body"],
+    );
+    buffer.insert_with_tags_by_name(
+        &mut end,
+        &brevier::typeset::typeset(second, "en"),
+        &["body", "continued"],
     );
 }
 
-const SAMPLE: &str = "Choose the face, the size, the length of the line and the space \
-between lines once, and every page you open is set the same way: a news site, a blog, \
-the documentation of a library. The site decides what to say; how it reads is up to you.";
+const SAMPLE: [&str; 2] = [
+    "Choose the face, the size, the length of the line and the space between lines \
+     once, and every page you open is set the same way: a news site, a blog, the \
+     documentation of a library.",
+    "The site decides what to say; how it reads is up to you.",
+];
 
 /// Выбор из чисел с подписями.
 fn number_choice(values: &[f32], current: f32, label: fn(f32) -> String) -> gtk::DropDown {
@@ -5110,6 +5131,9 @@ fn tags(buffer: &gtk::TextBuffer, theme: Theme, scale: f32, typography: &Type) {
         gtk::Justification::Left
     };
 
+    // Под абзацем — межстрочный воздух и сверх него воздух абзаца,
+    // который выбрал читатель (#59); у книжного набора его нет вовсе —
+    // абзац, продолжающий прозу, начинается красной строкой (`continued`).
     style(
         buffer,
         "body",
@@ -5117,9 +5141,19 @@ fn tags(buffer: &gtk::TextBuffer, theme: Theme, scale: f32, typography: &Type) {
             ("family", &family),
             ("size-points", &body),
             ("pixels-inside-wrap", &extra),
-            ("pixels-below-lines", &(extra * 2)),
+            (
+                "pixels-below-lines",
+                &(extra + px(f64::from(typography.paragraph_gap()))),
+            ),
             ("justification", &justification),
         ],
+    );
+    // Отступ первой строки — у Pango это и есть `indent` абзаца; у прозы
+    // другого отступа нет, спорить не с кем.
+    style(
+        buffer,
+        "continued",
+        &[("indent", &px(f64::from(typography.first_line_indent())))],
     );
     // Строфа (#21): каждая строка стиха — свой абзац буфера, и воздух между
     // ними тот же, что между строками прозы внутри абзаца. Длинная строка,
