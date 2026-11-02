@@ -268,6 +268,10 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
     let parsed = target(url)?;
 
     let mut res: Response<Body> = agent(ua, ACCEPT).get(parsed.as_str()).call()?;
+    let status = res.status().as_u16();
+    if status >= 400 {
+        return Err(refusal(&mut res, status, url));
+    }
 
     let final_url = res.get_uri().to_string();
     // В истории переходов первый адрес — сам запрос, поэтому переездов
@@ -325,6 +329,46 @@ fn fetch_once(url: &str, ua: UserAgent) -> Result<Page, Error> {
         body,
         redirects,
     })
+}
+
+/// Сколько тела отказа читаем, чтобы узнать в нём заслон. Заслоны Cloudflare
+/// и Qrator — несколько килобайт; страница отказа, которая длиннее, — уже
+/// не проверка скриптом, а чей-то текст.
+const REFUSAL_BODY: u64 = 256 * 1024;
+
+/// Ошибка вместо страницы. За 401 и 403 бывает не закрытая дверь, а заслон
+/// (#51): Cloudflare («Just a moment…») и Qrator отвечают отказом, пока
+/// клиент не исполнит их скрипт, а браузер читателя проходит его сам.
+/// Тогда это `ScriptGate`, как и заслон со статусом 200 (#23), — читателю
+/// честнее «сайт пускает только браузеры со скриптами», чем «не пустили».
+/// Тело остальных отказов не читаем: в нём нет ничего, что меняет ответ.
+fn refusal(res: &mut Response<Body>, status: u16, url: &str) -> Error {
+    if !matches!(status, 401 | 403) {
+        return Error::HttpStatus(status);
+    }
+    let mime = res
+        .body()
+        .mime_type()
+        .unwrap_or("text/html")
+        .to_ascii_lowercase();
+    if ContentKind::from_mime(&mime) != Some(ContentKind::Html) {
+        return Error::HttpStatus(status);
+    }
+    let charset = res.body().charset().map(str::to_owned);
+    let Ok(bytes) = res
+        .body_mut()
+        .with_config()
+        .limit(REFUSAL_BODY)
+        .read_to_vec()
+    else {
+        return Error::HttpStatus(status);
+    };
+    let body = decode(&bytes, charset.as_deref(), ContentKind::Html, url);
+    if !crate::nesting::html_too_deep(&body) && crate::extract::script_gate(&body, true) {
+        Error::ScriptGate
+    } else {
+        Error::HttpStatus(status)
+    }
 }
 
 /// Текст страницы из её байтов (#32).
@@ -599,11 +643,24 @@ fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
         .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
+/// Агент для страниц: статус ответа `fetch_once` смотрит сам — за отказом
+/// бывает заслон, и его тело нужно прочесть (#51).
 fn agent(ua: UserAgent, accept: &str) -> Agent {
-    agent_within(ua, accept, TIMEOUT)
+    config(ua, accept, TIMEOUT)
+        .http_status_as_error(false)
+        .build()
+        .new_agent()
 }
 
 fn agent_within(ua: UserAgent, accept: &str, timeout: Duration) -> Agent {
+    config(ua, accept, timeout).build().new_agent()
+}
+
+fn config(
+    ua: UserAgent,
+    accept: &str,
+    timeout: Duration,
+) -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
     let tls = TlsConfig::builder()
         // Никогда не трогать disable_verification, даже временно.
         .root_certs(RootCerts::PlatformVerifier)
@@ -618,8 +675,6 @@ fn agent_within(ua: UserAgent, accept: &str, timeout: Duration) -> Agent {
         // на запрос, а не запрос.
         .save_redirect_history(true)
         .timeout_global(Some(timeout))
-        .build()
-        .new_agent()
 }
 
 #[cfg(test)]

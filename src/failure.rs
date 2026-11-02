@@ -160,12 +160,13 @@ pub fn describe(error: &Error) -> Failure {
                 .to_owned(),
             true,
         ),
-        // Заслон, а не пустая страница (#23): скрипт ставит куку и грузит
-        // страницу заново. Обходить его, исполняя или читая скрипт, не станем —
-        // браузер читателя проходит его сам.
+        // Заслон, а не пустая страница (#23) и не закрытая дверь (#51): скрипт
+        // проверяет, что клиент их исполняет, — ставит куку и грузит страницу
+        // заново или зовёт проверку фильтра ботов. Обходить его, исполняя или
+        // читая скрипт, не станем — браузер читателя проходит его сам.
         Error::ScriptGate => failure(
             "The site lets in only browsers that run JavaScript",
-            "Instead of the page it sent a script that sets a cookie and loads the page again — a check that the client runs scripts, with nothing to read behind it yet. Brevier runs no JavaScript; your browser passes the check."
+            "Instead of the page it sent a script that checks whether the client runs scripts — a bot filter, with nothing to read behind it yet. Brevier runs no JavaScript; your browser passes the check."
                 .to_owned(),
             true,
         ),
@@ -188,9 +189,12 @@ pub fn describe(error: &Error) -> Failure {
 /// Отказ на странице, которую открывали (#9): к объяснению — её копии.
 ///
 /// Своя копия из архива — при любом отказе: она на диске читателя, сети
-/// ей не нужно, и прочитанное однажды остаётся его. Копия Wayback — только
-/// когда страницы, похоже, больше нет: 404, 410, сервер падает или
-/// не отвечает. На 403 она была бы обходом решения сайта, а не выходом.
+/// ей не нужно, и прочитанное однажды остаётся его. Копия Wayback — когда
+/// страницы, похоже, больше нет: 404, 410, сервер падает или не отвечает.
+/// И на заслоне (#51, решение мейнтейнера 2 ноября 2026): сайт пускает
+/// каждого читателя и проверяет лишь, что клиент исполняет скрипты, — копия
+/// не обходит ничьего решения. На простом 403 она была бы обходом решения
+/// сайта, а не выходом, — там её нет.
 ///
 /// Кнопкой, а не подменой: копия — не страница, и показать одну вместо
 /// другой, не спросив, значило бы притворяться. Есть ли снимок у Wayback,
@@ -209,7 +213,7 @@ pub fn describe_page(error: &Error, address: &Address, archive: &Archive) -> Fai
             address: archive::copy_address(&copy.path),
         });
     }
-    if gone(error)
+    if (gone(error) || matches!(error, Error::ScriptGate))
         && let Address::Web(url) = address
         && let Some(page) = hosts::for_wayback(url)
     {
@@ -322,5 +326,18 @@ mod tests {
         assert_eq!(gone.ways.len(), 1);
         assert_eq!(gone.ways[0].label, "Read the Wayback copy");
         assert!(!gone.detail.contains("You read"));
+    }
+
+    /// Заслон (#51) пускает каждого, кто исполняет скрипты: копия Wayback
+    /// ничьего решения не обходит — её предлагаем, как и для пропавшей.
+    #[test]
+    fn a_script_gate_offers_the_wayback_copy() {
+        let url = "https://www.garnstudio.com/lesson.php?id=86&cid=17";
+        let (archive, _dir) = archive_with("https://danluu.com/keyboard-latency/");
+        let gate = describe_page(&Error::ScriptGate, &parse(url).unwrap(), &archive);
+        assert_eq!(gate.ways.len(), 1);
+        assert_eq!(gate.ways[0].label, "Read the Wayback copy");
+        assert!(gate.detail.contains("The Wayback Machine"));
+        assert!(gate.offer_browser);
     }
 }

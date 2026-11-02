@@ -175,25 +175,35 @@ const GATE_MOVES: [&str; 5] = [
 const GATE_TEXT: usize = 200;
 
 /// Статьи не нашлось — но, может быть, и страницы не было: вместо неё
-/// заслон (#23). Признак по форме, а не по сайту: видимого текста нет,
-/// а скрипт перезагружает страницу или уводит дальше — обычно поставив
-/// куку, чтобы проверить, что клиент исполняет скрипты. Такой ответ
-/// не винит страницу в пустоте, а называет причину.
+/// заслон (#23). Такой ответ не винит страницу в пустоте, а называет причину.
 fn empty(html: &str) -> Error {
-    let doc = Document::from(html);
-    let moves = doc.select("script").iter().any(|script| {
-        let code = script.text();
-        GATE_MOVES.iter().any(|call| code.contains(call))
-    });
-    if !moves {
-        return Error::EmptyExtraction;
-    }
-    doc.select("script, style, noscript, template").remove();
-    if doc.select("body").text().trim().chars().count() < GATE_TEXT {
+    if script_gate(html, false) {
         Error::ScriptGate
     } else {
         Error::EmptyExtraction
     }
+}
+
+/// Заслон ли это, а не страница (#23, #51). Признак по форме, а не по сайту:
+/// видимого текста нет, а скрипт перезагружает страницу или уводит дальше —
+/// обычно поставив куку, чтобы проверить, что клиент исполняет скрипты.
+///
+/// `refused` — ответ пришёл отказом, 401 или 403. Тогда хватает и внешнего
+/// скрипта: заслон Qrator — пустое тело и один `<script src>`, без
+/// перезагрузки в самой странице. Со статусом 200 так выглядит и обычное
+/// приложение на скриптах (`<div id=root>` и бандл) — его пустым и зовём;
+/// отказ же говорит, что за скриптом не страница, а проверка.
+pub fn script_gate(html: &str, refused: bool) -> bool {
+    let doc = Document::from(html);
+    let checks = doc.select("script").iter().any(|script| {
+        let code = script.text();
+        GATE_MOVES.iter().any(|call| code.contains(call)) || (refused && script.has_attr("src"))
+    });
+    if !checks {
+        return false;
+    }
+    doc.select("script, style, noscript, template").remove();
+    doc.select("body").text().trim().chars().count() < GATE_TEXT
 }
 
 pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
@@ -3045,6 +3055,41 @@ mod tests {
             "<html><body><nav>{words}</nav><script>var here = location.href;</script></body></html>"
         );
         assert!(!matches!(empty(&busy), Error::ScriptGate));
+    }
+
+    /// Заслон Cloudflare с garnstudio.com (#51), 403, без длинных токенов.
+    const CLOUDFLARE: &str = "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title>\
+        <meta http-equiv=\"refresh\" content=\"360\"></head><body>\
+        <div class=\"main-wrapper\" role=\"main\"><div class=\"main-content\"><noscript>\
+        <div class=\"h2\"><span id=\"challenge-error-text\">Enable JavaScript and cookies to continue</span>\
+        </div></noscript></div></div><script>(function(){window._cf_chl_opt = {cType: 'managed'};\
+        var a = document.createElement('script');a.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1';\
+        window._cf_chl_opt.cOgUHash = location.hash === '' && location.href.indexOf('#') !== -1 ? '#' : location.hash;\
+        document.getElementsByTagName('head')[0].appendChild(a);}());</script></body></html>";
+
+    /// Заслон Qrator с rbc.ru (#49, #51), 401, байт в байт.
+    const QRATOR: &str = "<!DOCTYPE html>\n<html><head>\n\
+        <meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>\n\
+        <link rel=\"icon\" href=\"data:,\"/>\n<meta name=\"referrer\" content=\"no-referrer\" />\n\
+        <script src=\"/__qrator/ldr_v2e_v0986.js?t=1793535021.826\" charset=\"utf-8\"></script>\n\
+        </head><body></body>\n</html>\n";
+
+    #[test]
+    fn a_refusal_that_wants_a_script_is_a_gate() {
+        assert!(script_gate(CLOUDFLARE, true));
+        assert!(script_gate(CLOUDFLARE, false));
+        assert!(script_gate(QRATOR, true));
+        // Без отказа внешний скрипт на пустой странице — приложение, а не заслон.
+        assert!(!script_gate(QRATOR, false));
+        // Отказ с текстом — настоящий отказ, хоть скрипты на нём и есть.
+        let words = "<p>You need to sign in to read this. </p>".repeat(12);
+        let closed = format!("<html><body>{words}<script src=\"/app.js\"></script></body></html>");
+        assert!(!script_gate(&closed, true));
+        // И отказ без скриптов вовсе.
+        assert!(!script_gate(
+            "<html><body><h1>403 Forbidden</h1></body></html>",
+            true
+        ));
     }
 
     #[test]

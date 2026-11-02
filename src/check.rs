@@ -352,6 +352,12 @@ fn access_finding(error: &Error) -> Option<Finding> {
             "access-forbidden",
             format!("the server answered {}", status(error)),
         ),
+        // Из сети заслон приходит отказом (#51): 401 или 403 с проверкой
+        // скриптом вместо страницы. Для честного читателя это та же стена.
+        Error::ScriptGate => (
+            "access-forbidden",
+            "the server sent a script check instead of the page".to_owned(),
+        ),
         Error::HostingLimit => (
             "access-http",
             "the hosting API is rate limited (a 403 by another name)".to_owned(),
@@ -387,7 +393,6 @@ fn access_finding(error: &Error) -> Option<Finding> {
         | Error::Feed(_)
         | Error::Media(_)
         | Error::SearchChallenge
-        | Error::ScriptGate
         | Error::NotInWayback => return None,
     };
     Some(note(id, seen))

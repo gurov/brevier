@@ -354,7 +354,8 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **Plain `http` pages are marked "Not secure".** There is no padlock: people read it as
   "this site is trustworthy", when it only means "the connection is encrypted".
 - **A page that can't be shown says why** and offers **Open in your browser**. If you read
-  it before, it offers **your copy** from the archive too. If the page is gone, it offers
+  it before, it offers **your copy** from the archive too. If the page is gone, or the site
+  lets in only browsers that run JavaScript (a Cloudflare-style check), it offers
   **the Wayback copy**: the latest one the Wayback Machine saved of the page itself, not
   of its 404.
 

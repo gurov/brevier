@@ -54,9 +54,14 @@ fn answer(mut stream: TcpStream, routes: &[Route]) {
         )
         .into_bytes(),
         Some(route) => {
+            // «403 text/html» — ответ с таким статусом.
+            let (status, content_type) = match route.content_type.split_once(' ') {
+                Some((code, kind)) if code.parse::<u16>().is_ok() => (code, kind),
+                _ => ("200", route.content_type),
+            };
             let mut head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                route.content_type,
+                "HTTP/1.1 {status} Whatever\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                content_type,
                 route.body.len()
             )
             .into_bytes();
@@ -514,4 +519,42 @@ fn a_feed_link_names_the_feed_itself() {
         "{}",
         stdout(&out)
     );
+}
+
+/// Заслон за отказом (#51): Cloudflare отвечает 403, Qrator — 401, и оба
+/// ждут скрипта. Это заслон, а не закрытая дверь; простой 403 — по-прежнему
+/// статус. Код возврата тот же (3): для прогонов это отказ сервера.
+#[test]
+fn a_challenge_behind_a_refusal_is_named_a_script_gate() {
+    let base = serve(vec![
+        route(
+            "/cloudflare",
+            "403 text/html; charset=UTF-8",
+            "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>\
+             <noscript>Enable JavaScript and cookies to continue</noscript>\
+             <script>var a = location.href.indexOf('#');</script></body></html>",
+        ),
+        route(
+            "/qrator",
+            "401 text/html",
+            "<html><head><script src=\"/__qrator/ldr.js\"></script></head><body></body></html>",
+        ),
+        route(
+            "/closed",
+            "403 text/html",
+            "<html><body><h1>Forbidden</h1></body></html>",
+        ),
+    ]);
+    for path in ["/cloudflare", "/qrator"] {
+        let out = brevier(&[&format!("{base}{path}")]);
+        assert_eq!(out.status.code(), Some(3), "{path}");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            said.contains("only clients that run JavaScript"),
+            "{path}: {said}"
+        );
+    }
+    let out = brevier(&[&format!("{base}/closed")]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("server answered 403"));
 }
