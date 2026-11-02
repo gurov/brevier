@@ -41,6 +41,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::address::Address;
 use crate::outline::{Face, Type};
+use crate::palette::Paper;
 
 /// Сколько визитов держим. Chrome хранит 90 дней, Firefox — около 180;
 /// мера у них времени, у нас — числа строк, потому что за размер файла
@@ -660,6 +661,10 @@ pub struct Settings {
     /// от умолчания, — по той же причине, что у `shelf_width`: иначе наше
     /// нынешнее умолчание застыло бы в файле как выбор читателя.
     pub typography: Type,
+    /// Бумага светлой темы и тёмной (#53): каждая помнит свою. В файл —
+    /// только не наша: `paper sepia`, `dark-paper black`.
+    pub paper: Paper,
+    pub dark_paper: Paper,
 }
 
 impl Default for Settings {
@@ -680,6 +685,8 @@ impl Default for Settings {
             slide_bar: true,
             notes: true,
             typography: Type::default(),
+            paper: Paper::Usual,
+            dark_paper: Paper::Usual,
         }
     }
 }
@@ -748,6 +755,16 @@ impl Settings {
                     }
                 }
                 "justify" => settings.typography.justify = value == "on",
+                "paper" => {
+                    if let Some(paper) = Paper::from_name(value, false) {
+                        settings.paper = paper;
+                    }
+                }
+                "dark-paper" => {
+                    if let Some(paper) = Paper::from_name(value, true) {
+                        settings.dark_paper = paper;
+                    }
+                }
                 "paragraphs" => {
                     if let Some(lines) = Type::paragraphs_from(value) {
                         settings.typography.paragraphs = lines;
@@ -797,6 +814,12 @@ impl Settings {
         }
         if !self.notes {
             text.push_str("notes\thidden\n");
+        }
+        if self.paper != Paper::Usual {
+            text.push_str(&format!("paper\t{}\n", self.paper.name(false)));
+        }
+        if self.dark_paper != Paper::Usual {
+            text.push_str(&format!("dark-paper\t{}\n", self.dark_paper.name(true)));
         }
         let (chosen, usual) = (self.typography, Type::default());
         if chosen.face != usual.face {
@@ -1777,6 +1800,8 @@ mod tests {
                 justify: true,
                 paragraphs: 0.0,
             },
+            paper: Paper::Sepia,
+            dark_paper: Paper::Black,
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);
@@ -1830,6 +1855,7 @@ mod tests {
         assert!(!text.contains("bar"), "{text}");
         assert!(!text.contains("archive-files"), "{text}");
         assert!(!text.contains("notes"), "{text}");
+        assert!(!text.contains("paper"), "{text}");
 
         fs::write(&path, "size 17\nmeasure 900\nface comic\nleading 1.4\n").unwrap();
         let typography = Settings::at(&path).typography;

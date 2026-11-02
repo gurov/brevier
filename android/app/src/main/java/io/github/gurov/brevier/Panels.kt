@@ -488,6 +488,7 @@ class SettingsPage(
     private val fonts: Fonts,
     private val changed: (dark: Boolean, images: Boolean) -> Unit,
     private val contrasted: (high: Boolean) -> Unit,
+    private val papered: (name: String) -> Unit,
     private val slid: (on: Boolean) -> Unit,
     private val notesUnder: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
@@ -528,6 +529,23 @@ class SettingsPage(
         column.addView(row(
             "Dark theme", "Warm dark, in the same row as the ivory paper.",
             switch(palette, dark) { on -> this.dark = on; changed(this.dark, this.images) }, palette,
+        ))
+        // Бумага той темы, что сейчас (#53); у другой темы — своя.
+        val stored = Core.settings()
+        val tones = stored.getJSONArray(if (dark) "darkPapers" else "papers")
+        val toneNames = (0 until tones.length()).map { tones.getJSONObject(it).getString("name") }
+        val toneLabels = (0 until tones.length()).map { tones.getJSONObject(it).getString("label") }
+        column.addView(row(
+            "Paper",
+            if (dark) {
+                "The dark theme's paper: warm, grey, or black for OLED screens. The light theme keeps its own."
+            } else {
+                "Ivory, white, grey or sepia; each comes with its own ink. The dark theme keeps its own."
+            } + " High contrast sets its own paper over any of them.",
+            choice(palette, "Paper", toneLabels, toneNames.indexOf(if (dark) theme.darkPaper else theme.paper).coerceAtLeast(0)) { at ->
+                papered(toneNames[at])
+            },
+            palette,
         ))
         // Тронул — выбрал: с этой минуты решает читатель, а не система (#44).
         column.addView(row(

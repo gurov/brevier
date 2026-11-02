@@ -63,6 +63,9 @@ class MainActivity : Activity(), ArticleHost {
     private var systemHigh = false
     /** Уезжает ли шапка, пока читают (#45): настройка, по умолчанию — да. */
     private var slideBar = true
+    /** Бумага светлой и тёмной темы (#53), именем: `ivory`, `warm`… */
+    private var paper = "ivory"
+    private var darkPaper = "warm"
     /** Карточки заметок под абзацами (#42): настройка, по умолчанию — да. */
     private var notesShown = true
     /** Насколько шапка уехала вверх: 0 — на месте, её рост — вся. */
@@ -129,7 +132,7 @@ class MainActivity : Activity(), ArticleHost {
     private var hits: List<Hit> = emptyList()
     private var hit = 0
 
-    private val theme: Theme get() = Theme(dark, contrast ?: systemHigh)
+    private val theme: Theme get() = Theme(dark, contrast ?: systemHigh, paper, darkPaper)
     private val palette: Palette get() = type.palette(theme)
 
     override fun onCreate(saved: Bundle?) {
@@ -144,6 +147,8 @@ class MainActivity : Activity(), ArticleHost {
         }
         systemHigh = systemContrast()
         slideBar = stored.optBoolean("slideBar", true)
+        paper = stored.optString("paper", "ivory")
+        darkPaper = stored.optString("darkPaper", "warm")
         notesShown = stored.optBoolean("notes", true)
         assisted = assistance()
         images = stored.optBoolean("images", true)
@@ -338,9 +343,10 @@ class MainActivity : Activity(), ArticleHost {
         settings = SettingsPage(this, fonts,
             changed = { dark, images -> changeSettings(dark, images) },
             contrasted = { on -> changeContrast(on) },
+            papered = { name -> changePaper(name) },
             slid = { on -> changeSlideBar(on) },
             notesUnder = { on -> changeNotesShown(on) },
-            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown) },
+            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper) },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
             typeChanged = { chosen -> changeType(chosen) },
@@ -1250,7 +1256,7 @@ class MainActivity : Activity(), ArticleHost {
     /** Карточки заметок под абзацами (#42) — включить или выключить. */
     private fun changeNotesShown(on: Boolean) {
         notesShown = on
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
         for (tab in tabs) tab.view?.showCards(on)
     }
 
@@ -1839,7 +1845,7 @@ class MainActivity : Activity(), ArticleHost {
     /** Шапке — уезжать или стоять (#45). */
     private fun changeSlideBar(on: Boolean) {
         slideBar = on
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
         if (!on) showBar()
     }
 
@@ -1905,7 +1911,7 @@ class MainActivity : Activity(), ArticleHost {
         val imagesOn = images && !this.images
         this.dark = dark
         this.images = images
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
         if (themeChanged) retheme()
         if (imagesOn) currentTab()?.view?.loadAll()
     }
@@ -1914,7 +1920,15 @@ class MainActivity : Activity(), ArticleHost {
     private fun changeContrast(high: Boolean) {
         val was = theme
         contrast = high
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
+        if (theme != was) retheme()
+    }
+
+    /** Бумага текущей темы (#53): у светлой и тёмной — каждая своя. */
+    private fun changePaper(name: String) {
+        val was = theme
+        if (dark) darkPaper = name else paper = name
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper)
         if (theme != was) retheme()
     }
 

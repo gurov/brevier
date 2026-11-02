@@ -45,7 +45,7 @@ use brevier::outline::{
     Type, ZOOM_NORMAL, ZOOM_STEPS, clip,
 };
 use brevier::page::{self, Block};
-use brevier::palette::{FOUND, FOUND_HERE, FOUND_INK, Theme, colors, picture_paper, rgb};
+use brevier::palette::{FOUND, FOUND_HERE, FOUND_INK, Paper, Theme, colors, picture_paper, rgb};
 use brevier::reading::{self, Progress, Readings};
 use brevier::save;
 use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
@@ -381,8 +381,9 @@ struct Tab {
     /// картинки разбираются в пикселях экрана (#15).
     density_seen: i32,
     /// На какую бумагу легли прозрачные места её картинок: высокий контраст
-    /// кладёт их на белую (#44). Сменился — перерисовать при показе.
-    contrast_seen: bool,
+    /// кладёт их на белую (#44), читатель выбирает тон (#53). Сменилась —
+    /// перерисовать при показе.
+    paper_seen: [u8; 3],
     /// Кэш «назад/вперёд»: уже показанные документы этой вкладки, по адресу.
     /// «Назад» рисует страницу из него сразу, без сети, — как bfcache
     /// у браузеров. Живёт ровно на путь истории: страницы, обрубленные
@@ -465,6 +466,9 @@ struct State {
     /// Высокий контраст (#44), если читатель его выбрал; `None` — решает
     /// система, её ответ — в `system_contrast`.
     high_contrast: Option<bool>,
+    /// Бумага светлой и тёмной темы (#53).
+    paper: Paper,
+    dark_paper: Paper,
     /// Просит ли высокий контраст система (`follow_system_contrast`).
     system_contrast: bool,
     /// Подписка на смену контраста в портале: уходит вместе с окном.
@@ -632,6 +636,8 @@ impl State {
         Theme {
             dark: self.dark,
             high: self.high_contrast.unwrap_or(self.system_contrast),
+            paper: self.paper,
+            dark_paper: self.dark_paper,
         }
     }
 }
@@ -876,6 +882,8 @@ fn build(app: &Application, start: Vec<String>) {
         next_id: 0,
         dark: settings.dark,
         high_contrast: settings.high_contrast,
+        paper: settings.paper,
+        dark_paper: settings.dark_paper,
         system_contrast: false,
         contrast_watch: None,
         images: settings.images,
@@ -1354,7 +1362,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             zoom_seen: ZOOM_NORMAL,
             type_seen: Type::USUAL,
             density_seen: 1,
-            contrast_seen: false,
+            paper_seen: picture_paper(Theme::default()),
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: true,
@@ -1455,11 +1463,75 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         .valign(gtk::Align::Center)
         .active(images_on)
         .build();
+    // Бумага той темы, что сейчас (#53): у светлой и тёмной — каждая своя,
+    // поэтому список меняется вместе с переключателем темы.
+    let tones = gtk::StringList::new(&[]);
+    let paper = gtk::DropDown::builder()
+        .model(&tones)
+        .valign(gtk::Align::Center)
+        .build();
+    // Пока список перебирается под другую тему, выбор в нём скачет —
+    // это не выбор читателя.
+    let filling = Rc::new(Cell::new(false));
+    let show_papers = {
+        let tones = tones.clone();
+        let paper = paper.clone();
+        let state = state.clone();
+        let filling = filling.clone();
+        Rc::new(move || {
+            let (dark, chosen) = {
+                let borrowed = state.borrow();
+                let theme = borrowed.theme();
+                let chosen = if theme.dark {
+                    theme.dark_paper
+                } else {
+                    theme.paper
+                };
+                (theme.dark, chosen)
+            };
+            let choices = Paper::choices(dark);
+            let labels: Vec<&str> = choices.iter().map(|tone| tone.label(dark)).collect();
+            filling.set(true);
+            tones.splice(0, tones.n_items(), &labels);
+            paper.set_selected(choices.iter().position(|tone| *tone == chosen).unwrap_or(0) as u32);
+            filling.set(false);
+        })
+    };
+    show_papers();
     {
         let ui = ui.clone();
         let state = state.clone();
+        paper.connect_selected_notify(move |paper| {
+            if filling.get() {
+                return;
+            }
+            let dark = state.borrow().dark;
+            let Some(&chosen) = Paper::choices(dark).get(paper.selected() as usize) else {
+                return;
+            };
+            {
+                let mut borrowed = state.borrow_mut();
+                let slot = if dark {
+                    &mut borrowed.dark_paper
+                } else {
+                    &mut borrowed.paper
+                };
+                if *slot == chosen {
+                    return;
+                }
+                *slot = chosen;
+            }
+            apply_theme(&ui, &state);
+            remember_settings(&ui, &state);
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let show_papers = show_papers.clone();
         dark_mode.connect_active_notify(move |switch| {
             state.borrow_mut().dark = switch.is_active();
+            show_papers();
             apply_theme(&ui, &state);
             remember_settings(&ui, &state);
         });
@@ -1504,6 +1576,13 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         "Dark theme",
         "Warm dark, in the same row as the ivory paper.",
         &dark_mode,
+    ));
+    rows.append(&setting_row(
+        "Paper",
+        "Ivory, white, grey or sepia, each with its own ink; in the dark \
+         theme, warm, grey or black. Each theme keeps its own. High contrast \
+         sets its own paper over any of them.",
+        &paper,
     ));
     rows.append(&setting_row(
         "High contrast",
@@ -2326,7 +2405,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             zoom_seen: ZOOM_NORMAL,
             type_seen: Type::USUAL,
             density_seen: 1,
-            contrast_seen: false,
+            paper_seen: picture_paper(Theme::default()),
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: false,
@@ -2975,6 +3054,8 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         slide_bar: Settings::default().slide_bar,
         notes: borrowed.show_notes,
         typography: borrowed.typography,
+        paper: borrowed.paper,
+        dark_paper: borrowed.dark_paper,
     }
     .save();
 }
@@ -3605,7 +3686,7 @@ fn show_document(
     );
     let seen = current_zoom(&borrowed);
     let typography = borrowed.typography;
-    let high = borrowed.theme().high;
+    let paper = picture_paper(borrowed.theme());
     // Прогресс чтения (#19) — у статьи, не у списка ссылок и не у своих
     // страниц. Записанное о ней поднимаем сразу: доли на полке видны с порога.
     let readable = document.kind == brevier::Kind::Article
@@ -3650,7 +3731,7 @@ fn show_document(
         tab.zoom_seen = seen;
         tab.type_seen = typography;
         tab.density_seen = density(ui);
-        tab.contrast_seen = high;
+        tab.paper_seen = paper;
     }
     drop(borrowed);
     place_notes(state, id);
@@ -4369,7 +4450,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         let mut borrowed = state.borrow_mut();
         let seen = current_zoom(&borrowed);
         let typography = borrowed.typography;
-        let high = borrowed.theme().high;
+        let paper = picture_paper(borrowed.theme());
         if let Some(tab) = borrowed.find(id) {
             tab.links = page.links;
             tab.focus = None;
@@ -4380,7 +4461,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.zoom_seen = seen;
             tab.type_seen = typography;
             tab.density_seen = density(ui);
-            tab.contrast_seen = high;
+            tab.paper_seen = paper;
         }
     }
     // Подложки заметок ушли вместе с текстом, поле — под новую меру.
@@ -4425,7 +4506,7 @@ fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
                 && (tab.zoom_seen != current_zoom(&borrowed)
                     || tab.type_seen != borrowed.typography
                     || tab.density_seen != density(ui)
-                    || tab.contrast_seen != borrowed.theme().high)
+                    || tab.paper_seen != picture_paper(borrowed.theme()))
         })
     };
     if stale {
@@ -5074,7 +5155,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
     let mut borrowed = state.borrow_mut();
     let seen = current_zoom(&borrowed);
     let typography = borrowed.typography;
-    let high = borrowed.theme().high;
+    let paper = picture_paper(borrowed.theme());
     if let Some(tab) = borrowed.find(id) {
         tab.links = page.links;
         tab.focus = None;
@@ -5084,7 +5165,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         tab.zoom_seen = seen;
         tab.type_seen = typography;
         tab.density_seen = density(ui);
-        tab.contrast_seen = high;
+        tab.paper_seen = paper;
     }
     drop(borrowed);
     sync(ui, state, None);

@@ -299,6 +299,13 @@ fn call(method: &str, arg: &str) -> String {
             if !field(5).is_empty() {
                 settings.notes = field(5) == "1";
             }
+            // Бумага светлой и тёмной темы (#53); чужое имя — не трогаем.
+            if let Some(paper) = palette::Paper::from_name(field(6), false) {
+                settings.paper = paper;
+            }
+            if let Some(paper) = palette::Paper::from_name(field(7), true) {
+                settings.dark_paper = paper;
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -416,30 +423,6 @@ fn typography() -> String {
         .map(|weight| weight.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let theme = |dark: bool, high: bool| {
-        let colors = palette::colors(palette::Theme { dark, high });
-        format!(
-            "{{\"paper\":\"{}\",\"ink\":\"{}\",\"shelf\":\"{}\",\
-             \"link\":\"{}\",\"dim\":\"{}\",\"panel\":\"{}\",\"keyword\":\"{}\",\
-             \"literal\":\"{}\",\"number\":\"{}\",\"comment\":\"{}\",\"rule\":\"{}\",\
-             \"chosen\":\"{}\",\"touched\":\"{}\",\"note\":\"{}\",\"noteRule\":\"{}\"}}",
-            colors.paper,
-            colors.ink,
-            colors.shelf,
-            colors.link,
-            colors.dim,
-            colors.panel,
-            colors.keyword,
-            colors.literal,
-            colors.number,
-            colors.comment,
-            colors.rule,
-            colors.chosen,
-            colors.touched,
-            colors.note,
-            colors.note_rule,
-        )
-    };
     format!(
         "{{\"textSize\":{},\"textPx\":{},\"lineHeight\":{},\"headingLineHeight\":{},\
          \"headings\":[{}],\"headingWeights\":[{}],\"measureInEms\":{},\
@@ -450,7 +433,8 @@ fn typography() -> String {
          \"ruleWidth\":{},\"ruleX\":{},\"ruleInset\":{},\
          \"listLevels\":{},\"quoteLevels\":{},\"hints\":{},\
          \"found\":\"{}\",\"foundHere\":\"{}\",\"foundInk\":\"{}\",\
-         \"light\":{},\"dark\":{},\"lightHigh\":{},\"darkHigh\":{}}}",
+         \"light\":{},\"dark\":{},\"lightHigh\":{},\"darkHigh\":{},\
+         \"lightPapers\":{{{}}},\"darkPapers\":{{{}}}}}",
         outline::TEXT_SIZE,
         outline::TEXT_PX,
         outline::LINE_HEIGHT,
@@ -482,11 +466,60 @@ fn typography() -> String {
         palette::FOUND,
         palette::FOUND_HERE,
         palette::FOUND_INK,
-        theme(false, false),
-        theme(true, false),
-        theme(false, true),
-        theme(true, true),
+        theme_json(false, false, palette::Paper::Usual),
+        theme_json(true, false, palette::Paper::Usual),
+        theme_json(false, true, palette::Paper::Usual),
+        theme_json(true, true, palette::Paper::Usual),
+        papers(false),
+        papers(true),
     )
+}
+
+/// Цвета одной темы и тона бумаги для Kotlin (`Palette`).
+fn theme_json(dark: bool, high: bool, paper: palette::Paper) -> String {
+    let colors = palette::colors(palette::Theme {
+        dark,
+        high,
+        paper,
+        dark_paper: paper,
+    });
+    format!(
+        "{{\"paper\":\"{}\",\"ink\":\"{}\",\"shelf\":\"{}\",\
+         \"link\":\"{}\",\"dim\":\"{}\",\"panel\":\"{}\",\"keyword\":\"{}\",\
+         \"literal\":\"{}\",\"number\":\"{}\",\"comment\":\"{}\",\"rule\":\"{}\",\
+         \"chosen\":\"{}\",\"touched\":\"{}\",\"note\":\"{}\",\"noteRule\":\"{}\"}}",
+        colors.paper,
+        colors.ink,
+        colors.shelf,
+        colors.link,
+        colors.dim,
+        colors.panel,
+        colors.keyword,
+        colors.literal,
+        colors.number,
+        colors.comment,
+        colors.rule,
+        colors.chosen,
+        colors.touched,
+        colors.note,
+        colors.note_rule,
+    )
+}
+
+/// Тона бумаги темы (#53) — именем к набору цветов: Kotlin берёт набор
+/// по имени, которое выбрал читатель.
+fn papers(dark: bool) -> String {
+    palette::Paper::choices(dark)
+        .iter()
+        .map(|paper| {
+            format!(
+                "\"{}\":{}",
+                paper.name(dark),
+                theme_json(dark, false, *paper)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Начальная страница: тот же тракт, что у статьи. Недавнее в ней — из
@@ -880,8 +913,22 @@ fn settings() -> String {
             out
         })
         .collect();
+    // Тона бумаги (#53): выбранный в каждой теме и все на выбор с подписями.
+    let tones = |dark: bool| {
+        let items: Vec<String> = palette::Paper::choices(dark)
+            .iter()
+            .map(|paper| {
+                let mut out = format!("{{\"name\":\"{}\",\"label\":", paper.name(dark));
+                json_string(&mut out, paper.label(dark));
+                out.push('}');
+                out
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    };
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"notes\":{},\"type\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"notes\":{},\
+         \"paper\":\"{}\",\"darkPaper\":\"{}\",\"papers\":{},\"darkPapers\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{},\"paragraphs\":{}}}",
         settings.dark,
@@ -894,6 +941,10 @@ fn settings() -> String {
         settings.archive,
         settings.slide_bar,
         settings.notes,
+        settings.paper.name(false),
+        settings.dark_paper.name(true),
+        tones(false),
+        tones(true),
         type_json(&chosen),
         styles.join(","),
         chosen.style().map_or(-1, |index| index as i64),

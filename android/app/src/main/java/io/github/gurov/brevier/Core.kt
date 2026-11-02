@@ -98,11 +98,15 @@ object Core {
      * `contrast` — выбор читателя (#44); `null` — не выбирал, решает система.
      * `slideBar` — уезжает ли шапка, пока читают (#45).
      */
-    fun saveSettings(dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean, notes: Boolean) {
+    fun saveSettings(
+        dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean, notes: Boolean,
+        paper: String, darkPaper: String,
+    ) {
         val flags = listOf(dark, images, archive).map { if (it) "1" else "0" } +
             when (contrast) { true -> "1"; false -> "0"; null -> "" } +
             (if (slideBar) "1" else "0") +
-            if (notes) "1" else "0"
+            (if (notes) "1" else "0") +
+            paper + darkPaper
         ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 

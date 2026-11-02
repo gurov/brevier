@@ -46,12 +46,16 @@ class Typography(json: JSONObject) {
     /** Высокий контраст (#44): белая бумага и чёрная краска, в тёмной — наоборот. */
     val lightHigh = Palette(json.getJSONObject("lightHigh"))
     val darkHigh = Palette(json.getJSONObject("darkHigh"))
+    /** Тона бумаги (#53) по имени: свои у светлой темы и у тёмной. */
+    private val lightPapers = papers(json.getJSONObject("lightPapers"))
+    private val darkPapers = papers(json.getJSONObject("darkPapers"))
 
+    /** Высокий контраст — над любой бумагой; незнакомое имя — наша бумага. */
     fun palette(theme: Theme) = when {
         theme.dark && theme.high -> darkHigh
-        theme.dark -> dark
+        theme.dark -> darkPapers[theme.darkPaper] ?: dark
         theme.high -> lightHigh
-        else -> light
+        else -> lightPapers[theme.paper] ?: light
     }
 
     /** Висячий отступ по ширине маркера: 0 — «•», 1..3 — цифр в номере (`outline::hang`). */
@@ -61,6 +65,9 @@ class Typography(json: JSONObject) {
         private fun floats(json: JSONObject, key: String) =
             json.getJSONArray(key).map { (it as Number).toFloat() }
 
+        private fun papers(json: JSONObject): Map<String, Palette> =
+            json.keys().asSequence().associateWith { Palette(json.getJSONObject(it)) }
+
         fun color(hex: String): Int = Color.parseColor(hex)
 
         /** Одна на процесс: модель неизменна, спрашивать ядро дважды незачем. */
@@ -68,8 +75,11 @@ class Typography(json: JSONObject) {
     }
 }
 
-/** Чем печатать: тема и контраст — как `palette::Theme` в ядре. */
-data class Theme(val dark: Boolean, val high: Boolean)
+/**
+ * Чем печатать: тема, контраст и бумага каждой темы (#53) — как `palette::Theme`
+ * в ядре. Бумага — именем: `ivory`, `sepia`; в тёмной — `warm`, `black`.
+ */
+data class Theme(val dark: Boolean, val high: Boolean, val paper: String = "ivory", val darkPaper: String = "warm")
 
 /** Цвета темы. */
 class Palette(json: JSONObject) {
