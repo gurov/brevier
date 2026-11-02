@@ -56,7 +56,7 @@ anyone else, or older than what you have, is refused. The key's fingerprint:
 
 Each release also has the
 same app as one file,
-[`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.19.2/brevier.flatpak)
+[`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier.flatpak)
 (`flatpak install --user ./brevier.flatpak`). Files released after 0.14.0 update from the
 repository as well; Brevier installed from an older one does not — run
 `flatpak uninstall --user io.github.gurov.brevier` (your data stays) and install it again
@@ -71,8 +71,8 @@ local files (a `.md`, a saved feed) can't be opened.
 Ubuntu) and no wish for a sandbox:
 
 ```sh
-tar xf brevier-0.19.2-x86_64-linux.tar.gz
-cd brevier-0.19.2-x86_64-linux && ./install.sh
+tar xf brevier-0.20.0-x86_64-linux.tar.gz
+cd brevier-0.20.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` installs into `~/.local`, needs no root, and `--uninstall` removes it again.
@@ -91,18 +91,18 @@ tested with. No desktop entry or icon is installed this way;
 needs no GTK: `cargo install --locked brevier --features save`.
 
 **Windows** 10 or 11, 64-bit. Download
-[`brevier-0.19.2-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.19.2/brevier-0.19.2-windows-x86_64-setup.exe)
+[`brevier-0.20.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier-0.20.0-windows-x86_64-setup.exe)
 and run it. It installs for you alone, with no administrator rights, and puts Brevier in the
 Start menu; remove it under Installed apps. The installer is not signed yet, so Windows
 shows "Windows protected your PC" first: choose **More info**, then **Run anyway**. To run
 Brevier without installing it, unpack
-[`brevier-0.19.2-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.19.2/brevier-0.19.2-windows-x86_64.zip)
+[`brevier-0.20.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier-0.20.0-windows-x86_64.zip)
 anywhere and start `bin\brevier-ui.exe`; `bin\brevier.exe` is the command line.
 
 **Android** 7.0 or later, 64-bit ARM. Install it from
 [F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/), which keeps it up to
 date. Or download
-[`brevier-0.19.2-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.19.2/brevier-0.19.2-arm64.apk)
+[`brevier-0.20.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier-0.20.0-arm64.apk)
 on the phone and open it; Android asks once to allow installs from the app you opened it
 with. Updates install over it as long as they are signed with the same release key:
 
@@ -211,7 +211,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action:
 
 ```yaml
-- uses: gurov/brevier@v0.19.2  # a release tag, or @main
+- uses: gurov/brevier@v0.20.0  # a release tag, or @main
   with:
     urls: |
       https://example.com/
@@ -256,21 +256,24 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 
 - **Your typography, the same on every site.** Out of the box: 16.5 pt Noto Sans, about
   65 characters per line, airy leading, headings lighter than the text. Settings offer
-  four ready-made styles — Brevier, Book (your system's serif, justified), Large print and
-  Compact — and under **Fine-tune**, the face (the built-in Noto Sans, or your system's
-  serif or sans), the size, the line length and the line spacing, once for every site;
-  zoom stays on top, for the run.
+  four ready-made styles — Brevier, Book (your system's serif, justified, paragraphs
+  indented), Large print and Compact — and under **Fine-tune**, the face (the built-in
+  Noto Sans, or your system's serif or sans), the size, the line length, the line spacing
+  and the space between paragraphs, or none and a book's first-line indent instead, once
+  for every site; zoom stays on top, for the run.
 - **Hyphenation by the page's language** (English and Russian are built in); in Russian
   and Czech no line ends on a one-letter word. Copy and find-on-page see the plain text,
   tables included: find goes through their cells, and a copied table pastes as rows of
   tab-separated cells.
 - **Justified text** as a setting: paragraphs get a straight right edge; headings, lists
   and code stay ragged.
-- **Ivory paper** instead of glaring white, and a warm dark theme. **High contrast** for
-  sharper letters: black on white paper, or white on black in the dark theme. Until you
-  choose, Brevier follows your system's contrast setting (Linux, Android 14 and later,
-  Windows).
-- **Zoom (67–200%) scales the whole layout**, so a line still holds about 65 characters.
+- **Ivory paper** instead of glaring white, and a warm dark theme. Or pick another paper:
+  white, grey or sepia, and grey or black (for OLED screens) in the dark theme, each with
+  its own ink; each theme keeps its own. **High contrast** for sharper letters: black on
+  white paper, or white on black in the dark theme. Until you choose, Brevier follows your
+  system's contrast setting (Linux, Android 14 and later, Windows).
+- **Zoom (67–300%) scales the whole layout**, so a line still holds about 65 characters.
+  The window goes only as far as the column fits the screen; a shorter line makes room.
 - **Fonts are built in** — Noto Sans and Noto Sans Mono — so a page looks the same on every
   system, unless you pick your system's serif or sans.
 - **Poems keep their lines and stanzas.**
@@ -387,6 +390,9 @@ text — not in a WebView — with the same typography and colours as the window
 
 - Tabs, the shelf, find on page, zoom (from the menu or with a pinch), saving, history,
   bookmarks, settings, the dark theme, and a session that comes back.
+- **Tabs close with a swipe** in the tab list, and a closed tab comes back with **Undo**
+  for a few seconds. A tab opened by a link from another app closes when Back returns
+  there; the page stays in the history.
 - It can be your default browser, and **Open in your browser** still finds the others.
 - It opens links, shared text, `feed://` links and Markdown or feed files from other apps.
 - A long press on a link opens it in a new tab, copies it, or sends it to your browser.
@@ -399,6 +405,8 @@ text — not in a WebView — with the same typography and colours as the window
 - **The bar slides away while you read**: it follows your finger up and down without moving
   the text, and stays put at the top and end of a page, on short pages, while you type,
   search or select, and with TalkBack or Switch Access on. A setting keeps it in place.
+- **Full screen**, as a setting: while you read, the system's status and navigation bars
+  go away too; a swipe from the edge brings them back for a moment.
 - With a keyboard attached, the window's shortcuts work, `Alt+←` / `Alt+→` included.
 
 The maintainer uses it every day. It hasn't been tested with TalkBack yet.

@@ -1,0 +1,6 @@
+• Full screen, in Settings: the system bars go away while you read.
+• Swipe a tab away in the tab list; Undo brings it back. A tab opened from another app closes when Back returns there.
+• Paper: white, grey or sepia; grey or black in the dark theme.
+• Paragraph spacing, or a book's first-line indent.
+• Zoom up to 300%.
+• Sites behind a JavaScript check say so and offer the Wayback copy.
