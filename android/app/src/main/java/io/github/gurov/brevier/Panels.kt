@@ -453,7 +453,7 @@ class TabList(
         override fun getItemId(position: Int) = position.toLong()
 
         override fun getView(position: Int, convert: View?, parent: ViewGroup): View {
-            val row = LinearLayout(context).apply {
+            val row = SwipeRow(context) { close(position) }.apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(context.dp(16f), context.dp(6f), context.dp(4f), context.dp(6f))
                 background = if (position == current) GradientDrawable().apply { setColor(palette.chosen) } else pressable(palette.touched, 0f)
@@ -475,6 +475,111 @@ class TabList(
             row.setOnClickListener { choose(position) }
             return row
         }
+    }
+}
+
+/**
+ * Строка, которую смахивают вбок (#52), как вкладки у Chrome и Firefox:
+ * смахивают там, где палец, — высота строк, которые съезжают на место
+ * закрытой, больше не важна. Нажатие и крестик внутри работают как прежде;
+ * крестик остаётся для TalkBack и для тех, кто не смахивает.
+ *
+ * Смахиванием считается движение, где вбок заметно больше, чем вверх-вниз:
+ * иначе это прокрутка списка, и её забирает `ListView`.
+ */
+@SuppressLint("ViewConstructor", "ClickableViewAccessibility")
+class SwipeRow(context: Context, private val swiped: () -> Unit) : LinearLayout(context) {
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    private val fling = android.view.ViewConfiguration.get(context).scaledMinimumFlingVelocity * 4
+    private var downX = 0f
+    private var downY = 0f
+    private var dragging = false
+    private var gone = false
+    private var tracker: android.view.VelocityTracker? = null
+
+    override fun onInterceptTouchEvent(event: android.view.MotionEvent): Boolean {
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> start(event)
+            android.view.MotionEvent.ACTION_MOVE -> {
+                tracker?.addMovement(event)
+                if (sideways(event)) return true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> stop()
+        }
+        return false
+    }
+
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (gone) return true
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> start(event)
+            android.view.MotionEvent.ACTION_MOVE -> {
+                tracker?.addMovement(event)
+                if (!dragging && sideways(event)) {
+                    // Нажатие строки, которое уже началось, — отменить.
+                    val cancel = android.view.MotionEvent.obtain(event).apply { action = android.view.MotionEvent.ACTION_CANCEL }
+                    super.onTouchEvent(cancel)
+                    cancel.recycle()
+                }
+                if (dragging) {
+                    translationX = event.rawX - downX
+                    alpha = 1f - minOf(1f, Math.abs(translationX) / width.coerceAtLeast(1))
+                    return true
+                }
+            }
+            android.view.MotionEvent.ACTION_UP -> if (dragging) {
+                tracker?.addMovement(event)
+                tracker?.computeCurrentVelocity(1000)
+                val velocity = tracker?.xVelocity ?: 0f
+                val far = Math.abs(translationX) > width / 3f
+                val thrown = Math.abs(velocity) > fling && Math.signum(velocity) == Math.signum(translationX)
+                stop()
+                if (far || thrown) away() else back()
+                return true
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> if (dragging) {
+                stop()
+                back()
+                return true
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private fun start(event: android.view.MotionEvent) {
+        downX = event.rawX
+        downY = event.rawY
+        dragging = false
+        tracker?.recycle()
+        tracker = android.view.VelocityTracker.obtain().apply { addMovement(event) }
+    }
+
+    private fun sideways(event: android.view.MotionEvent): Boolean {
+        if (dragging) return true
+        val dx = Math.abs(event.rawX - downX)
+        val dy = Math.abs(event.rawY - downY)
+        if (dx > slop && dx > dy * 2) {
+            dragging = true
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        return dragging
+    }
+
+    private fun stop() {
+        tracker?.recycle()
+        tracker = null
+    }
+
+    private fun back() {
+        dragging = false
+        animate().translationX(0f).alpha(1f).setDuration(150).start()
+    }
+
+    private fun away() {
+        dragging = false
+        gone = true
+        val edge = if (translationX < 0) -width.toFloat() else width.toFloat()
+        animate().translationX(edge).alpha(0f).setDuration(150).withEndAction { swiped() }.start()
     }
 }
 

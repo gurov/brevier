@@ -336,7 +336,7 @@ class MainActivity : Activity(), ArticleHost {
         root.addView(shelf, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         tabList = TabList(this, fonts,
             choose = { index -> tabList.visibility = View.GONE; switchTo(index) },
-            close = { index -> closeTab(index); fillTabList() },
+            close = { index -> closeTab(index, undoable = true); fillTabList() },
             fresh = { tabList.visibility = View.GONE; newTab(null) },
         )
         root.addView(tabList, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
@@ -592,22 +592,89 @@ class MainActivity : Activity(), ArticleHost {
         rememberSession()
     }
 
-    private fun closeTab(index: Int) {
+    /**
+     * Закрыть вкладку. `undoable` — читатель закрыл её сам, и несколько секунд
+     * её можно вернуть (#52): промах по крестику не должен стоить вкладки.
+     * `ask` — как у `newTab`: закрылась последняя, и пустой взамен нужна ли
+     * клавиатура. При `undoable` — нет.
+     */
+    private fun closeTab(index: Int, undoable: Boolean = false, ask: Boolean = true) {
         if (index !in tabs.indices) return
+        val wasCurrent = index == current
         val tab = tabs.removeAt(index)
         leaveReading(tab)
-        // Уходя, бросаем загрузку: слушать её больше некому.
+        // Уходя, бросаем загрузку: слушать её больше некому. Место в тексте —
+        // запомнить: вернувшаяся вкладка встаёт туда же.
         tab.generation += 1
-        tab.view = null
+        release(tab)
+        if (undoable) offerUndo(tab, index, wasCurrent)
         if (tabs.isEmpty()) {
             current = 0
-            newTab(null)
+            // Закрыли, что можно вернуть, — адрес не фокусируем: карточка под
+            // ним (#29) съела бы касание, которое шло к «Undo».
+            newTab(null, ask = ask && !undoable)
             return
         }
         if (index < current || current >= tabs.size) current -= 1
         current = current.coerceIn(0, tabs.size - 1)
         switchTo(current)
         rememberSession()
+    }
+
+    /** Закрытая вкладка, которую ещё можно вернуть: она, её место в ряду, была ли впереди. */
+    private var closed: Triple<Tab, Int, Boolean>? = null
+
+    /**
+     * «Tab closed · Undo» внизу экрана (#52), как у Chrome, Firefox и Safari:
+     * закрыть сразу и дать вернуть, а не спрашивать. Над списком вкладок тоже —
+     * закрывают чаще всего оттуда.
+     */
+    private fun offerUndo(tab: Tab, index: Int, wasCurrent: Boolean) {
+        closed = Triple(tab, index, wasCurrent)
+        val said = "Tab closed · Undo"
+        notice.text = android.text.SpannableString(said).apply {
+            setSpan(android.text.style.UnderlineSpan(), said.length - 4, said.length, 0)
+        }
+        notice.contentDescription = "Tab closed. Tap to undo"
+        notice.visibility = View.VISIBLE
+        notice.bringToFront()
+        notice.setOnClickListener {
+            notice.visibility = View.GONE
+            notice.setOnClickListener(null)
+            reopenClosed()
+        }
+        main.removeCallbacksAndMessages(NOTICE)
+        main.postAtTime({
+            if (closed?.first === tab) closed = null
+            if (notice.text.toString() == said) {
+                notice.visibility = View.GONE
+                notice.setOnClickListener(null)
+            }
+        }, NOTICE, android.os.SystemClock.uptimeMillis() + UNDO_MS)
+    }
+
+    /** Вернуть закрытую вкладку на её место в ряду, с её историей и местом в тексте. */
+    private fun reopenClosed() {
+        val (tab, index, wasCurrent) = closed ?: return
+        closed = null
+        // Закрыли последнюю, и на её месте встала пустая: вернувшаяся её заменяет.
+        val blank = tabs.singleOrNull()?.takeIf { it.current() == null && !it.loading && it.shown == null }
+        if (blank != null) {
+            release(blank)
+            tabs.clear()
+            current = 0
+        }
+        // Загрузку закрытие бросило — вкладка догрузится, когда её покажут.
+        if (tab.loading) {
+            tab.loading = false
+            tab.pending = tab.current() != null
+        }
+        val at = index.coerceIn(0, tabs.size)
+        tabs.add(at, tab)
+        if (tabs.size > 1 && at <= current) current += 1
+        if (wasCurrent || tabs.size == 1) switchTo(at) else rememberSession()
+        if (tabList.visibility == View.VISIBLE) fillTabList()
+        sync()
     }
 
     /**
@@ -1725,6 +1792,7 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun offerContinue(tab: Tab, at: Int, share: Int) {
         val said = "Continue from $share%"
+        notice.contentDescription = null
         notice.text = android.text.SpannableString(said).apply {
             setSpan(android.text.style.UnderlineSpan(), 0, said.length, 0)
         }
@@ -2290,8 +2358,10 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Строка состояния внизу: сама и убирается. */
     private fun notice(said: String) {
-        // Обычная строка не нажимается: предложение «Continue» (#19) ушло.
+        // Обычная строка не нажимается: предложение «Continue» (#19)
+        // и «Undo» (#52) ушли.
         notice.setOnClickListener(null)
+        notice.contentDescription = null
         notice.text = said
         notice.visibility = View.VISIBLE
         main.removeCallbacksAndMessages(NOTICE)
@@ -2329,8 +2399,14 @@ class MainActivity : Activity(), ArticleHost {
             currentTab()?.canGoBack() == true -> step(backwards = true)
             // Вкладки и место в них уже в сессии: уходим, не закрываясь.
             // С вкладки, открытой снаружи, это и есть возврат туда, откуда
-            // пришла ссылка.
-            else -> moveTaskToBack(true)
+            // пришла ссылка, — и она закрывается (#52), как в Chrome: прочитал
+            // присланное и вернулся — самый частый путь, и вкладки копились
+            // именно так. Страница остаётся в истории и в архиве.
+            else -> {
+                val tab = currentTab()
+                if (tab != null && tab.outside && tab.at <= 0) closeTab(current, ask = false)
+                moveTaskToBack(true)
+            }
         }
     }
 
@@ -2341,7 +2417,7 @@ class MainActivity : Activity(), ArticleHost {
             val done = when (event.keyCode) {
                 KeyEvent.KEYCODE_L -> { address.requestFocus(); address.selectAll(); true }
                 KeyEvent.KEYCODE_T -> { newTab(null); true }
-                KeyEvent.KEYCODE_W -> { closeTab(current); true }
+                KeyEvent.KEYCODE_W -> { closeTab(current, undoable = true); true }
                 KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_PAGE_DOWN -> {
                     val step = if (event.isShiftPressed || event.keyCode == KeyEvent.KEYCODE_PAGE_UP) -1 else 1
                     switchTo((current + step + tabs.size) % tabs.size); true
@@ -2382,6 +2458,8 @@ class MainActivity : Activity(), ArticleHost {
         /** Самая большая картинка, которую берём в заметку из галереи. */
         const val MAX_PICTURE = 64L * 1024 * 1024
         private val NOTICE = Any()
+        /** Сколько закрытую вкладку можно вернуть (#52): как у Chrome — несколько секунд. */
+        private const val UNDO_MS = 6_000L
         /** Докуда растёт «Loading…», прежде чем начать сначала. */
         private const val LOADING_DOTS = 10
         /** Куда по высоте окна ставить заголовок, к которому прыгнули. */
