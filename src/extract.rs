@@ -2366,19 +2366,30 @@ fn looks_like_article(url: &Url) -> bool {
 
 /// Сайт по хосту: без `www.` и без поддомена — `edition.cnn.com` и `cnn.com`
 /// один сайт. Списка публичных суффиксов у нас нет, поэтому грубо: два
-/// последних имени, а при двухбуквенной зоне с коротким вторым именем
-/// (`bbc.co.uk`, `abc.net.au`) — три.
+/// последних имени, а при двухбуквенной зоне с общим вторым именем
+/// ([`SECOND_LEVEL`]: `bbc.co.uk`, `abc.net.au`) — три.
+///
+/// Общее имя — списком, не по длине: «второе имя не длиннее трёх букв»
+/// делало зоной и `rbc.ru`, и региональная главная `nsk.rbc.ru` теряла
+/// заголовки с `www.rbc.ru` — шесть своих против порога в восемь (#49).
 fn site_key(host: &str) -> String {
     let host = host.strip_prefix("www.").unwrap_or(host);
     let labels: Vec<&str> = host.split('.').collect();
     let n = labels.len();
-    let take = if n > 2 && labels[n - 1].len() == 2 && labels[n - 2].len() <= 3 {
+    let take = if n > 2 && labels[n - 1].len() == 2 && SECOND_LEVEL.contains(&labels[n - 2]) {
         3
     } else {
         2
     };
     labels[n.saturating_sub(take)..].join(".")
 }
+
+/// Имена второго уровня, под которыми страны раздают домены:
+/// `co.uk`, `com.au`, `ne.jp`, `gob.mx`, `gouv.fr`.
+const SECOND_LEVEL: &[&str] = &[
+    "ac", "co", "com", "edu", "go", "gob", "gouv", "gov", "govt", "ltd", "mil", "ne", "net", "nhs",
+    "nic", "nom", "or", "org", "plc", "sch",
+];
 
 /// Адрес без запроса и решётки: так одна заметка узнаётся под разными
 /// метками (`?utm_source=…`, `#comments`).
@@ -3811,6 +3822,12 @@ mod tests {
         assert_eq!(site_key("www.bbc.co.uk"), "bbc.co.uk");
         assert_eq!(site_key("news.bbc.co.uk"), "bbc.co.uk");
         assert_eq!(site_key("lenta.ru"), "lenta.ru");
+        assert_eq!(site_key("www.abc.net.au"), "abc.net.au");
+        assert_eq!(site_key("www.smh.com.au"), "smh.com.au");
+        // Короткое имя — ещё не зона (#49).
+        assert_eq!(site_key("nsk.rbc.ru"), "rbc.ru");
+        assert_eq!(site_key("www.rbc.ru"), "rbc.ru");
+        assert_eq!(site_key("news.bbc.com"), "bbc.com");
     }
 
     /// Меню и подвал внутри вырезанного означают, что общим предком карточек
