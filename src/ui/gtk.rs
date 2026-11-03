@@ -17,12 +17,13 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 mod article;
 mod formula;
 mod margin;
 mod sharp;
+mod timing;
 
 use article::Article;
 use formula::Formula;
@@ -52,6 +53,17 @@ use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "io.github.gurov.brevier";
+
+thread_local! {
+    /// Когда приложение нарисовало первый кадр первого окна. Запуск без
+    /// адреса, начатый раньше, нового окна не открывает (`main`).
+    static FIRST_FRAME: Cell<Option<SystemTime>> = const { Cell::new(None) };
+}
+
+/// Переменная, в которой каждый запуск несёт главному экземпляру время
+/// своего начала, в миллисекундах от эпохи (`ApplicationFlags::SEND_ENVIRONMENT`).
+const LAUNCHED_AT: &str = "BREVIER_LAUNCHED_AT";
+
 /// Высота полосы прогресса внизу статьи (#19), в точках.
 const BAR_HEIGHT: i32 = 7;
 /// Сколько читатель «здесь» после последнего движения: экран текста читают
@@ -142,6 +154,7 @@ a page.
 ";
 
 fn main() -> glib::ExitCode {
+    timing::start();
     // Про саму программу отвечаем до того, как поднято приложение: у GTK
     // второй запуск отдаёт строку уже работающему экземпляру, и ответ вышел бы
     // в чужой терминал — в тот, из которого запустили первое окно.
@@ -157,6 +170,19 @@ fn main() -> glib::ExitCode {
         None => {}
     }
 
+    // Время начала запуска — главному экземпляру, если им окажется
+    // не этот процесс: щелчок, сделанный до того, как окно появилось,
+    // нового окна не просит (`FIRST_FRAME`). Ставим, пока поток один:
+    // менять окружение при живых потоках нельзя.
+    let launched = timing::launched_at()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    // Безопасно: других потоков ещё нет.
+    unsafe {
+        std::env::set_var(LAUNCHED_AT, launched.to_string());
+    }
+
     brevier::init_crypto();
     // fontconfig читает свой конфиг при первой отрисовке, поэтому до GTK;
     // на Windows шрифты отдаются Pango, а её карта шрифтов есть только после.
@@ -166,16 +192,21 @@ fn main() -> glib::ExitCode {
     let app = Application::builder()
         .application_id(APP_ID)
         // Адреса разбираем сами, поэтому GTK их трогать не должен.
-        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        // Окружение второго запуска едет главному ради `LAUNCHED_AT`.
+        .flags(
+            gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT,
+        )
         .build();
 
     // Иконка ставится на запуске приложения, а не в `main`: темы значков
     // до открытого дисплея ещё нет. Там же, раз на запуск и в фоне, — уборка
     // недельного кэша страниц: второй экземпляр сюда не доходит.
     app.connect_startup(|_| {
+        timing::mark("startup: this process is the main one");
         use_bundled_icon();
         #[cfg(windows)]
         use_bundled_fonts();
+        timing::mark("startup: icon and fonts are in place");
         std::thread::spawn(|| {
             brevier::cache::Cache::open().prune();
             // Архив (#8): копия живёт, пока на неё указывает журнал, а у
@@ -199,24 +230,55 @@ fn main() -> glib::ExitCode {
         // одну страницу», а не «дай мне ещё одно окно». Второе окно
         // по-прежнему заводится запуском без адреса.
         // Действие висит на `ApplicationWindow`: только он и умеет
-        // быть группой действий.
-        let open = app
+        // быть группой действий. Окно, которое ещё ни разу не было в фокусе,
+        // тоже годится: адрес, пришедший, пока первое окно встаёт, иначе
+        // открыл бы второе.
+        let window = app
             .active_window()
-            .and_then(|window| window.downcast::<ApplicationWindow>().ok())
-            .filter(|_| !start.is_empty());
-        match open {
-            Some(window) => {
+            .or_else(|| app.windows().into_iter().next())
+            .and_then(|window| window.downcast::<ApplicationWindow>().ok());
+        match window {
+            Some(window) if !start.is_empty() => {
+                timing::mark("command line: the address goes to the open window");
                 for text in &start {
                     ActionGroupExt::activate_action(&window, OPEN_ACTION, Some(&text.to_variant()));
                 }
                 window.present();
             }
-            None => build(app, start),
+            // Запуск без адреса — новое окно, но не тот, что начат раньше,
+            // чем первое окно появилось: на Windows оно встаёт секундами,
+            // и читатель, не увидев его, щёлкает по значку снова. Второе
+            // окно ему не нужно, ему нужно первое. Сравниваем время начала,
+            // а не время прихода: пока окно встаёт, главный экземпляр глух,
+            // и второй запуск доходит до него уже после первого кадра.
+            Some(window) if started_before_first_frame(command_line) => {
+                timing::mark("command line: launched again while starting, the window is raised");
+                window.present();
+            }
+            _ => {
+                timing::mark("command line: building a window");
+                build(app, start);
+            }
         }
         glib::ExitCode::SUCCESS
     });
 
+    timing::mark("GTK is next: registering on the session bus");
     app.run()
+}
+
+/// Начат ли этот запуск раньше, чем приложение нарисовало первый кадр.
+/// Запуск без отметки (чужая сборка, `LAUNCHED_AT` не дошла) считается
+/// поздним: лишнее окно лучше, чем несработавший щелчок.
+fn started_before_first_frame(command_line: &gio::ApplicationCommandLine) -> bool {
+    let Some(shown) = FIRST_FRAME.get() else {
+        return true;
+    };
+    command_line
+        .getenv(LAUNCHED_AT)
+        .and_then(|value| value.as_str().parse::<u64>().ok())
+        .map(|millis| SystemTime::UNIX_EPOCH + Duration::from_millis(millis))
+        .is_some_and(|launched| launched < shown)
 }
 
 /// Ответ терминалу вместо окна — или `None`, если в строке одни адреса.
@@ -667,6 +729,7 @@ fn build(app: &Application, start: Vec<String>) {
     // дёрнуть все обработчики разом и на глазах у читателя перекрасить
     // окно из светлого в тёмное.
     let settings = Settings::load();
+    timing::mark("window: settings read");
     let ui = Ui {
         window: ApplicationWindow::builder()
             .application(app)
@@ -1272,6 +1335,7 @@ fn build(app: &Application, start: Vec<String>) {
         // Открываем первую: читатель просил их в этом порядке, а не наоборот.
         ui.notebook.set_current_page(Some(0));
     }
+    timing::mark("window: tabs are in place");
 
     {
         // Место в тексте меняется молча, без событий, — значит последний
@@ -1288,7 +1352,41 @@ fn build(app: &Application, start: Vec<String>) {
         });
     }
 
+    watch_first_frame(&ui.window);
+    timing::mark("window: built, presenting");
     ui.window.present();
+}
+
+/// Первый кадр окна: запомнить его время (`FIRST_FRAME`) и, если
+/// идёт замер, записать веху. Способ рисования GTK выбирает при `realize`,
+/// и падения в драйвере (#61) случаются там же — поэтому и он веха.
+fn watch_first_frame(window: &ApplicationWindow) {
+    window.connect_realize(|window| {
+        if timing::on() {
+            let renderer = window
+                .renderer()
+                .map(|renderer| renderer.type_().name().to_owned())
+                .unwrap_or_else(|| "none".to_owned());
+            timing::mark(&format!("window: realized, drawn by {renderer}"));
+        }
+        let Some(clock) = window.frame_clock() else {
+            return;
+        };
+        let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::default();
+        let id = clock.connect_after_paint({
+            let handler = handler.clone();
+            move |clock| {
+                if FIRST_FRAME.get().is_none() {
+                    FIRST_FRAME.set(Some(SystemTime::now()));
+                    timing::mark("window: first frame drawn");
+                }
+                if let Some(id) = handler.borrow_mut().take() {
+                    clock.disconnect(id);
+                }
+            }
+        });
+        handler.replace(Some(id));
+    });
 }
 
 /// Открыть настройки вкладкой. Раньше это было отдельное окно; теперь —
