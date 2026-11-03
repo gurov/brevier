@@ -48,10 +48,10 @@ Nothing lives in an account. There is no account.
 
 ## 6. Honest
 
-The User-Agent says `Brevier`. The numbers in the README are the project's own
-regression figures, and they say how they were relaxed. A page that is a list of
-links is shown as a list of links. What the program does not do is listed under its
-own heading, including the parts that hurt.
+The User-Agent says `Brevier`, and never pretends on its own. The numbers in the
+README are the project's own regression figures, and they say how they were relaxed.
+A page that is a list of links is shown as a list of links. What the program does not
+do is listed under its own heading, including the parts that hurt.
 
 ## 7. Not a crawler
 
