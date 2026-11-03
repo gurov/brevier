@@ -98,6 +98,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.22.0" date="2026-11-03" type="development">
+      <description>
+        <p>Pictures no longer crash Brevier on Android 9 and earlier. On the
+          phone, turn the page with a tap, a swipe or the volume keys, each
+          by its own switch. Bookmarked pages and pages with notes keep their
+          pictures in the archive. The address bar says that words are
+          searched on DuckDuckGo. A developer can set their own User-Agent at
+          the bottom of Settings. On Windows, a window that closed before it
+          appeared starts without OpenGL next time.</p>
+      </description>
+    </release>
     <release version="0.21.0" date="2026-11-03" type="development">
       <description>
         <p>A page that brought Brevier down no longer does it again on every

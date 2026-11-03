@@ -1,0 +1,5 @@
+• Pictures no longer crash Brevier on Android 9 and earlier.
+• Turn the page with a tap, a swipe or the volume keys: Settings, Turning the page.
+• Bookmarked pages and pages with notes keep their pictures.
+• The address bar says that words are searched on DuckDuckGo, and its suggestions no longer cover what you type.
+• Your own User-Agent, for developers, at the bottom of Settings.
