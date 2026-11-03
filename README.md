@@ -99,6 +99,9 @@ shows "Windows protected your PC" first: choose **More info**, then **Run anyway
 Brevier without installing it, unpack
 [`brevier-0.21.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.21.0/brevier-0.21.0-windows-x86_64.zip)
 anywhere and start `bin\brevier-ui.exe`; `bin\brevier.exe` is the command line.
+On some older laptops the graphics driver brings the window down before it appears; the
+next start then draws without the graphics card and says so at the bottom of the window.
+To try the graphics card again, delete `drawing.txt` in `%LOCALAPPDATA%\Brevier`.
 
 **Android** 7.0 or later, 64-bit ARM. Install it from
 [F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/), which keeps it up to

@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 mod article;
+mod drawing;
 mod formula;
 mod margin;
 mod sharp;
@@ -184,6 +185,9 @@ fn main() -> glib::ExitCode {
     // Безопасно: других потоков ещё нет.
     unsafe {
         std::env::set_var(LAUNCHED_AT, launched.to_string());
+        // Окно Windows, не дожившее до первого кадра, — рисовать без
+        // видеокарты (#61). Тоже окружение, тоже пока поток один.
+        drawing::choose();
     }
 
     brevier::init_crypto();
@@ -209,6 +213,7 @@ fn main() -> glib::ExitCode {
         // Пометка прошлого запуска (#57): умер посреди страницы — её сессия
         // сама не откроет. Только главный экземпляр: второй уходит раньше.
         brevier::guard::watch();
+        drawing::starting();
         use_bundled_icon();
         #[cfg(windows)]
         use_bundled_fonts();
@@ -1363,7 +1368,7 @@ fn build(app: &Application, start: Vec<String>) {
         });
     }
 
-    watch_first_frame(&ui.window);
+    watch_first_frame(&ui);
     timing::mark("window: built, presenting");
     ui.window.present();
 }
@@ -1371,8 +1376,10 @@ fn build(app: &Application, start: Vec<String>) {
 /// Первый кадр окна: запомнить его время (`FIRST_FRAME`) и, если
 /// идёт замер, записать веху. Способ рисования GTK выбирает при `realize`,
 /// и падения в драйвере (#61) случаются там же — поэтому и он веха.
-fn watch_first_frame(window: &ApplicationWindow) {
-    window.connect_realize(|window| {
+/// Дорисовал — снять пометку запуска (`drawing`).
+fn watch_first_frame(ui: &Ui) {
+    let ui = ui.clone();
+    ui.window.clone().connect_realize(move |window| {
         if timing::on() {
             let renderer = window
                 .renderer()
@@ -1386,10 +1393,14 @@ fn watch_first_frame(window: &ApplicationWindow) {
         let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::default();
         let id = clock.connect_after_paint({
             let handler = handler.clone();
+            let ui = ui.clone();
             move |clock| {
                 if FIRST_FRAME.get().is_none() {
                     FIRST_FRAME.set(Some(SystemTime::now()));
                     timing::mark("window: first frame drawn");
+                }
+                if let Some(said) = drawing::drawn() {
+                    notice(&ui, said);
                 }
                 if let Some(id) = handler.borrow_mut().take() {
                     clock.disconnect(id);
