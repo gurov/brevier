@@ -253,9 +253,17 @@ jobs:
           if ($LASTEXITCODE) { exit 1 }
           & "$bin\brevier.exe" "$PWD\README.md" | Select-Object -First 5
           if ($LASTEXITCODE) { exit 1 }
-          $ui = Start-Process -PassThru -FilePath "$bin\brevier-ui.exe" -ArgumentList "`"$PWD\README.md`""
+          # Замер запуска (`BREVIER_TIMING`): сколько окно вставало и увидело ли
+          # шрифты, поставленные установщиком, — тогда оно их не регистрирует.
+          $env:BREVIER_TIMING = '1'
+          $ui = Start-Process -PassThru -FilePath "$bin\brevier-ui.exe" -ArgumentList "`"$PWD\README.md`"" `
+            -RedirectStandardError "$PWD\timing.txt"
           Start-Sleep -Seconds 20
           if ($ui.HasExited) { Write-Error "brevier-ui exited: $($ui.ExitCode)"; exit 1 }
+          Select-String -Path timing.txt -Pattern 'timing' | ForEach-Object { $_.Line }
+          if (-not (Select-String -Path timing.txt -Pattern 'ours are installed' -Quiet)) {
+            Write-Output '::warning::the window did not find the fonts the installer put in'
+          }
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
           $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
@@ -266,6 +274,9 @@ jobs:
           Start-Process -Wait -FilePath "$env:LOCALAPPDATA\Programs\Brevier\uninstall.exe" -ArgumentList '/S'
           Start-Sleep -Seconds 5
           if (Test-Path "$bin\brevier-ui.exe") { Write-Error 'the uninstaller left the program'; exit 1 }
+          $fonts = (Get-Item 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts').Property |
+            Where-Object { $_ -like '*(Brevier)' }
+          if ($fonts) { Write-Error "the uninstaller left the fonts: $fonts"; exit 1 }
       - uses: actions/upload-artifact@v4
         with:
           name: windows

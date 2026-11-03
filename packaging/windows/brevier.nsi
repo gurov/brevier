@@ -15,6 +15,7 @@ ManifestDPIAware true
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "WinMessages.nsh"
 
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Brevier"
 !define CLIENT_KEY "Software\Clients\StartMenuInternet\Brevier"
@@ -30,6 +31,33 @@ ManifestDPIAware true
 !macroend
 !macro UnOpens extension
     DeleteRegValue HKCU "Software\Classes\${extension}\OpenWithProgids" "${FILE_CLASS}"
+!macroend
+
+; Шрифты окна — в систему, для одного читателя (Windows 10 1809 и новее
+; читает их из HKCU): иначе окно отдаёт их Pango на каждом запуске, а это
+; секунды на машине с сотнями шрифтов. Имя записи — со словом Brevier:
+; Noto Sans, поставленный читателем самим, мы не перезаписываем и при
+; удалении не трогаем. На старой Windows запись ничего не даст — окно
+; увидит, что шрифтов нет, и отдаст их само.
+!define FONTS_KEY "Software\Microsoft\Windows NT\CurrentVersion\Fonts"
+!macro Font file name
+    File "${FONTS}\${file}"
+    WriteRegStr HKCU "${FONTS_KEY}" "${name} (Brevier)" "$INSTDIR\fonts\${file}"
+    System::Call 'gdi32::AddFontResourceW(w "$INSTDIR\fonts\${file}") i'
+!macroend
+!macro UnFont file name
+    System::Call 'gdi32::RemoveFontResourceW(w "$INSTDIR\fonts\${file}") i'
+    DeleteRegValue HKCU "${FONTS_KEY}" "${name} (Brevier)"
+    Delete /REBOOTOK "$INSTDIR\fonts\${file}"
+!macroend
+!macro Fonts how
+    !insertmacro ${how} "NotoSans-Light.ttf" "Noto Sans Light"
+    !insertmacro ${how} "NotoSans-Regular.ttf" "Noto Sans"
+    !insertmacro ${how} "NotoSans-Italic.ttf" "Noto Sans Italic"
+    !insertmacro ${how} "NotoSans-Medium.ttf" "Noto Sans Medium"
+    !insertmacro ${how} "NotoSans-Bold.ttf" "Noto Sans Bold"
+    !insertmacro ${how} "NotoSans-BoldItalic.ttf" "Noto Sans Bold Italic"
+    !insertmacro ${how} "NotoSansMono-Regular.ttf" "Noto Sans Mono"
 !macroend
 
 Name "Brevier"
@@ -69,6 +97,15 @@ Section
     File /r "${STAGE}\*"
     WriteUninstaller "$INSTDIR\uninstall.exe"
     CreateShortcut "$SMPROGRAMS\Brevier.lnk" "${EXE}"
+
+    ; Папку шрифтов не стираем, как прочие: шрифт, открытый другой
+    ; программой, не перезаписать. Не вышло — остаётся прежний файл:
+    ; гарнитуры меняются раз в годы.
+    SetOutPath "$INSTDIR\fonts"
+    SetOverwrite try
+    !insertmacro Fonts Font
+    SetOverwrite on
+    SendMessage ${HWND_BROADCAST} ${WM_FONTCHANGE} 0 0 /TIMEOUT=5000
 
     ; Строка в «Установленных приложениях».
     ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
@@ -115,6 +152,9 @@ SectionEnd
 
 Section "Uninstall"
     Delete "$SMPROGRAMS\Brevier.lnk"
+    !insertmacro Fonts UnFont
+    RMDir "$INSTDIR\fonts"
+    SendMessage ${HWND_BROADCAST} ${WM_FONTCHANGE} 0 0 /TIMEOUT=5000
     ; Только своё: папку установки могли выбрать общую, и удалять её
     ; целиком установщик не вправе.
     RMDir /r "$INSTDIR\bin"

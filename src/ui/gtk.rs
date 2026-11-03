@@ -24,6 +24,9 @@ mod formula;
 mod margin;
 mod sharp;
 mod timing;
+// Коллекция шрифтов нужна только Windows; тест — везде.
+#[cfg(any(windows, test))]
+mod ttc;
 
 use article::Article;
 use formula::Formula;
@@ -4941,27 +4944,100 @@ fn use_bundled_fonts() {
 }
 
 /// То же на Windows. GTK там рисует текст через DirectWrite, и fontconfig
-/// в этом не участвует; файлы отдаём самой карте шрифтов Pango — той,
+/// в этом не участвует; шрифты отдаём самой карте шрифтов Pango — той,
 /// что достаётся каждому виджету. Поэтому и зовётся после подъёма GTK.
+///
+/// Установщик ставит наши шрифты в систему для читателя, и тогда отдавать
+/// нечего: карта их уже знает. Не знает (zip, `cargo install`, чужой
+/// установщик) — отдаём одной коллекцией, а не семью файлами: каждый
+/// `add_font_file` стоит Pango двух перестроек карты (`ttc`).
 #[cfg(windows)]
 fn use_bundled_fonts() {
     use pango::prelude::FontMapExt;
 
-    let Some(fonts) = unpack_fonts() else {
-        return;
-    };
     let Some(map) = gtk::Label::new(None).pango_context().font_map() else {
         return;
     };
-    for (name, _) in FONTS {
-        if let Err(error) = map.add_font_file(fonts.join(name)) {
-            eprintln!("brevier-ui: the bundled font {name}: {error}");
+    timing::mark("fonts: the font map is ready");
+    match missing_bundled_face(&map) {
+        None => {
+            timing::mark("fonts: ours are installed, nothing to register");
+            return;
+        }
+        Some(missing) if timing::on() => {
+            timing::mark(&format!("fonts: not installed, {missing}"));
+        }
+        Some(_) => {}
+    }
+    let Some(file) = unpack_collection() else {
+        return;
+    };
+    if let Err(error) = map.add_font_file(&file) {
+        eprintln!("brevier-ui: the bundled fonts: {error}");
+    }
+    timing::mark("fonts: the bundled collection is registered");
+}
+
+/// Какого из наших начертаний (в лад с `FONTS`) карта шрифтов не знает;
+/// `None` — знает все. Свой Noto Sans читателя тоже годится, если в нём
+/// есть все шесть.
+#[cfg(windows)]
+fn missing_bundled_face(map: &pango::FontMap) -> Option<String> {
+    use pango::prelude::{FontFaceExt, FontFamilyExt, FontMapExt};
+    use pango::{Style, Weight};
+
+    let wanted: [(&str, Weight, Style); 7] = [
+        ("Noto Sans", Weight::Light, Style::Normal),
+        ("Noto Sans", Weight::Normal, Style::Normal),
+        ("Noto Sans", Weight::Normal, Style::Italic),
+        ("Noto Sans", Weight::Medium, Style::Normal),
+        ("Noto Sans", Weight::Bold, Style::Normal),
+        ("Noto Sans", Weight::Bold, Style::Italic),
+        (MONO_FAMILY, Weight::Normal, Style::Normal),
+    ];
+    for (name, weight, style) in wanted {
+        let Some(family) = map.family(name) else {
+            return Some(format!("no family {name}"));
+        };
+        let found = family.list_faces().iter().any(|face| {
+            let description = face.describe();
+            !face.is_synthesized() && description.weight() == weight && description.style() == style
+        });
+        if !found {
+            let faces: Vec<String> = family
+                .list_faces()
+                .iter()
+                .map(|face| face.describe().to_string())
+                .collect();
+            return Some(format!(
+                "{name} has no {weight:?} {style:?}; it has {faces:?}"
+            ));
         }
     }
+    None
+}
+
+/// Выложить коллекцию наших шрифтов в кэш; отвечает её путём. Отдельные
+/// файлы, что клали прежние версии, убираем.
+#[cfg(windows)]
+fn unpack_collection() -> Option<std::path::PathBuf> {
+    let fonts = unpacked().join("fonts");
+    std::fs::create_dir_all(&fonts).ok()?;
+    for (name, _) in FONTS {
+        let _ = std::fs::remove_file(fonts.join(name));
+    }
+    let bytes = ttc::collection(&FONTS.map(|(_, bytes)| bytes))?;
+    let path = fonts.join("brevier.ttc");
+    let stale = std::fs::metadata(&path).map(|meta| meta.len() as usize != bytes.len());
+    if stale.unwrap_or(true) {
+        std::fs::write(&path, bytes).ok()?;
+    }
+    Some(path)
 }
 
 /// Выложить гарнитуры в кэш: шрифт подключается файлом, а не байтами.
 /// Отвечает папкой, когда все файлы на месте.
+#[cfg(not(windows))]
 fn unpack_fonts() -> Option<std::path::PathBuf> {
     let fonts = unpacked().join("fonts");
     std::fs::create_dir_all(&fonts).ok()?;

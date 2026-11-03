@@ -182,9 +182,17 @@ works only on Linux.
 https://github.com/gurov/brevier
 EOF
 
+# Шрифты — только установщику: он ставит их в систему для читателя.
+# В zip их нет: окно из zip собирает коллекцию из вшитых само.
+fonts="$work/fonts"
+rm -rf "$fonts"
+mkdir -p "$fonts"
+cp assets/fonts/*.ttf "$fonts/"
+
 rm -f "$out/$name.zip" "$out/$name-setup.exe"
 (cd "$work" && zip -q -r -9 "$(native "$out/$name.zip")" Brevier)
 makensis -V2 -DVERSION="$version" -DSTAGE="$(backslashed "$stage")" \
+    -DFONTS="$(backslashed "$fonts")" \
     -DOUTFILE="$(native "$out/$name-setup.exe")" "$(native "$root/packaging/windows/brevier.nsi")"
 
 echo "$out/$name-setup.exe"
