@@ -64,7 +64,16 @@ mod imp {
         type ParentType = gtk::TextView;
     }
 
-    impl ObjectImpl for Article {}
+    impl ObjectImpl for Article {
+        fn constructed(&self) {
+            self.parent_constructed();
+            // Полосу прокрутки `ScrolledWindow` угадывает по высоте статьи:
+            // при `Minimum` — по наименьшей, а она теперь 0 (см. `measure`),
+            // и он раскладывал бы длинную страницу дважды за кадр.
+            self.obj()
+                .set_vscroll_policy(gtk::ScrollablePolicy::Natural);
+        }
+    }
 
     impl WidgetImpl for Article {
         // Поле заметок (#42) входит в естественную ширину статьи, а не
@@ -73,10 +82,19 @@ mod imp {
         // правое поле текста и в наименьшую — поверх самого широкого
         // виджета страницы (таблица, рамка картинки стоят во всю меру), —
         // и поле держало бы окно шире, чем хочет читатель.
+        //
+        // Наименьшая высота — 0, а не высота всего текста, как у
+        // `GtkTextView`: статья стоит по центру (`halign`), и GTK при каждой
+        // раскладке меряет её ширину при высоте окна — меньше текста, —
+        // а `gtk_widget_measure` на это пишет «Trying to measure
+        // BrevierArticle for height of 744, but it needs at least 907».
+        // Наименьшая высота прокручиваемого виджета никому не нужна:
+        // `ScrolledWindow` её наверх не отдаёт, а полосу угадывает
+        // по естественной (`vscroll-policy`, см. `constructed`).
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             let (min, natural, min_base, natural_base) = self.parent_measure(orientation, for_size);
             if orientation != gtk::Orientation::Horizontal {
-                return (min, natural, min_base, natural_base);
+                return (0, natural, min_base, natural_base);
             }
             let panel = self.panel.get();
             let wanted = self.obj().width_request() + panel;
