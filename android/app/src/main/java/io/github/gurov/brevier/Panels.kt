@@ -596,6 +596,7 @@ class SettingsPage(
     private val papered: (name: String) -> Unit,
     private val slid: (on: Boolean) -> Unit,
     private val fullScreened: (on: Boolean) -> Unit,
+    private val turned: (Turning) -> Unit,
     private val notesUnder: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
@@ -619,7 +620,7 @@ class SettingsPage(
 
     fun show(
         palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType,
-        slideBar: Boolean, notes: Boolean, fullScreen: Boolean,
+        slideBar: Boolean, notes: Boolean, fullScreen: Boolean, turning: Turning,
     ) {
         this.dark = theme.dark
         this.theme = theme
@@ -681,6 +682,30 @@ class SettingsPage(
             "Notes under their paragraphs",
             "Your words and pictures stand right under the passage they belong to, set apart by a green rule. Off: only the highlight stays, and a tap on it shows the note.",
             switch(palette, notes) { on -> notesUnder(on) }, palette,
+        ))
+
+        // Листание (#55): каждое своим переключателем, всё выключено.
+        var turn = turning
+        column.addView(section("Turning the page", palette))
+        column.addView(row(
+            "Tap the edges",
+            "A tap on the text turns a screen forward; on the left third, back. The last line stays in sight. Links, pictures and notes work as before.",
+            switch(palette, turning.taps) { on -> turn = turn.copy(taps = on); turned(turn) }, palette,
+        ))
+        column.addView(row(
+            "Left hand",
+            "Taps swap sides: the right third turns back.",
+            switch(palette, turning.leftHand) { on -> turn = turn.copy(leftHand = on); turned(turn) }, palette,
+        ))
+        column.addView(row(
+            "Swipe sideways",
+            "Right to left turns forward, left to right back. Tables and code that scroll sideways still scroll.",
+            switch(palette, turning.swipes) { on -> turn = turn.copy(swipes = on); turned(turn) }, palette,
+        ))
+        column.addView(row(
+            "Volume keys",
+            "Volume down turns forward, up back, while a page is open. Everywhere else they change the volume.",
+            switch(palette, turning.keys) { on -> turn = turn.copy(keys = on); turned(turn) }, palette,
         ))
 
         typeSection(palette, reader)

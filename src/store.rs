@@ -669,6 +669,49 @@ pub struct Settings {
     /// только не наша: `paper sepia`, `dark-paper black`.
     pub paper: Paper,
     pub dark_paper: Paper,
+    /// Листание телефона (#55): касанием края, свайпом вбок, клавишами
+    /// громкости. Окно этого не умеет. Всё выключено; в файл — перечень
+    /// включённого: `turn taps,swipes,keys,left-hand`.
+    pub turn: Turning,
+}
+
+/// Чем телефон листает страницу (#55). Каждое — своим переключателем:
+/// кому касание мешает выделять, тому могут пригодиться клавиши.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Turning {
+    /// Касание края текста: справа — вперёд, слева — назад.
+    pub taps: bool,
+    /// Свайп вбок: справа налево — вперёд.
+    pub swipes: bool,
+    /// Клавиши громкости: «тише» — вперёд, «громче» — назад.
+    pub keys: bool,
+    /// Для левой руки: стороны касания меняются местами.
+    pub left_hand: bool,
+}
+
+impl Turning {
+    /// Слова строки `turn`: что включено.
+    pub fn words(self) -> Vec<&'static str> {
+        [
+            (self.taps, "taps"),
+            (self.swipes, "swipes"),
+            (self.keys, "keys"),
+            (self.left_hand, "left-hand"),
+        ]
+        .into_iter()
+        .filter_map(|(on, word)| on.then_some(word))
+        .collect()
+    }
+
+    pub fn from_words(value: &str) -> Self {
+        let has = |word| value.split(',').any(|part| part.trim() == word);
+        Self {
+            taps: has("taps"),
+            swipes: has("swipes"),
+            keys: has("keys"),
+            left_hand: has("left-hand"),
+        }
+    }
 }
 
 impl Default for Settings {
@@ -692,6 +735,7 @@ impl Default for Settings {
             typography: Type::default(),
             paper: Paper::Usual,
             dark_paper: Paper::Usual,
+            turn: Turning::default(),
         }
     }
 }
@@ -740,6 +784,7 @@ impl Settings {
                 "bar" => settings.slide_bar = value != "stays",
                 "screen" => settings.full_screen = value == "full",
                 "notes" => settings.notes = value != "hidden",
+                "turn" => settings.turn = Turning::from_words(value),
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
                         settings.typography.face = face;
@@ -823,6 +868,10 @@ impl Settings {
         }
         if !self.notes {
             text.push_str("notes\thidden\n");
+        }
+        let turn = self.turn.words();
+        if !turn.is_empty() {
+            text.push_str(&format!("turn\t{}\n", turn.join(",")));
         }
         if self.paper != Paper::Usual {
             text.push_str(&format!("paper\t{}\n", self.paper.name(false)));
@@ -1812,6 +1861,12 @@ mod tests {
             },
             paper: Paper::Sepia,
             dark_paper: Paper::Black,
+            turn: Turning {
+                taps: true,
+                swipes: false,
+                keys: true,
+                left_hand: true,
+            },
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);

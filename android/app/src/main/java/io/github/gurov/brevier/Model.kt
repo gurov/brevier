@@ -162,6 +162,8 @@ class Loaded(
     /** Откуда продолжить, если страницу уже читали долго (#19): UTF-16 и проценты. */
     val continueAt: Int?,
     val continueShare: Int,
+    /** Следующая страница, если страница её назвала (#35): листание (#55) её предлагает. */
+    val next: Entry? = null,
 ) {
     companion object {
         fun of(json: JSONObject, asked: String): Loaded {
@@ -189,6 +191,7 @@ class Loaded(
                 ways = json.optJSONArray("ways")?.map { entry(it as JSONObject) } ?: emptyList(),
                 continueAt = json.optJSONObject("continue")?.optInt("at"),
                 continueShare = json.optJSONObject("continue")?.optInt("share") ?: 0,
+                next = json.optJSONObject("next")?.let(::entry),
             )
         }
 
@@ -197,3 +200,32 @@ class Loaded(
 }
 
 fun <T> JSONArray.map(transform: (Any) -> T): List<T> = (0 until length()).map { transform(get(it)) }
+
+/**
+ * Чем листать страницу (#55): касанием края, свайпом вбок, клавишами
+ * громкости; `leftHand` меняет стороны касания. В `settings.tsv` —
+ * строкой `turn` с перечнем включённого.
+ */
+data class Turning(
+    val taps: Boolean = false,
+    val swipes: Boolean = false,
+    val keys: Boolean = false,
+    val leftHand: Boolean = false,
+) {
+    val any: Boolean get() = taps || swipes || keys
+
+    /** Для ядра: включённое через запятую, `off` — ничего. */
+    fun words(): String = listOfNotNull(
+        "taps".takeIf { taps },
+        "swipes".takeIf { swipes },
+        "keys".takeIf { keys },
+        "left-hand".takeIf { leftHand },
+    ).joinToString(",").ifEmpty { "off" }
+
+    companion object {
+        fun of(words: String): Turning {
+            val on = words.split(',').map { it.trim() }.toSet()
+            return Turning("taps" in on, "swipes" in on, "keys" in on, "left-hand" in on)
+        }
+    }
+}

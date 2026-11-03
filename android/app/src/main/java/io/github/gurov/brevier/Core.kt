@@ -100,14 +100,15 @@ object Core {
      */
     fun saveSettings(
         dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean, notes: Boolean,
-        paper: String, darkPaper: String, fullScreen: Boolean,
+        paper: String, darkPaper: String, fullScreen: Boolean, turning: Turning,
     ) {
         val flags = listOf(dark, images, archive).map { if (it) "1" else "0" } +
             when (contrast) { true -> "1"; false -> "0"; null -> "" } +
             (if (slideBar) "1" else "0") +
             (if (notes) "1" else "0") +
             paper + darkPaper +
-            (if (fullScreen) "1" else "0")
+            (if (fullScreen) "1" else "0") +
+            turning.words()
         ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 

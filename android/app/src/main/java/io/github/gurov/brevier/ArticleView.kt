@@ -87,6 +87,12 @@ interface ArticleHost {
 
     /** Щипок: ступень масштаба вверх или вниз. */
     fun zoom(step: Int)
+
+    /** Чем сейчас листать (#55): выключенное и при TalkBack — ничем. */
+    fun turning(): Turning
+
+    /** Листнули вперёд, а страница кончилась (#55): предложить следующую. */
+    fun pageEnd()
 }
 
 /**
@@ -155,6 +161,23 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     var covered = 0
     /** Прокрутку ведёт палец: только её сдвиг достаётся шапке. */
     private var dragging = false
+
+    /** Идёт выделение текста (#39): касание его снимает, а не листает (#55). */
+    private var choosing = false
+    /** Когда страница последний раз двигалась не нами: касание по броску его останавливает. */
+    private var movedAt = 0L
+    /** Листание, которое ещё едет: следующее начнётся с его конца. */
+    private var turnAnimation: android.animation.ValueAnimator? = null
+    private var turnTarget = 0
+
+    // Жест листания (#55): касание или свайп, с нажатия до отпускания.
+    private var gestureX = 0f
+    private var gestureY = 0f
+    private var gestureAt = 0L
+    private var gestureMoved = false
+    private var gestureCalm = false
+    private var swipeAllowed = false
+    private var swiping = false
 
     init {
         isFillViewport = true
@@ -486,8 +509,204 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
         if (dragging && t != oldt) host.dragged(t - oldt)
+        if (turnAnimation == null) movedAt = android.os.SystemClock.uptimeMillis()
         host.scrolled()
     }
+
+    // ── листание (#55) ──────────────────────────────────────────────────────
+
+    /**
+     * Строка на высоте `y` колонки: верх, низ и базовая линия — по ней,
+     * а не по низу, видна ли строка: под последней строкой абзаца ещё воздух,
+     * и по низу она казалась бы резаной всегда. Картинка, таблица, карточка — целиком, как одна строка;
+     * между кусками — пустое место.
+     */
+    private class Span(val top: Int, val bottom: Int, val ink: Int)
+
+    private fun lineSpan(y: Int): Span {
+        for (index in 0 until column.childCount) {
+            val child = column.getChildAt(index)
+            if (y < child.top || y >= child.bottom) continue
+            if (child is ProseView) {
+                val layout = child.layout ?: return Span(child.top, child.bottom, child.bottom)
+                val inside = y - child.top - child.totalPaddingTop
+                if (inside < 0 || inside >= layout.height) return Span(y, y, y)
+                val line = layout.getLineForVertical(inside)
+                val top = child.top + child.totalPaddingTop
+                // Строка читается, пока видна её базовая линия: срезанные
+                // хвосты «р» и «у» её не прячут.
+                val ink = top + layout.getLineBaseline(line)
+                return Span(top + layout.getLineTop(line), top + layout.getLineBottom(line), ink)
+            }
+            return Span(child.top, child.bottom, child.bottom)
+        }
+        return Span(y, y, y)
+    }
+
+    /** Высота строки текста: шаг, на который листание не доходит до экрана. */
+    private fun lineHeight(): Int = proses.firstOrNull()?.lineHeight?.takeIf { it > 0 } ?: (metrics.text * 1.5f).toInt()
+
+    /**
+     * Перелистнуть (#55): на экран без строки, чтобы последняя строка
+     * осталась на виду ориентиром, и до границы строк, чтобы ни одна
+     * не резалась пополам. Назад — так же, вверх. Это пробел и Page Down
+     * окна. Шапку (#45) листание не двигает: это прыжок, а не палец.
+     */
+    fun turn(forward: Boolean) {
+        turnAnimation?.let {
+            it.cancel()
+            jump { scrollTo(0, turnTarget) }
+        }
+        if (forward && !canScrollVertically(1)) {
+            host.pageEnd()
+            return
+        }
+        if (!forward && !canScrollVertically(-1)) return
+        val view = visibleHeight()
+        val top = visibleTop()
+        val line = lineHeight()
+        var next = if (forward) {
+            val bottom = top + view
+            val cut = lineSpan(bottom - 1)
+            // Последняя целая строка становится первой.
+            if (cut.ink <= bottom) cut.top else lineSpan(cut.top - 1).top
+        } else {
+            val first = lineSpan(top)
+            // Первая целая строка становится последней; верхняя — не резаная.
+            val firstEnd = if (first.top >= top) first.ink else lineSpan(first.bottom).ink
+            val raw = firstEnd - view
+            val at = lineSpan(raw)
+            if (at.top < raw && at.bottom - raw <= 2 * line) at.bottom else raw
+        }
+        // Картинка выше экрана или пустота — шаг на экран без строки как есть.
+        if (abs(next - top) < view / 2) next = if (forward) top + view - line else top - view + line
+        val max = max(0, column.height + paddingTop - height)
+        val target = (next + paddingTop - covered).coerceIn(0, max)
+        if (target == scrollY) return
+        turnTarget = target
+        val animate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.animation.ValueAnimator.areAnimatorsEnabled()
+        } else {
+            android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+        }
+        if (!animate) {
+            jump { scrollTo(0, target) }
+            return
+        }
+        turnAnimation = android.animation.ValueAnimator.ofInt(scrollY, target).apply {
+            duration = TURN_MS
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { jump { scrollTo(0, it.animatedValue as Int) } }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (turnAnimation === animation) turnAnimation = null
+                }
+            })
+            start()
+        }
+    }
+
+    /**
+     * Касание по пустому тексту: не ссылка, не картинка, не таблица,
+     * не заметка — оно и листает. `x`, `y` — в координатах статьи.
+     */
+    private fun quietAt(x: Float, y: Float): Boolean {
+        val cx = x - column.left
+        val cy = y + scrollY - column.top
+        for (index in 0 until column.childCount) {
+            val child = column.getChildAt(index)
+            if (cy < child.top || cy >= child.bottom || cx < child.left || cx >= child.right) continue
+            return child is ProseView && child.quietAt(cx - child.left, cy - child.top)
+        }
+        return true
+    }
+
+    /** Под пальцем то, что само листается вбок: таблица или код (`TableFrame`). */
+    private fun sidewaysAt(x: Float, y: Float): Boolean {
+        val cx = x - column.left
+        val cy = y + scrollY - column.top
+        for (index in 0 until column.childCount) {
+            val child = column.getChildAt(index)
+            if (cy >= child.top && cy < child.bottom && cx >= child.left && cx < child.right) return child is TableFrame
+        }
+        return false
+    }
+
+    /**
+     * Свайп от края экрана — системный «назад»: такие начала не наши.
+     * Края — из вставок жестов системы (Android 10+), иначе их нет.
+     */
+    private fun nearSystemEdge(x: Float): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val insets = rootWindowInsets?.systemGestureInsets ?: return false
+        return x < insets.left || x > width - insets.right
+    }
+
+    /**
+     * Касание и свайп листания (#55). Отдаёт `true`, если жест забран:
+     * свайп вбок — с той минуты, как он стал явно горизонтальным.
+     */
+    private fun turnGesture(event: MotionEvent): Boolean {
+        val turning = host.turning()
+        if (!turning.taps && !turning.swipes) return false
+        val slop = ViewConfiguration.get(context).scaledTouchSlop
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gestureX = event.x
+                gestureY = event.y
+                gestureAt = event.eventTime
+                gestureMoved = false
+                swiping = false
+                // Касание, остановившее бросок, и касание, снявшее выделение, не листают.
+                gestureCalm = !choosing && android.os.SystemClock.uptimeMillis() - movedAt > CALM_MS
+                swipeAllowed = turning.swipes && !choosing && !nearSystemEdge(event.x) && !sidewaysAt(event.x, event.y)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                gestureMoved = true
+                swipeAllowed = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - gestureX
+                val dy = event.y - gestureY
+                if (abs(dx) > slop || abs(dy) > slop) gestureMoved = true
+                if (swiping) return true
+                // Вбок вдвое больше, чем вниз, — как у строки вкладок (`SwipeRow`):
+                // иначе это прокрутка, и её не трогаем.
+                if (swipeAllowed && abs(dx) > slop && abs(dx) > 2 * abs(dy)) {
+                    swiping = true
+                    val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                    super.dispatchTouchEvent(cancel)
+                    cancel.recycle()
+                    if (dragging) {
+                        dragging = false
+                        host.released(pinch = false)
+                    }
+                    return true
+                }
+                if (abs(dy) > slop) swipeAllowed = false
+            }
+            MotionEvent.ACTION_UP -> {
+                if (swiping) {
+                    swiping = false
+                    val dx = event.x - gestureX
+                    if (abs(dx) >= context.dp(SWIPE_DP)) turn(forward = dx < 0)
+                    return true
+                }
+                val tap = turning.taps && !gestureMoved && gestureCalm &&
+                    event.eventTime - gestureAt < ViewConfiguration.getLongPressTimeout()
+                if (tap && quietAt(event.x, event.y)) {
+                    // Назад — треть у края, вперёд — остальное (как у Kindle
+                    // и Play Books: вперёд листают чаще, промах назад досаднее).
+                    val third = width / 3f
+                    val back = if (turning.leftHand) event.x > width - third else event.x < third
+                    post { turn(forward = !back) }
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        return false
+    }
+
 
     // ── поиск ───────────────────────────────────────────────────────────────
 
@@ -673,8 +892,11 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         if (scaler.isInProgress) {
             if (dragging) host.released(pinch = true)
             dragging = false
+            gestureMoved = true
+            swipeAllowed = false
             return true
         }
+        if (turnGesture(event)) return true
         // Шапка (#45) идёт за пальцем, как у Firefox: от касания до отпускания;
         // бросок после него страницу листает, а шапку уже нет.
         when (event.actionMasked) {
@@ -1120,6 +1342,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 override fun onCreateActionMode(mode: ActionMode, menu: android.view.Menu): Boolean {
                     menu.add(android.view.Menu.NONE, MARK, 0, "Highlight")
                     menu.add(android.view.Menu.NONE, NOTE, 1, "Note")
+                    choosing = true
                     host.selecting(true)
                     return true
                 }
@@ -1141,7 +1364,10 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     return true
                 }
 
-                override fun onDestroyActionMode(mode: ActionMode) = host.selecting(false)
+                override fun onDestroyActionMode(mode: ActionMode) {
+                    choosing = false
+                    host.selecting(false)
+                }
             }
             setOnLongClickListener {
                 val link = linkAt(downX, downY) ?: return@setOnLongClickListener false
@@ -1180,6 +1406,10 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             }
             return super.onTouchEvent(event)
         }
+
+        /** Под точкой ни ссылки, ни заметки, и ничего не выделено: касание листает (#55). */
+        fun quietAt(x: Float, y: Float): Boolean =
+            !hasSelection() && linkAt(x, y) == null && offsetAt(x, y)?.let { noteAt(it) } == null
 
         /** Смещение страницы под точкой — только если палец на тексте строки. */
         private fun offsetAt(x: Float, y: Float): Int? {
@@ -1251,6 +1481,15 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     companion object {
         /** Сколько кадров ждём, пока картинки и таблицы займут своё место. */
         const val SETTLE_FRAMES = 45
+
+        /** Листание (#55) — быстрое, но видно, куда ушёл текст. */
+        const val TURN_MS = 200L
+
+        /** Сколько страница стоит после броска, чтобы касание листало, а не останавливало. */
+        const val CALM_MS = 120L
+
+        /** Свайп короче этого — дрожь пальца, а не просьба листать. */
+        const val SWIPE_DP = 48f
 
         /** Сколько знаков кладём в колонку сразу: первый экран с запасом. */
         const val FIRST_CHARS = 2 * CHUNK_CHARS

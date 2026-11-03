@@ -68,6 +68,10 @@ class MainActivity : Activity(), ArticleHost {
      * по умолчанию выключена.
      */
     private var fullScreen = false
+    /** Чем листать страницу (#55). */
+    private var turning = Turning()
+    /** Касание краёв только что включили: показать зоны, как вернёмся к статье. */
+    private var zonesPending = false
     /** Бумага светлой и тёмной темы (#53), именем: `ivory`, `warm`… */
     private var paper = "ivory"
     private var darkPaper = "warm"
@@ -156,6 +160,7 @@ class MainActivity : Activity(), ArticleHost {
         systemHigh = systemContrast()
         slideBar = stored.optBoolean("slideBar", true)
         fullScreen = stored.optBoolean("fullScreen", false)
+        turning = Turning.of(stored.optString("turn"))
         paper = stored.optString("paper", "ivory")
         darkPaper = stored.optString("darkPaper", "warm")
         notesShown = stored.optBoolean("notes", true)
@@ -356,6 +361,7 @@ class MainActivity : Activity(), ArticleHost {
             papered = { name -> changePaper(name) },
             slid = { on -> changeSlideBar(on) },
             fullScreened = { on -> changeFullScreen(on) },
+            turned = { chosen -> changeTurning(chosen) },
             notesUnder = { on -> changeNotesShown(on) },
             keepCopies = { on -> archive = on; saveSettings() },
             forget = { forgetEverything() },
@@ -466,6 +472,10 @@ class MainActivity : Activity(), ArticleHost {
         root.viewTreeObserver.addOnGlobalLayoutListener {
             fitSystemBars()
             refitHints()
+            if (zonesPending && readingOnly() && currentTab()?.view?.page != null) {
+                zonesPending = false
+                root.post { showZones() }
+            }
         }
         // Под вырез камеры окно заходит, когда панели спрятаны: бумага до края,
         // а текст от выреза отодвигает `fitInsets`. С Android 15 так и так.
@@ -1984,7 +1994,7 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun showSettings() {
         showBar()
-        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, fullScreen)
+        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, fullScreen, turning)
     }
 
     /** Шапке — уезжать или стоять (#45). */
@@ -2071,7 +2081,74 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Все настройки разом — на диск, в `settings.tsv`. */
     private fun saveSettings() =
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper, fullScreen)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper, fullScreen, turning)
+
+    /** Листание (#55): включили касание краёв — зоны покажутся над статьёй. */
+    private fun changeTurning(chosen: Turning) {
+        if (chosen.taps && (!turning.taps || chosen.leftHand != turning.leftHand)) zonesPending = true
+        if (!chosen.taps) zonesPending = false
+        turning = chosen
+        saveSettings()
+    }
+
+    override fun turning(): Turning = if (assisted) Turning() else turning
+
+    /**
+     * Листнули за конец страницы (#55). Дальше листание само не уходит:
+     * следующую страницу (#35) предлагает строка внизу, нажать — перейти.
+     */
+    override fun pageEnd() {
+        val next = currentTab()?.shown?.next
+        if (next == null) {
+            notice("The end of the page")
+            return
+        }
+        val said = "Next page: ${next.title.ifEmpty { next.address }}"
+        notice.contentDescription = null
+        notice.text = android.text.SpannableString(said).apply {
+            setSpan(android.text.style.UnderlineSpan(), 0, said.length, 0)
+        }
+        notice.visibility = View.VISIBLE
+        notice.setOnClickListener {
+            notice.visibility = View.GONE
+            notice.setOnClickListener(null)
+            go(next.address)
+        }
+        main.removeCallbacksAndMessages(NOTICE)
+        main.postAtTime({
+            if (notice.text.toString() == said) {
+                notice.visibility = View.GONE
+                notice.setOnClickListener(null)
+            }
+        }, NOTICE, android.os.SystemClock.uptimeMillis() + 8000)
+    }
+
+    /**
+     * Зоны касания (#55) — поверх статьи на полторы секунды, когда касание
+     * краёв только что включили: где «назад», где «вперёд».
+     */
+    private fun showZones() {
+        val back = if (turning.leftHand) Gravity.END else Gravity.START
+        val zones = FrameLayout(this).apply {
+            isClickable = false
+            alpha = 0f
+        }
+        fun zone(label: String, gravity: Int, share: Float) = TextView(this).apply {
+            text = label
+            typeface = fonts.medium
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTextColor(palette.ink)
+            this.gravity = Gravity.CENTER
+            setBackgroundColor((palette.chosen and 0xffffff) or 0xb0000000.toInt())
+            layoutParams = FrameLayout.LayoutParams((root.width * share).toInt(), FrameLayout.LayoutParams.MATCH_PARENT, gravity)
+        }
+        zones.addView(zone("Back", back, 1f / 3))
+        zones.addView(zone("Forward", if (back == Gravity.START) Gravity.END else Gravity.START, 2f / 3 - 0.005f))
+        root.addView(zones, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        zones.animate().alpha(1f).setDuration(150).withEndAction {
+            zones.animate().alpha(0f).setStartDelay(1500).setDuration(300).withEndAction { root.removeView(zones) }
+        }
+    }
 
     /** Полный экран (#60): включили — панели уходят, как только читатель вернётся к статье. */
     private fun changeFullScreen(on: Boolean) {
@@ -2584,6 +2661,20 @@ class MainActivity : Activity(), ArticleHost {
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_F5) {
             reload()
             return true
+        }
+        // Клавиши громкости листают (#55), пока на экране статья и ничего
+        // поверх; иначе — громкость, как всегда. Забираем и нажатие,
+        // и отпускание, иначе система покажет ползунок громкости.
+        val volume = event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
+        if (volume && turning().keys && readingOnly()) {
+            val view = currentTab()?.view
+            if (view?.page != null) {
+                // Удержание не листает очередью: страница за нажатие.
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    view.turn(forward = event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+                }
+                return true
+            }
         }
         if (event.action == KeyEvent.ACTION_DOWN && event.isAltPressed) {
             when (event.keyCode) {

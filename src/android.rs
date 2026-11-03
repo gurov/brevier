@@ -312,6 +312,11 @@ fn call(method: &str, arg: &str) -> String {
             if let Some(paper) = palette::Paper::from_name(field(7), true) {
                 settings.dark_paper = paper;
             }
+            // Листание (#55): включённое через запятую, `off` — ничего;
+            // поля нет — переключатели не трогали.
+            if !field(9).is_empty() {
+                settings.turn = crate::store::Turning::from_words(field(9));
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -750,6 +755,15 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
         out.push_str(",\"directory\":");
         entry_json(&mut out, "Files in this directory", &directory);
     }
+    // Следующая страница (#35): листание (#55) в конце предлагает её, а сам
+    // не уходит.
+    if let Some(next) = &document.next {
+        out.push_str(",\"next\":{\"title\":");
+        json_string(&mut out, &next.title);
+        out.push_str(",\"address\":");
+        json_string(&mut out, &next.address);
+        out.push('}');
+    }
     out.push_str(",\"page\":");
     out.push_str(&page.to_json());
     out.push('}');
@@ -958,7 +972,7 @@ fn settings() -> String {
         format!("[{}]", items.join(","))
     };
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"fullScreen\":{},\"notes\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"fullScreen\":{},\"notes\":{},\"turn\":\"{}\",\
          \"paper\":\"{}\",\"darkPaper\":\"{}\",\"papers\":{},\"darkPapers\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{},\"paragraphs\":{}}}",
@@ -973,6 +987,7 @@ fn settings() -> String {
         settings.slide_bar,
         settings.full_screen,
         settings.notes,
+        settings.turn.words().join(","),
         settings.paper.name(false),
         settings.dark_paper.name(true),
         tones(false),
