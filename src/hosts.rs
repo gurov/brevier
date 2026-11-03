@@ -267,6 +267,9 @@ fn part_address(url: &str, part: usize) -> String {
 /// Где искать: DuckDuckGo Lite. Страница выдачи — по GET, запрос в `q`.
 const SEARCH: &str = "https://lite.duckduckgo.com/lite/";
 
+/// Имя поисковика для интерфейса: строка подсказки и пустая адресная (#50).
+pub const SEARCH_NAME: &str = "DuckDuckGo";
+
 /// Адрес выдачи по запросу.
 pub fn search_url(query: &str) -> String {
     let mut url = Url::parse(SEARCH).expect("адрес поисковика разбирается");

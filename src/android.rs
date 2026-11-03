@@ -808,6 +808,18 @@ fn follow(here: &str, target: &str) -> String {
 fn suggest(typed: &str) -> String {
     let hints = core().store.suggest(typed, HINTS);
     let mut out = String::from("[");
+    // Уйдёт в поиск — первой строкой «Search DuckDuckGo for “…”» (#50):
+    // адрес у неё — само напечатанное, `search` — показать без адреса.
+    if let Some(label) = address::search_row(typed) {
+        out.push_str("{\"address\":");
+        json_string(&mut out, typed.trim());
+        out.push_str(",\"title\":");
+        json_string(&mut out, &label);
+        out.push_str(",\"search\":true}");
+        if !hints.is_empty() {
+            out.push(',');
+        }
+    }
     for (index, hint) in hints.iter().enumerate() {
         if index > 0 {
             out.push(',');

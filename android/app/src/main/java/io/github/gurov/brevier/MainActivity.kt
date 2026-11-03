@@ -131,7 +131,10 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Строку адреса окно правит и само — пока правит, подсказки молчат. */
     private var quiet = false
-    private var hintRows: List<Pair<String, String>> = emptyList()
+    /** Строка подсказки: адрес, заголовок; `search` — «Search DuckDuckGo for …» (#50), без адреса. */
+    private data class HintRow(val address: String, val title: String, val search: Boolean)
+
+    private var hintRows: List<HintRow> = emptyList()
 
     /** Поиск: совпадения на открытой странице и на котором стоим. */
     private var hits: List<Hit> = emptyList()
@@ -366,7 +369,9 @@ class MainActivity : Activity(), ArticleHost {
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            hint = "address or search"
+            // Сначала — что поиск есть (#50); поисковик назовёт строка
+            // подсказки: «Search DuckDuckGo or type an address» сюда не влезает.
+            hint = "Search or type an address"
             typeface = fonts.regular
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setSelectAllOnFocus(true)
@@ -441,7 +446,7 @@ class MainActivity : Activity(), ArticleHost {
             setOnItemClickListener { _, _, position, _ ->
                 val chosen = hintRows.getOrNull(position) ?: return@setOnItemClickListener
                 dismiss()
-                go(chosen.first)
+                go(chosen.address)
             }
         }
 
@@ -458,7 +463,10 @@ class MainActivity : Activity(), ArticleHost {
         root.setOnApplyWindowInsetsListener { view, insets -> fitInsets(view, insets) }
         // Полный экран (#60): поверх статьи открылось или закрылось своё —
         // настройки, вкладки, полка, клавиатура, — и раскладка пересчиталась.
-        root.viewTreeObserver.addOnGlobalLayoutListener { fitSystemBars() }
+        root.viewTreeObserver.addOnGlobalLayoutListener {
+            fitSystemBars()
+            refitHints()
+        }
         // Под вырез камеры окно заходит, когда панели спрятаны: бумага до края,
         // а текст от выреза отодвигает `fitInsets`. С Android 15 так и так.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -1865,7 +1873,7 @@ class MainActivity : Activity(), ArticleHost {
         val found = Core.suggest(typed)
         hintRows = found.map { item ->
             val hint = item as org.json.JSONObject
-            hint.getString("address") to hint.getString("title")
+            HintRow(hint.getString("address"), hint.getString("title"), hint.optBoolean("search"))
         }
         if (hintRows.isEmpty()) {
             hints.dismiss()
@@ -1879,10 +1887,34 @@ class MainActivity : Activity(), ArticleHost {
         })
         hints.width = bar.width - 2 * dropMargin
         hints.horizontalOffset = dropMargin
-        // Высота — по строкам, а не до клавиатуры: пустой хвост списка
-        // закрывал страницу и ничего не предлагал.
-        hints.height = hintRows.size * dp(if (hintRows.any { it.second.isNotEmpty() }) 60f else 40f) + dp(8f)
-        if (!hints.isShowing) hints.show() else hints.show()
+        hints.height = hintsHeight()
+        hints.show()
+    }
+
+    /**
+     * Высота списка подсказок — по строкам (пустой хвост закрывал страницу
+     * и ничего не предлагал), но не ниже клавиатуры. Не влезший список
+     * система не режет, а поднимает — на строку адреса, и напечатанного
+     * не видно, пока клавиатура открыта (мейнтейнер, 3 ноября 2026).
+     * Поместилось не всё — список листается.
+     */
+    private fun hintsHeight(): Int {
+        val wanted = hintRows.sumOf { dp(if (it.title.isNotEmpty() && !it.search) 60f else 40f) } + dp(8f)
+        // Низ корня — верх клавиатуры: `fitInsets` отступает от неё снизу.
+        val rootAt = IntArray(2).also { root.getLocationInWindow(it) }
+        val barAt = IntArray(2).also { bar.getLocationInWindow(it) }
+        val room = rootAt[1] + root.height - root.paddingBottom - (barAt[1] + bar.height) - dp(8f)
+        return minOf(wanted, room).coerceAtLeast(dp(40f))
+    }
+
+    /** Клавиатура встала, сменила высоту или ушла — список под неё. */
+    private fun refitHints() {
+        if (!::hints.isInitialized || !hints.isShowing || hintRows.isEmpty()) return
+        val height = hintsHeight()
+        if (height != hints.height) {
+            hints.height = height
+            hints.show()
+        }
     }
 
     private inner class HintAdapter : BaseAdapter() {
@@ -1890,15 +1922,16 @@ class MainActivity : Activity(), ArticleHost {
         override fun getItem(position: Int) = hintRows[position]
         override fun getItemId(position: Int) = position.toLong()
         override fun getView(position: Int, convert: View?, parent: ViewGroup): View {
-            val (target, title) = hintRows[position]
+            val row = hintRows[position]
             return LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14f), dp(8f), dp(14f), dp(8f))
-                if (title.isNotEmpty()) addView(label(title, fonts, palette.ink, 14f).apply {
+                if (row.title.isNotEmpty()) addView(label(row.title, fonts, palette.ink, 14f).apply {
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
                 })
-                addView(label(target, fonts, palette.dim, 12f).apply {
+                // Адрес выдачи читателю ничего не скажет — у строки поиска его нет.
+                if (!row.search) addView(label(row.address, fonts, palette.dim, 12f).apply {
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.MIDDLE
                 })

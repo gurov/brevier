@@ -480,6 +480,23 @@ fn search(query: &str) -> Address {
     Address::Web(crate::hosts::search_url(query))
 }
 
+/// Первая строка подсказок, когда напечатанное уйдёт в поиск (#50):
+/// «Search DuckDuckGo for “…”», как у Firefox и Chrome. Тестер Play решил,
+/// что поиска нет вовсе: «address or search» в пустой строке пропадает
+/// с первой буквой, а поисковик не назван до самой выдачи. Строка
+/// объясняет это в ту минуту, когда нужно, и Enter делает ровно то,
+/// что в ней написано.
+pub fn search_row(typed: &str) -> Option<String> {
+    let Ok(Address::Web(url)) = parse(typed) else {
+        return None;
+    };
+    let query = crate::hosts::search_query(&url)?;
+    Some(format!(
+        "Search {} for \u{201c}{query}\u{201d}",
+        crate::hosts::SEARCH_NAME
+    ))
+}
+
 /// После двоеточия — порт: цифры, а за ними конец или путь.
 fn is_port(rest: &str) -> bool {
     let digits = rest.chars().take_while(char::is_ascii_digit).count();
@@ -1064,6 +1081,32 @@ mod tests {
         // `?` впереди ищет и то, что само похоже на адрес.
         assert_eq!(searched("?danluu.com").as_deref(), Some("danluu.com"));
         assert_eq!(searched(" ? gh:o/n ").as_deref(), Some("gh:o/n"));
+    }
+
+    /// Строка «Search DuckDuckGo for …» — ровно когда Enter уйдёт в поиск (#50).
+    #[test]
+    fn the_search_row_is_there_when_enter_searches() {
+        assert_eq!(
+            search_row("borrow checker").as_deref(),
+            Some("Search DuckDuckGo for \u{201c}borrow checker\u{201d}")
+        );
+        assert_eq!(
+            search_row("?danluu.com").as_deref(),
+            Some("Search DuckDuckGo for \u{201c}danluu.com\u{201d}")
+        );
+        assert!(search_row("rust").is_some());
+        for address in [
+            "",
+            "?",
+            "danluu.com",
+            "https://danluu.com/",
+            "gh:rust-lang/book",
+            "localhost:8080",
+            "brevier:history",
+            "./notes.md",
+        ] {
+            assert_eq!(search_row(address), None, "{address}");
+        }
     }
 
     #[test]

@@ -745,7 +745,12 @@ fn build(app: &Application, start: Vec<String>) {
             .build(),
         notebook: gtk::Notebook::builder().scrollable(true).build(),
         entry: gtk::Entry::builder()
-            .placeholder_text("address or search")
+            // Поисковик назван до первой буквы (#50): «address or search»
+            // тестер прочёл как «адрес», поиска не заметил.
+            .placeholder_text(format!(
+                "Search {} or type an address",
+                brevier::hosts::SEARCH_NAME
+            ))
             .hexpand(true)
             .build(),
         back: gtk::Button::from_icon_name("go-previous-symbolic"),
@@ -3367,11 +3372,15 @@ fn offer_hints(ui: &Ui, state: &Rc<RefCell<State>>) {
     }
     let typed = ui.entry.text().to_string();
     let found = state.borrow().store.suggest(&typed, HINTS);
+    // Уйдёт в поиск — первой строкой это и сказано (#50). Её адрес —
+    // само напечатанное: открыть его и значит искать.
+    let search = address::search_row(&typed);
 
     while let Some(child) = ui.hint_list.first_child() {
         ui.hint_list.remove(&child);
     }
-    if found.is_empty() {
+    let rows = found.len() + usize::from(search.is_some());
+    if rows == 0 {
         state.borrow_mut().hints.clear();
         ui.hints.popdown();
         return;
@@ -3381,8 +3390,11 @@ fn offer_hints(ui: &Ui, state: &Rc<RefCell<State>>) {
     // строк стало меньше — под списком осталась бы пустая плита. Показываем
     // заново, но только когда число строк и правда изменилось, иначе окно
     // мигало бы на каждом нажатии.
-    if ui.hints.is_visible() && found.len() != state.borrow().hints.len() {
+    if ui.hints.is_visible() && rows != state.borrow().hints.len() {
         ui.hints.popdown();
+    }
+    if let Some(label) = &search {
+        ui.hint_list.append(&search_row(label));
     }
     for hint in &found {
         ui.hint_list.append(&hint_row(hint));
@@ -3390,7 +3402,11 @@ fn offer_hints(ui: &Ui, state: &Rc<RefCell<State>>) {
     // Ничего не выбрано: первое нажатие Enter обязано открыть напечатанное,
     // а не то, что программа угадала за читателя. Выбирают стрелкой.
     ui.hint_list.unselect_all();
-    state.borrow_mut().hints = found.into_iter().map(|hint| hint.address).collect();
+    state.borrow_mut().hints = search
+        .map(|_| typed.trim().to_owned())
+        .into_iter()
+        .chain(found.into_iter().map(|hint| hint.address))
+        .collect();
 
     // Ширину берём у строки: список — её продолжение вниз, и уже неё
     // он выглядел бы чужим.
@@ -3427,6 +3443,24 @@ fn hint_row(hint: &Hint) -> gtk::ListBoxRow {
 
     let row = gtk::ListBoxRow::builder().can_focus(false).build();
     row.set_child(Some(&column));
+    row
+}
+
+/// Строка «Search DuckDuckGo for “…”»: одна строка текста, без адреса
+/// под ней — адрес выдачи читателю ничего не скажет. Высотой — как
+/// строка журнала с заголовком, чтобы список не прыгал.
+fn search_row(label: &str) -> gtk::ListBoxRow {
+    let text = gtk::Label::builder()
+        .label(label)
+        .xalign(0.0)
+        .ellipsize(pango::EllipsizeMode::End)
+        .margin_start(10)
+        .margin_end(10)
+        .margin_top(4)
+        .margin_bottom(4)
+        .build();
+    let row = gtk::ListBoxRow::builder().can_focus(false).build();
+    row.set_child(Some(&text));
     row
 }
 
