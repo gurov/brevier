@@ -56,6 +56,25 @@ pub fn tripped() -> String {
     )
 }
 
+/// Что показать вместо страницы, посреди работы над которой Brevier в прошлый
+/// раз закрылся (#57, `guard`). Сам не открываем: открыли бы — он закрылся бы
+/// снова, и так на каждом запуске.
+pub fn closed_last_time(address: &Address) -> Failure {
+    Failure {
+        headline: "Brevier closed while opening this page",
+        detail: "Last time, Brevier quit while it was opening this page or its pictures, \
+                 so this time it waits for you. If it quits again, turn off Images in \
+                 Settings and try once more, or open the page in your browser. \
+                 Reporting the address helps fix it: github.com/gurov/brevier/issues."
+            .to_owned(),
+        offer_browser: !matches!(address, Address::Internal(_)),
+        ways: vec![Way {
+            label: "Open it again",
+            address: address.display(),
+        }],
+    }
+}
+
 pub fn describe(error: &Error) -> Failure {
     let failure = |headline, detail: String, offer_browser| Failure {
         headline,

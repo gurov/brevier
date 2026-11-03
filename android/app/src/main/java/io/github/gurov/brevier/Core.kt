@@ -122,6 +122,14 @@ object Core {
 
     fun session(): JSONArray = list("session", "")
 
+    /**
+     * Приложение падает на этой странице (#57): пометку — ядру, сразу. Иначе
+     * сессия подняла бы её снова, и приложение падало бы на каждом запуске.
+     */
+    fun fell(address: String) {
+        ask("fell", address)
+    }
+
     /** Вкладка сессии: текущая ли, где в истории, где в тексте и сам путь. */
     class Opened(val current: Boolean, val at: Int, val place: Int, val addresses: List<String>)
 

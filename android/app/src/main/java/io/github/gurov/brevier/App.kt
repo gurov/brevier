@@ -13,6 +13,16 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Core.init(this, filesDir.path)
+        // Необработанное исключение закрывает приложение, и ядро о нём
+        // не знает: его пометки (#57) снимаются, как только кончилась работа
+        // ядра, а падает потом Kotlin — на картинке, на раскладке. Перед тем
+        // как закрыться, называем ядру страницу на экране: следующий запуск
+        // не откроет её сам, а спросит.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, failure ->
+            MainActivity.showing?.let { address -> runCatching { Core.fell(address) } }
+            previous?.uncaughtException(thread, failure)
+        }
     }
 
     companion object {

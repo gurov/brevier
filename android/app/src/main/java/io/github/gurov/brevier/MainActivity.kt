@@ -874,7 +874,10 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun render(tab: Tab) {
         val view = tab.view ?: return
-        if (tab == currentTab()) showBar()
+        if (tab == currentTab()) {
+            showBar()
+            showing = tab.current()
+        }
         // Упала раскладка у самого телефона (модель, которой он не ждал) —
         // объяснение на месте страницы, а не закрытое приложение со всеми
         // вкладками. Упавшее в ядре сюда не доходит: его заменяет само ядро
@@ -1159,7 +1162,9 @@ class MainActivity : Activity(), ArticleHost {
             notice("Opened in a new tab")
             sync()
         } else {
-            open(tab, address, remember = true)
+            // Ссылка на ту же страницу («Open it again» после падения, #57) —
+            // загрузка на месте, а не второй такой же шаг истории.
+            open(tab, address, remember = address != tab.current())
         }
     }
 
@@ -2574,6 +2579,13 @@ class MainActivity : Activity(), ArticleHost {
         /** Доезд шапки к краю после отпускания (#45) — как у Firefox. */
         const val BAR_SETTLE_MS = 150L
         const val LISTING = "A list of links, not an article — pick one to read."
+        /**
+         * Адрес страницы на экране — для обработчика падений (`App`, #57):
+         * он зовётся из любого потока, когда активности уже не до вопросов.
+         */
+        @Volatile
+        var showing: String? = null
+
         /** Как `failure::TRIPPED` в ядре: страница, которую не удалось нарисовать. */
         const val TRIPPED = "Brevier tripped over this page"
         /** Потолок файла снаружи — тот же, что у тела страницы из сети. */

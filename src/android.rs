@@ -155,6 +155,8 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_init<'caller>(
     let outcome = unowned.with_env(|env| -> Result<(), JniError> {
         let home = home.try_to_string(env)?;
         store::set_home(PathBuf::from(home));
+        // Пометка прошлого запуска (#57) — до первой страницы.
+        crate::guard::watch();
         rustls_platform_verifier::android::init_with_env(env, context)?;
         crate::init_crypto();
         // Уборка недельного кэша страниц и архива — раз на запуск и в фоне.
@@ -403,6 +405,12 @@ fn call(method: &str, arg: &str) -> String {
             format!("{{\"ok\":{done}}}")
         }
         "notes.export" => export_notes(field(0), field(1)),
+        // Приложение падает на этой странице (#57): необработанное исключение
+        // в Kotlin, которого ядро не видит.
+        "fell" => {
+            crate::guard::fell(arg);
+            "{}".to_owned()
+        }
         other => {
             let mut out = String::from("{\"error\":");
             json_string(&mut out, &format!("unknown call: {other}"));
@@ -632,6 +640,13 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
         Err(error) => return failure_json(&describe(&error), None),
     };
     let external = address.external();
+    // Прошлый запуск умер посреди этой страницы (#57): сами не открываем,
+    // спрашиваем. Раньше кэша — иначе её картинки уронили бы снова.
+    let shown = address.display();
+    if crate::guard::suspected(&shown) {
+        return failure_json(&crate::failure::closed_last_time(&address), Some(external));
+    }
+    let _working = crate::guard::opening(&shown);
     let anchor = page::anchor_in(&address);
     let disk = Cache::open();
     let copy = (!fresh).then(|| disk.page(&address)).flatten();

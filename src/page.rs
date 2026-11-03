@@ -275,6 +275,8 @@ impl Page {
     /// и заголовок у замены те же: вкладка, история и «открыть в браузере»
     /// ведут на настоящую страницу.
     pub fn guarded(document: &Document) -> Page {
+        // Раскладка — тоже работа над страницей (#57): упала — сторож знает где.
+        let _working = crate::guard::opening(&document.address.display());
         let laid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Page::of(document)));
         laid.unwrap_or_else(|_| {
             Page::of(&Document {

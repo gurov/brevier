@@ -206,6 +206,9 @@ fn main() -> glib::ExitCode {
     // недельного кэша страниц: второй экземпляр сюда не доходит.
     app.connect_startup(|_| {
         timing::mark("startup: this process is the main one");
+        // Пометка прошлого запуска (#57): умер посреди страницы — её сессия
+        // сама не откроет. Только главный экземпляр: второй уходит раньше.
+        brevier::guard::watch();
         use_bundled_icon();
         #[cfg(windows)]
         use_bundled_fonts();
@@ -1390,6 +1393,65 @@ fn watch_first_frame(window: &ApplicationWindow) {
         });
         handler.replace(Some(id));
     });
+}
+
+/// Отказ во вкладке: заголовок, объяснение и кнопки — копии страницы
+/// (#9), «открыть снова» (#57) и системный браузер.
+fn show_problem(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    id: u64,
+    view: &gtk::TextView,
+    problem: &Failure,
+    external: &str,
+) {
+    // Копии (#9) открываются здесь же, во вкладке, — как ссылка.
+    // Холостым ходом, а не из обработчика: открытие стирает буфер
+    // с самой кнопкой, и кнопка, уничтоженная посреди своего же
+    // сигнала, роняла окно (SIGSEGV).
+    let mut buttons: Vec<gtk::Button> = problem
+        .ways
+        .iter()
+        .map(|way| {
+            let button = message_button(way.label);
+            let (ui, state, target) = (ui.clone(), state.clone(), way.address.clone());
+            button.connect_clicked(move |_| {
+                let Ok(address) = address::parse(&target) else {
+                    return;
+                };
+                // Копия — новый шаг истории; «открыть снова» (#57) — та же
+                // страница, на которой вкладка и стоит.
+                let here = state
+                    .borrow_mut()
+                    .find(id)
+                    .and_then(|tab| tab.history.current().map(Address::display));
+                let remember = here.as_deref() != Some(target.as_str());
+                let (ui, state) = (ui.clone(), state.clone());
+                glib::idle_add_local_once(move || {
+                    open(&ui, &state, id, address, remember);
+                });
+            });
+            button
+        })
+        .collect();
+    buttons.extend(problem.offer_browser.then(|| browser_button(external)));
+    show_message(view, problem.headline, &problem.detail, &buttons);
+    let mut borrowed = state.borrow_mut();
+    if let Some(tab) = borrowed.find(id) {
+        tab.loading = false;
+        tab.resume = None;
+        tab.label.set_text(&clip(problem.headline, TAB_LABEL));
+        tab.links.clear();
+        tab.marks.clear();
+        tab.anchors.clear();
+        tab.shots.clear();
+        tab.document = None;
+    }
+    drop(borrowed);
+    sync(ui, state, None);
+    // Вкладка с отказом — тоже открытая вкладка, и в сессии
+    // ей место: читатель закрыл окно с ней и ждёт её обратно.
+    remember_session(ui, state);
 }
 
 /// Открыть настройки вкладкой. Раньше это было отдельное окно; теперь —
@@ -3603,6 +3665,16 @@ fn open_with(
         (tab.generation, cached)
     };
 
+    // Прошлый запуск умер посреди этой страницы (#57): сами не открываем,
+    // спрашиваем. Раньше кэшей — иначе её картинки уронили бы окно снова.
+    if brevier::guard::suspected(&key) {
+        if let Some(view) = view_of(state, id) {
+            let problem = brevier::failure::closed_last_time(&address);
+            show_problem(ui, state, id, &view, &problem, &address.external());
+        }
+        return;
+    }
+
     // Есть в кэше — показываем сразу, тем же трактом, что и свежую загрузку.
     if let Some(document) = cached {
         show_document(ui, state, id, &document, anchor.as_deref());
@@ -3651,8 +3723,11 @@ fn open_with(
         (borrowed.archive, form)
     };
     let offset = local_offset();
+    let working = key.clone();
     glib::spawn_future_local(async move {
         let loaded = off_main(move || {
+            // Пока страница едет и разбирается, сторож (#57) знает, какая.
+            let _working = brevier::guard::opening(&working);
             // Отказ объясняем здесь же, в потоке: объяснение заглядывает
             // в архив за копией страницы (#9).
             let document = brevier::open(&address, UserAgent::Honest).map_err(|error| {
@@ -3694,48 +3769,7 @@ fn open_with(
                     tab.pages.insert(key.clone(), document.clone());
                 }
             }
-            Ok(Err(problem)) => {
-                // Копии (#9) открываются здесь же, во вкладке, — как ссылка.
-                // Холостым ходом, а не из обработчика: открытие стирает буфер
-                // с самой кнопкой, и кнопка, уничтоженная посреди своего же
-                // сигнала, роняла окно (SIGSEGV).
-                let mut buttons: Vec<gtk::Button> = problem
-                    .ways
-                    .iter()
-                    .map(|way| {
-                        let button = message_button(way.label);
-                        let (ui, state, target) = (ui.clone(), state.clone(), way.address.clone());
-                        button.connect_clicked(move |_| {
-                            let Ok(address) = address::parse(&target) else {
-                                return;
-                            };
-                            let (ui, state) = (ui.clone(), state.clone());
-                            glib::idle_add_local_once(move || {
-                                open(&ui, &state, id, address, true);
-                            });
-                        });
-                        button
-                    })
-                    .collect();
-                buttons.extend(problem.offer_browser.then(|| browser_button(&external)));
-                show_message(&view, problem.headline, &problem.detail, &buttons);
-                let mut borrowed = state.borrow_mut();
-                if let Some(tab) = borrowed.find(id) {
-                    tab.loading = false;
-                    tab.resume = None;
-                    tab.label.set_text(&clip(problem.headline, TAB_LABEL));
-                    tab.links.clear();
-                    tab.marks.clear();
-                    tab.anchors.clear();
-                    tab.shots.clear();
-                    tab.document = None;
-                }
-                drop(borrowed);
-                sync(&ui, &state, None);
-                // Вкладка с отказом — тоже открытая вкладка, и в сессии
-                // ей место: читатель закрыл окно с ней и ждёт её обратно.
-                remember_session(&ui, &state);
-            }
+            Ok(Err(problem)) => show_problem(&ui, &state, id, &view, &problem, &external),
             Err(_) => {
                 if let Some(tab) = state.borrow_mut().find(id) {
                     tab.loading = false;

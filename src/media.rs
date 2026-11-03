@@ -299,6 +299,8 @@ pub fn grab(source: &Source, ua: UserAgent) -> Result<(Vec<u8>, Option<String>),
 /// Разобрать байты картинки. Тип берём из заголовка, но не верим ему
 /// на слово: сервер ошибается, а подпись svg видна в самих байтах.
 pub fn decode(bytes: &[u8], mime: Option<&str>, look: Look) -> Result<Raster, Error> {
+    // Разбор картинки — работа над страницей (#57): память кончается здесь.
+    let _working = crate::guard::picture();
     if bytes.is_empty() {
         return Err(Error::Media("the server sent nothing".to_owned()));
     }
