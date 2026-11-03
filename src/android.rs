@@ -191,9 +191,15 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_call<'caller>(
 
 /// Картинка: скачать (или взять из кэша) и разобрать под колонку.
 ///
-/// Ответ — байты: первый — ответ, дальше данные. `0`: ширина и высота
-/// (по четыре байта, big-endian), затем RGBA построчно. `1`: причина отказа
-/// в UTF-8 — её показывают на месте картинки.
+/// Ответ — байты, последний — что это. `0`: RGBA построчно с нулевого
+/// байта, за ними ширина и высота (по четыре байта, big-endian). `1`:
+/// причина отказа в UTF-8 — её показывают на месте картинки.
+///
+/// Пиксели — с начала массива, а не после заголовка (#58): Android 9
+/// и раньше в `Bitmap.copyPixelsFromBuffer` отпускал массив указателем
+/// со сдвигом буфера, ART принимал его за копию и освобождал — SIGSEGV
+/// в `free` на любой странице с картинками (LG V30, Android 9; эмулятор
+/// API 28). Буфер с нуля сдвига не знает ни в одной версии.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
     mut unowned: EnvUnowned<'caller>,
@@ -410,6 +416,16 @@ fn call(method: &str, arg: &str) -> String {
             format!("{{\"ok\":{done}}}")
         }
         "notes.export" => export_notes(field(0), field(1)),
+        // Картинка в работе у Kotlin (#58): пометка сторожа держится,
+        // пока из неё делают `Bitmap`.
+        "picture.hold" => {
+            crate::guard::hold();
+            "{}".to_owned()
+        }
+        "picture.release" => {
+            crate::guard::release();
+            "{}".to_owned()
+        }
         // Приложение падает на этой странице (#57): необработанное исключение
         // в Kotlin, которого ядро не видит.
         "fell" => {
@@ -1385,16 +1401,16 @@ fn image(source: &str, look: Look) -> Vec<u8> {
     };
     match decoded {
         Ok(raster) => {
-            let mut out = Vec::with_capacity(9 + raster.rgba.len());
-            out.push(0);
+            let mut out = raster.rgba;
+            out.reserve_exact(9);
             out.extend_from_slice(&raster.width.to_be_bytes());
             out.extend_from_slice(&raster.height.to_be_bytes());
-            out.extend_from_slice(&raster.rgba);
+            out.push(0);
             out
         }
         Err(error) => {
-            let mut out = vec![1];
-            out.extend_from_slice(describe(&error).headline.as_bytes());
+            let mut out = describe(&error).headline.as_bytes().to_vec();
+            out.push(1);
             out
         }
     }

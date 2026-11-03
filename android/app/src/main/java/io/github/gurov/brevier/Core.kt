@@ -29,6 +29,36 @@ object Core {
      * на x86_64-эмуляторе): это отказ одной картинки, а не повод падать.
      */
     external fun image(source: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray?
+
+    /** Картинка из ответа [image] — или почему её нет. */
+    class Raster(val bitmap: android.graphics.Bitmap?, val trouble: String?)
+
+    /**
+     * Разобрать ответ [image]: последний байт — что это; `0` — RGBA с нулевого
+     * байта, за ними ширина и высота (big-endian), `1` — слова отказа.
+     *
+     * Пиксели читаются буфером с самого начала массива (#58): со сдвигом
+     * (`ByteBuffer.wrap(bytes, 9, …)`) Android 9 и раньше в
+     * `copyPixelsFromBuffer` освобождал чужой адрес — SIGSEGV, процесс
+     * умирал мимо обработчика исключений и мимо сторожа (#57).
+     */
+    fun raster(bytes: ByteArray?): Raster {
+        if (bytes == null || bytes.isEmpty()) return Raster(null, "The load fell through")
+        val size = bytes.size
+        if (bytes[size - 1].toInt() != 0) return Raster(null, String(bytes, 0, size - 1))
+        if (size < 9) return Raster(null, "The load fell through")
+        val tail = java.nio.ByteBuffer.wrap(bytes, size - 9, 8)
+        val w = tail.int
+        val h = tail.int
+        if (w <= 0 || h <= 0 || w.toLong() * h * 4 > size - 9) return Raster(null, "The load fell through")
+        return try {
+            val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            bitmap.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(bytes))
+            Raster(bitmap, null)
+        } catch (failure: Throwable) {
+            Raster(null, "The image did not fit in memory")
+        }
+    }
     private external fun find(text: String, needle: String): IntArray
 
     /**
@@ -129,6 +159,21 @@ object Core {
      */
     fun fell(address: String) {
         ask("fell", address)
+    }
+
+    /**
+     * Картинка от запроса до готового `Bitmap` — под пометкой сторожа (#58):
+     * нативное падение в самом Android (`copyPixelsFromBuffer` на Android 9)
+     * проходит мимо обработчика исключений, и без пометки следующий запуск
+     * открыл бы ту же страницу и упал снова.
+     */
+    fun <T> holdingPicture(work: () -> T): T {
+        ask("picture.hold", "")
+        try {
+            return work()
+        } finally {
+            ask("picture.release", "")
+        }
     }
 
     /** Вкладка сессии: текущая ли, где в истории, где в тексте и сам путь. */

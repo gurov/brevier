@@ -1325,21 +1325,13 @@ class MainActivity : Activity(), ArticleHost {
         val width = resources.displayMetrics.widthPixels
         val paper = theme.copy(dark = false).let { type.palette(it).paper } and 0xffffff
         App.work.execute {
-            val bytes = try {
-                Core.image(path, width, paper, metrics().text, false)
-            } catch (failure: Throwable) {
-                null
-            }
-            val bitmap = bytes?.takeIf { it.isNotEmpty() && it[0].toInt() == 0 }?.let {
-                val buffer = java.nio.ByteBuffer.wrap(it)
-                buffer.get()
-                val w = buffer.int
-                val h = buffer.int
-                runCatching {
-                    android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).apply {
-                        copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(it, 9, w * h * 4))
-                    }
-                }.getOrNull()
+            val bitmap = Core.holdingPicture {
+                val bytes = try {
+                    Core.image(path, width, paper, metrics().text, false)
+                } catch (failure: Throwable) {
+                    null
+                }
+                Core.raster(bytes).bitmap
             }
             main.post { if (bitmap != null) image.setImageBitmap(bitmap) }
         }

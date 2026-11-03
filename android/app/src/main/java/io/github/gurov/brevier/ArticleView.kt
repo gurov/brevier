@@ -38,7 +38,6 @@ import android.widget.ScrollView
 import android.widget.TableLayout
 import android.widget.TableRow
 import android.widget.TextView
-import java.nio.ByteBuffer
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -928,30 +927,16 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     private fun fetch(source: String, look: Look, done: (Decoded) -> Unit) {
         val shown = generation
         App.work.execute {
-            val fell = byteArrayOf(1) + "The load fell through".toByteArray()
-            val bytes = try {
-                Core.image(source, look.width, look.paper, look.fontSize, look.natural) ?: fell
-            } catch (failure: Throwable) {
-                fell
+            val raster = Core.holdingPicture {
+                val bytes = try {
+                    Core.image(source, look.width, look.paper, look.fontSize, look.natural)
+                } catch (failure: Throwable) {
+                    null
+                }
+                Core.raster(bytes)
             }
-            val decoded = decode(bytes)
+            val decoded = Decoded(raster.bitmap, raster.trouble)
             post { if (shown == generation) done(decoded) }
-        }
-    }
-
-    private fun decode(bytes: ByteArray): Decoded {
-        if (bytes.isEmpty()) return Decoded(null, "The load fell through")
-        if (bytes[0].toInt() != 0) return Decoded(null, String(bytes, 1, bytes.size - 1))
-        val buffer = ByteBuffer.wrap(bytes)
-        buffer.get()
-        val w = buffer.int
-        val h = buffer.int
-        return try {
-            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(bytes, 9, w * h * 4))
-            Decoded(bitmap, null)
-        } catch (failure: Throwable) {
-            Decoded(null, "The image did not fit in memory")
         }
     }
 
