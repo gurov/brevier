@@ -98,6 +98,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.21.0" date="2026-11-03" type="development">
+      <description>
+        <p>A page that brought Brevier down no longer does it again on every
+          start: its tab waits, with Open it again and Open in your browser.
+          Big pictures take much less memory. A second start while the window
+          is still coming up brings that window forward instead of opening
+          another.</p>
+      </description>
+    </release>
     <release version="0.20.0" date="2026-11-02" type="development">
       <description>
         <p>Choose the paper: white, grey or sepia, or grey or black in the

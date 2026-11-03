@@ -245,8 +245,9 @@ checks the tag against `Cargo.toml`, builds the tarball, the Flatpak, the signed
 Windows installer and zip, and the command line alone for Linux, macOS and Windows
 (`packaging/cli.sh`, each archive opening a page where it was built), and publishes them
 with `SHA256SUMS`. Before the files are
-published, the Windows job installs the installer on a clean Windows, starts the window and
-uninstalls it again; a manual run of the workflow keeps a screenshot of that window. A published tag is never moved: something newer is a new
+published, the Windows job installs the installer on a clean Windows, starts the window
+(printing how long its start took and warning if it did not find the installed fonts) and
+uninstalls it again, checking that the fonts went too; a manual run of the workflow keeps a screenshot of that window. A published tag is never moved: something newer is a new
 version.
 
 After the GitHub release, the same workflow publishes the crate to

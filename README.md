@@ -56,7 +56,7 @@ anyone else, or older than what you have, is refused. The key's fingerprint:
 
 Each release also has the
 same app as one file,
-[`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier.flatpak)
+[`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.21.0/brevier.flatpak)
 (`flatpak install --user ./brevier.flatpak`). Files released after 0.14.0 update from the
 repository as well; Brevier installed from an older one does not — run
 `flatpak uninstall --user io.github.gurov.brevier` (your data stays) and install it again
@@ -71,8 +71,8 @@ local files (a `.md`, a saved feed) can't be opened.
 Ubuntu) and no wish for a sandbox:
 
 ```sh
-tar xf brevier-0.20.0-x86_64-linux.tar.gz
-cd brevier-0.20.0-x86_64-linux && ./install.sh
+tar xf brevier-0.21.0-x86_64-linux.tar.gz
+cd brevier-0.21.0-x86_64-linux && ./install.sh
 ```
 
 `install.sh` installs into `~/.local`, needs no root, and `--uninstall` removes it again.
@@ -91,18 +91,19 @@ tested with. No desktop entry or icon is installed this way;
 needs no GTK: `cargo install --locked brevier --features save`.
 
 **Windows** 10 or 11, 64-bit. Download
-[`brevier-0.20.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier-0.20.0-windows-x86_64-setup.exe)
-and run it. It installs for you alone, with no administrator rights, and puts Brevier in the
-Start menu; remove it under Installed apps. The installer is not signed yet, so Windows
+[`brevier-0.21.0-windows-x86_64-setup.exe`](https://github.com/gurov/brevier/releases/download/v0.21.0/brevier-0.21.0-windows-x86_64-setup.exe)
+and run it. It installs for you alone, with no administrator rights, puts Brevier in the
+Start menu and installs its fonts for you, so the window starts faster; remove it under
+Installed apps. The installer is not signed yet, so Windows
 shows "Windows protected your PC" first: choose **More info**, then **Run anyway**. To run
 Brevier without installing it, unpack
-[`brevier-0.20.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier-0.20.0-windows-x86_64.zip)
+[`brevier-0.21.0-windows-x86_64.zip`](https://github.com/gurov/brevier/releases/download/v0.21.0/brevier-0.21.0-windows-x86_64.zip)
 anywhere and start `bin\brevier-ui.exe`; `bin\brevier.exe` is the command line.
 
 **Android** 7.0 or later, 64-bit ARM. Install it from
 [F-Droid](https://f-droid.org/packages/io.github.gurov.brevier/), which keeps it up to
 date. Or download
-[`brevier-0.20.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.20.0/brevier-0.20.0-arm64.apk)
+[`brevier-0.21.0-arm64.apk`](https://github.com/gurov/brevier/releases/download/v0.21.0/brevier-0.21.0-arm64.apk)
 on the phone and open it; Android asks once to allow installs from the app you opened it
 with. Updates install over it as long as they are signed with the same release key:
 
@@ -211,7 +212,7 @@ it, and the findings by stage, each with what to change](assets/screenshot-check
 In CI it is a GitHub Action:
 
 ```yaml
-- uses: gurov/brevier@v0.20.0  # a release tag, or @main
+- uses: gurov/brevier@v0.21.0  # a release tag, or @main
   with:
     urls: |
       https://example.com/
@@ -309,6 +310,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   next page — ends with a **Next:** line, and `Space` at the very end goes there.
 - **A new tab shows the five pages you read last.**
 - **Tabs come back** after you close the window; only the visible one loads at start.
+- **A page that brought Brevier down waits.** If Brevier closed while it was opening a page
+  or its pictures, the next start does not open that page by itself: the tab asks first,
+  with **Open it again** and **Open in your browser**.
 - **History and bookmarks**, and the address bar suggests pages you have read.
 - **Every article you read is kept as your copy**, a Markdown file, so you can read and
   search it after the site has changed or gone; compressed, or plain `.md` for other
@@ -471,6 +475,7 @@ History, open tabs and bookmarks are plain text, one line per entry:
 ~/.local/share/brevier/reading.tsv     # where you stopped in long pages
 ~/.local/share/brevier/notes.tsv       # your highlights and notes
 ~/.local/share/brevier/notes/          # the pictures in your notes
+~/.local/share/brevier/working.txt     # the page being opened, gone once it is
 ```
 
 The archive holds one file per page, `<host>/<date>-<title>.md.lz4`: Markdown with a short

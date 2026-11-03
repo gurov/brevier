@@ -1,0 +1,2 @@
+• A page that brought Brevier down no longer does it again on every start: its tab waits, with Open it again and Open in your browser.
+• Big pictures take much less memory: large ones are decoded one at a time.
