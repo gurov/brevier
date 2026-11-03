@@ -597,6 +597,7 @@ class SettingsPage(
     private val slid: (on: Boolean) -> Unit,
     private val fullScreened: (on: Boolean) -> Unit,
     private val turned: (Turning) -> Unit,
+    private val agentChanged: (own: Boolean, agent: String) -> Unit,
     private val notesUnder: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
@@ -621,6 +622,7 @@ class SettingsPage(
     fun show(
         palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType,
         slideBar: Boolean, notes: Boolean, fullScreen: Boolean, turning: Turning,
+        ownAgent: Boolean, agent: String,
     ) {
         this.dark = theme.dark
         this.theme = theme
@@ -734,7 +736,57 @@ class SettingsPage(
             "The list at brevier:history goes away, the address bar stops suggesting those pages, and the copies of what you read are deleted. Bookmarks, with their copies, and open tabs stay.",
             button("Forget", 0xffb3261e.toInt(), palette) { forget() }, palette,
         ))
+        developerSection(palette, ownAgent, agent)
         visibility = VISIBLE
+    }
+
+    /**
+     * Своя строка User-Agent — в самом низу, «для разработчиков» (мейнтейнер,
+     * 3 ноября 2026, по просьбе читателя). Включил — под полем предупреждение:
+     * мы советуем строку Brevier. Текст — тот же, что у окна (`fetch.rs`).
+     */
+    private fun developerSection(palette: Palette, ownAgent: Boolean, agent: String) {
+        var own = ownAgent
+        var line = agent
+        column.addView(section("For developers", palette))
+        // Цветом чисел кода: тёплый, в каждой теме с проверенным контрастом.
+        val warning = context.label(AGENT_WARNING, fonts, palette.number, 13f).apply {
+            visibility = if (own) VISIBLE else GONE
+            setPadding(0, context.dp(6f), 0, context.dp(12f))
+        }
+        column.addView(row(
+            "Your own User-Agent",
+            "Brevier tells every site that it is Brevier. On, it sends the line below instead.",
+            switch(palette, own) { on ->
+                own = on
+                warning.visibility = if (on) VISIBLE else GONE
+                agentChanged(own, line)
+            },
+            palette,
+        ))
+        val field = android.widget.EditText(context).apply {
+            setText(agent)
+            hint = "Mozilla/5.0 (…)"
+            isSingleLine = true
+            typeface = fonts.regular
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextColor(palette.ink)
+            setHintTextColor(palette.dim)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    val typed = s?.toString()?.trim() ?: ""
+                    // Невидимые знаки заголовком не уйдут: такую строку не берём.
+                    if (typed.any { it != ' ' && (it < '!' || it > '~') }) return
+                    line = typed
+                    agentChanged(own, line)
+                }
+            })
+        }
+        column.addView(field)
+        column.addView(warning)
     }
 
     /**
@@ -1058,3 +1110,9 @@ class Menu(
         popup.showAtLocation(root, Gravity.NO_GRAVITY, left, top)
     }
 }
+
+/** Предупреждение под своей строкой User-Agent — то же, что у окна (`fetch::READERS_AGENT_WARNING`). */
+const val AGENT_WARNING =
+    "We recommend Brevier's own User-Agent. With another one, sites may show pages wrongly or not at all: " +
+        "many tell Brevier from a browser by more than this line, and a browser's name on a client that is not one looks like a bot. " +
+        "Meant for developers checking how a site answers."

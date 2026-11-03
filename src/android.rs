@@ -157,6 +157,8 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_init<'caller>(
         store::set_home(PathBuf::from(home));
         // Пометка прошлого запуска (#57) — до первой страницы.
         crate::guard::watch();
+        // Своя строка User-Agent читателя — тоже до первого запроса.
+        crate::fetch::use_readers_agent(Settings::load().readers_agent());
         rustls_platform_verifier::android::init_with_env(env, context)?;
         crate::init_crypto();
         // Уборка недельного кэша страниц и архива — раз на запуск и в фоне.
@@ -323,7 +325,16 @@ fn call(method: &str, arg: &str) -> String {
             if !field(9).is_empty() {
                 settings.turn = crate::store::Turning::from_words(field(9));
             }
+            // Своя строка User-Agent («For developers»): переключатель и сама
+            // строка; поля нет — не трогали.
+            if !field(10).is_empty() {
+                settings.own_user_agent = field(10) == "1";
+                if crate::fetch::valid_agent(field(11).trim()) {
+                    settings.user_agent = field(11).trim().to_owned();
+                }
+            }
             settings.save();
+            crate::fetch::use_readers_agent(settings.readers_agent());
             "{}".to_owned()
         }
         // Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж, выключка,
@@ -988,7 +999,7 @@ fn settings() -> String {
         format!("[{}]", items.join(","))
     };
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"fullScreen\":{},\"notes\":{},\"turn\":\"{}\",\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"fullScreen\":{},\"notes\":{},\"turn\":\"{}\",\"ownUserAgent\":{},\"userAgent\":{},\
          \"paper\":\"{}\",\"darkPaper\":\"{}\",\"papers\":{},\"darkPapers\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{},\"paragraphs\":{}}}",
@@ -1004,6 +1015,12 @@ fn settings() -> String {
         settings.full_screen,
         settings.notes,
         settings.turn.words().join(","),
+        settings.own_user_agent,
+        {
+            let mut agent = String::new();
+            json_string(&mut agent, &settings.user_agent);
+            agent
+        },
         settings.paper.name(false),
         settings.dark_paper.name(true),
         tones(false),

@@ -49,7 +49,54 @@ pub enum UserAgent {
     Browser,
 }
 
+/// Строка User-Agent, которую читатель задал сам (настройки, «For
+/// developers»; мейнтейнер, 3 ноября 2026, по просьбе читателя: строка
+/// `Brevier` выделяется в толпе). Окно и телефон ставят её из настроек —
+/// на старте и при смене; тогда ею, а не `Brevier/0.1`, называется
+/// `UserAgent::Honest`. cli и корпус её не видят: настроек они не читают,
+/// а замер обязан знать, кто спрашивал.
+static READERS_AGENT: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// Поставить строку читателя; `None` или пустая — снова `Brevier`. Строка
+/// с невидимыми знаками заголовком не уйдёт — её не ставим вовсе.
+pub fn use_readers_agent(agent: Option<&str>) {
+    let agent = agent
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty() && valid_agent(agent))
+        .map(str::to_owned);
+    *READERS_AGENT
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = agent;
+}
+
+/// Что сказать читателю, включившему свою строку: окно и телефон — одно.
+pub const READERS_AGENT_WARNING: &str = "We recommend Brevier's own User-Agent. With \
+another one, sites may show pages wrongly or not at all: many tell Brevier from a browser \
+by more than this line, and a browser's name on a client that is not one looks like a bot. \
+Meant for developers checking how a site answers.";
+
+/// Годится ли строка в заголовок: видимый ASCII и пробелы.
+pub fn valid_agent(agent: &str) -> bool {
+    agent
+        .bytes()
+        .all(|byte| byte == b' ' || byte.is_ascii_graphic())
+}
+
 impl UserAgent {
+    /// Строка, которой называемся на деле: у `Honest` — своя читателя,
+    /// если он её задал.
+    fn header(self) -> String {
+        if self == UserAgent::Honest
+            && let Some(own) = READERS_AGENT
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        {
+            return own;
+        }
+        self.as_str().to_owned()
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             UserAgent::Honest => "Brevier/0.1",
@@ -667,7 +714,7 @@ fn config(
         .build();
 
     Config::builder()
-        .user_agent(ua.as_str())
+        .user_agent(ua.header())
         .accept(accept)
         .tls_config(tls)
         .max_redirects(MAX_REDIRECTS)

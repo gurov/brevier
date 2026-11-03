@@ -72,6 +72,9 @@ class MainActivity : Activity(), ArticleHost {
     private var turning = Turning()
     /** Касание краёв только что включили: показать зоны, как вернёмся к статье. */
     private var zonesPending = false
+    /** Своя строка User-Agent («For developers») и включена ли она. */
+    private var ownAgent = false
+    private var agent = ""
     /** Бумага светлой и тёмной темы (#53), именем: `ivory`, `warm`… */
     private var paper = "ivory"
     private var darkPaper = "warm"
@@ -161,6 +164,8 @@ class MainActivity : Activity(), ArticleHost {
         slideBar = stored.optBoolean("slideBar", true)
         fullScreen = stored.optBoolean("fullScreen", false)
         turning = Turning.of(stored.optString("turn"))
+        ownAgent = stored.optBoolean("ownUserAgent", false)
+        agent = stored.optString("userAgent", "")
         paper = stored.optString("paper", "ivory")
         darkPaper = stored.optString("darkPaper", "warm")
         notesShown = stored.optBoolean("notes", true)
@@ -362,6 +367,7 @@ class MainActivity : Activity(), ArticleHost {
             slid = { on -> changeSlideBar(on) },
             fullScreened = { on -> changeFullScreen(on) },
             turned = { chosen -> changeTurning(chosen) },
+            agentChanged = { own, line -> ownAgent = own; agent = line; saveSettings() },
             notesUnder = { on -> changeNotesShown(on) },
             keepCopies = { on -> archive = on; saveSettings() },
             forget = { forgetEverything() },
@@ -1986,7 +1992,7 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun showSettings() {
         showBar()
-        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, fullScreen, turning)
+        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, fullScreen, turning, ownAgent, agent)
     }
 
     /** Шапке — уезжать или стоять (#45). */
@@ -2073,7 +2079,7 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Все настройки разом — на диск, в `settings.tsv`. */
     private fun saveSettings() =
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper, fullScreen, turning)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper, fullScreen, turning, ownAgent, agent)
 
     /** Листание (#55): включили касание краёв — зоны покажутся над статьёй. */
     private fun changeTurning(chosen: Turning) {

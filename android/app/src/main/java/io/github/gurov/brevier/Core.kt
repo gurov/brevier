@@ -131,6 +131,7 @@ object Core {
     fun saveSettings(
         dark: Boolean, images: Boolean, archive: Boolean, contrast: Boolean?, slideBar: Boolean, notes: Boolean,
         paper: String, darkPaper: String, fullScreen: Boolean, turning: Turning,
+        ownAgent: Boolean, agent: String,
     ) {
         val flags = listOf(dark, images, archive).map { if (it) "1" else "0" } +
             when (contrast) { true -> "1"; false -> "0"; null -> "" } +
@@ -138,7 +139,9 @@ object Core {
             (if (notes) "1" else "0") +
             paper + darkPaper +
             (if (fullScreen) "1" else "0") +
-            turning.words()
+            turning.words() +
+            (if (ownAgent) "1" else "0") +
+            agent.replace(FIELD, ' ')
         ask("settings.save", flags.joinToString(FIELD.toString()))
     }
 

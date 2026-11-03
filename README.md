@@ -521,7 +521,9 @@ line keeps no history.
 - **The Wayback Machine is asked only when you press the button.** A page that is gone
   does not send its address to archive.org by itself.
 - **An honest User-Agent:** `Brevier/0.1`. On our test set, pretending to be a browser lost
-  seven pages to anti-bot 403s and won none.
+  seven pages to anti-bot 403s and won none. Settings → **For developers** can send a line
+  of your own instead, in the window and on the phone; we advise against it for the same
+  reason, and the setting says so.
 - **TLS trust comes from your operating system** (`rustls` with
   `rustls-platform-verifier`). There are no bundled certificates and no way to skip the
   check. On Android, revoked certificates are refused too, and so is a site whose

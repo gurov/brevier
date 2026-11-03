@@ -554,6 +554,9 @@ struct State {
     archive: bool,
     /// Простым `.md`, а не сжатой (#43).
     plain_archive: bool,
+    /// Своя строка User-Agent («For developers») и включена ли она.
+    user_agent: String,
+    own_user_agent: bool,
     /// Ступень масштаба — одна на окно, общая для всех страниц. Читатель
     /// выставляет её раз и ждёт её везде: разная по хостам ступень
     /// оборачивалась тем, что соседняя страница открывалась «странно».
@@ -741,6 +744,8 @@ fn build(app: &Application, start: Vec<String>) {
     // окно из светлого в тёмное.
     let settings = Settings::load();
     timing::mark("window: settings read");
+    // Своя строка User-Agent читателя — до первого запроса окна.
+    brevier::fetch::use_readers_agent(settings.readers_agent());
     let ui = Ui {
         window: ApplicationWindow::builder()
             .application(app)
@@ -968,6 +973,8 @@ fn build(app: &Application, start: Vec<String>) {
         images: settings.images,
         archive: settings.archive,
         plain_archive: settings.plain_archive,
+        user_agent: settings.user_agent.clone(),
+        own_user_agent: settings.own_user_agent,
         zoom: ZOOM_NORMAL,
         typography: settings.typography,
         store: Store::open(),
@@ -1822,8 +1829,113 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
         forget.connect_clicked(move |_| forget_everything(&ui, &state));
     }
 
+    developer_settings(ui, state, &page);
     page
 }
+
+/// Своя строка User-Agent — в самом низу, «для разработчиков» (мейнтейнер,
+/// 3 ноября 2026, по просьбе читателя с F-Droid). Brevier называет себя
+/// Brevier; включил своё — под полем предупреждение, почему мы советуем
+/// не менять: сайты отличают Brevier не по одной этой строке.
+fn developer_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
+    let (agent, own) = {
+        let borrowed = state.borrow();
+        (borrowed.user_agent.clone(), borrowed.own_user_agent)
+    };
+    let title = gtk::Label::builder()
+        .label("For developers")
+        .xalign(0.0)
+        .build();
+    title.add_css_class("shelf-title");
+    page.append(&title);
+
+    let switch = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(own)
+        .build();
+    let entry = gtk::Entry::builder()
+        .text(&agent)
+        .placeholder_text("Mozilla/5.0 (…)")
+        .hexpand(true)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_bottom(8)
+        .build();
+    let warning = gtk::Label::builder()
+        .label(USER_AGENT_WARNING)
+        .xalign(0.0)
+        .wrap(true)
+        .max_width_chars(52)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_bottom(10)
+        .visible(own)
+        .build();
+    warning.add_css_class("caption");
+    warning.add_css_class("caution");
+
+    let rows = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    rows.add_css_class("rich-list");
+    rows.append(&setting_row(
+        "Your own User-Agent",
+        "Brevier tells every site that it is Brevier. On, it sends the line \
+         below instead.",
+        &switch,
+    ));
+    let more = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    more.append(&entry);
+    more.append(&warning);
+    rows.append(
+        &gtk::ListBoxRow::builder()
+            .child(&more)
+            .activatable(false)
+            .build(),
+    );
+    page.append(&rows);
+
+    let apply = {
+        let ui = ui.clone();
+        let state = state.clone();
+        move || {
+            let borrowed = state.borrow();
+            let chosen = Settings {
+                user_agent: borrowed.user_agent.clone(),
+                own_user_agent: borrowed.own_user_agent,
+                ..Settings::default()
+            };
+            brevier::fetch::use_readers_agent(chosen.readers_agent());
+            drop(borrowed);
+            remember_settings(&ui, &state);
+        }
+    };
+    {
+        let state = state.clone();
+        let warning = warning.clone();
+        let apply = apply.clone();
+        switch.connect_active_notify(move |switch| {
+            state.borrow_mut().own_user_agent = switch.is_active();
+            warning.set_visible(switch.is_active());
+            apply();
+        });
+    }
+    {
+        let state = state.clone();
+        entry.connect_changed(move |entry| {
+            let text = entry.text().to_string();
+            // Невидимые знаки заголовком не уйдут: такую строку не берём.
+            if !brevier::fetch::valid_agent(text.trim()) {
+                return;
+            }
+            state.borrow_mut().user_agent = text.trim().to_owned();
+            apply();
+        });
+    }
+}
+
+/// Предупреждение под своей строкой User-Agent: одно на окно и телефон.
+const USER_AGENT_WARNING: &str = brevier::fetch::READERS_AGENT_WARNING;
 
 /// Набор читателя (#4): гарнитура, кегль, мера, интерлиньяж и выключка —
 /// раз и для всех сайтов. Под выбором — образец, набранный тем, что выбрано:
@@ -3234,6 +3346,8 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         full_screen: Settings::default().full_screen,
         // Листание касанием (#55) — тоже телефона.
         turn: Settings::default().turn,
+        user_agent: borrowed.user_agent.clone(),
+        own_user_agent: borrowed.own_user_agent,
         notes: borrowed.show_notes,
         typography: borrowed.typography,
         paper: borrowed.paper,
@@ -4421,6 +4535,9 @@ fn page_css(theme: Theme) -> String {
     let (dim, rule) = (colors.dim, colors.rule);
     let (chosen, touched) = (colors.chosen, colors.touched);
     let note_rule = colors.note_rule;
+    // Предупреждение под своей строкой User-Agent — цветом чисел кода:
+    // тёплый, в каждой теме с проверенным контрастом.
+    let caution = colors.number;
 
     format!(
         // Шапка и окно — в тот же тёплый ряд, что и бумага. Иначе слоновая
@@ -4450,6 +4567,7 @@ fn page_css(theme: Theme) -> String {
          .hints row:selected label {{ color: {ink}; }}\n\
          .hint-address {{ color: {dim}; font-size: 0.85em; }}\n\
          .caption {{ color: {dim}; font-size: 0.85em; margin-bottom: 6px; }}\n\
+         .caption.caution {{ color: {caution}; }}\n\
          .formula {{ padding: 0 2px; min-height: 0; min-width: 0; color: {dim}; }}\n\
          .table {{ margin: 10px 0 14px 0; }}\n\
          .table separator {{ background-color: {rule}; min-height: 1px; }}\n\

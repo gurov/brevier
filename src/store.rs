@@ -673,6 +673,19 @@ pub struct Settings {
     /// громкости. Окно этого не умеет. Всё выключено; в файл — перечень
     /// включённого: `turn taps,swipes,keys,left-hand`.
     pub turn: Turning,
+    /// Своя строка User-Agent (раздел «For developers»): строка хранится
+    /// и выключенной, чтобы её не набирать заново. В файл — `user-agent`
+    /// со строкой до конца строки (в ней пробелы) и `own-user-agent on`.
+    pub user_agent: String,
+    pub own_user_agent: bool,
+}
+
+impl Settings {
+    /// Какой строкой называться, если не `Brevier`: своя включена и не пуста.
+    pub fn readers_agent(&self) -> Option<&str> {
+        let agent = self.user_agent.trim();
+        (self.own_user_agent && !agent.is_empty()).then_some(agent)
+    }
 }
 
 /// Чем телефон листает страницу (#55). Каждое — своим переключателем:
@@ -736,6 +749,8 @@ impl Default for Settings {
             paper: Paper::Usual,
             dark_paper: Paper::Usual,
             turn: Turning::default(),
+            user_agent: String::new(),
+            own_user_agent: false,
         }
     }
 }
@@ -767,6 +782,14 @@ impl Settings {
             let (Some(name), Some(value)) = (parts.next(), parts.next()) else {
                 continue;
             };
+            // Строка User-Agent — целиком, до конца строки: в ней пробелы.
+            if name == "user-agent" {
+                let rest = line.trim_start()[name.len()..].trim();
+                if crate::fetch::valid_agent(rest) {
+                    settings.user_agent = rest.to_owned();
+                }
+                continue;
+            }
             match name {
                 "theme" => settings.dark = value == "dark",
                 "contrast" => {
@@ -785,6 +808,7 @@ impl Settings {
                 "screen" => settings.full_screen = value == "full",
                 "notes" => settings.notes = value != "hidden",
                 "turn" => settings.turn = Turning::from_words(value),
+                "own-user-agent" => settings.own_user_agent = value == "on",
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
                         settings.typography.face = face;
@@ -872,6 +896,13 @@ impl Settings {
         let turn = self.turn.words();
         if !turn.is_empty() {
             text.push_str(&format!("turn\t{}\n", turn.join(",")));
+        }
+        let agent = self.user_agent.trim();
+        if !agent.is_empty() && crate::fetch::valid_agent(agent) {
+            text.push_str(&format!("user-agent\t{agent}\n"));
+        }
+        if self.own_user_agent {
+            text.push_str("own-user-agent\ton\n");
         }
         if self.paper != Paper::Usual {
             text.push_str(&format!("paper\t{}\n", self.paper.name(false)));
@@ -1867,6 +1898,9 @@ mod tests {
                 keys: true,
                 left_hand: true,
             },
+            user_agent: "Mozilla/5.0 (Android 9; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
+                .to_owned(),
+            own_user_agent: true,
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);
