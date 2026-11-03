@@ -360,7 +360,7 @@ copies as plain `.md`, the header kept: those tools read it as properties.
 
 ### 16. Pictures in the archive (#42)
 
-Not yet. The reader's own pictures came first: since 0.19.0 a note can hold them, in a
+Done. The reader's own pictures came first: since 0.19.0 a note can hold them, in a
 margin beside its passage or under its paragraph.
 
 A copy is Markdown: the text outlives the site, the pictures die with it. For most pages
@@ -374,15 +374,17 @@ documentation the diagrams and screenshots are half of the page.
   from the week's cache. Pictures turned off stay off, and a picture not at hand is not
   fetched for this.
 - **Beside the copy, not inside it.** The copy's text is untouched — search, notes and
-  the reading place rest on it. The pictures lie next to it byte for byte, as `--save`
-  writes them, with a list of which address is which file, and they leave with their
-  copy.
+  the reading place rest on it. The pictures lie in the archive byte for byte, as `--save`
+  writes them, one folder per page rather than per copy (`archive/_pictures/`), with a
+  list of which address is which file; they leave with the page's last copy. A kept page
+  shows its pictures from there before asking the site.
 - **Not into the phone's backup.** Android backs an app up to Google only up to 25 MB
   and stops altogether beyond that, bookmarks and notes included. Pictures would get
   there fast, and the archive's text gets there too, at about 1,700 pages — so the
-  backup leaves the archive's pictures out, perhaps the archive as a whole.
+  backup leaves the archive's pictures out (moving to a new phone takes them along).
+  The archive's text still goes into the backup.
 
-Known cost: disk. A ceiling per copy, set by measurement.
+Known cost: disk, up to 32 MB a page.
 
 ### 17. The bar steps aside, on the phone (#45)
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Резервная копия до Android 12 (`fullBackupContent`): всё, кроме картинок
+     архива (#42). Автокопия Google сверх 25 МБ приложение не копирует вовсе —
+     вместе с закладками и заметками, — а картинки дошли бы до предела быстро. -->
+<full-backup-content>
+    <exclude domain="file" path="archive/_pictures/" />
+</full-backup-content>

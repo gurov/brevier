@@ -3250,6 +3250,9 @@ fn keep_page(ui: &Ui, state: &Rc<RefCell<State>>) {
         let offset = local_offset();
         borrowed.marks.toggle(&address, &title, offset)
     };
+    if kept && let Some(id) = current_id(ui, state) {
+        gather_pictures(state, id);
+    }
     show_star(ui, kept);
     notice(
         ui,
@@ -3259,6 +3262,30 @@ fn keep_page(ui: &Ui, state: &Rc<RefCell<State>>) {
             "Taken off the bookmarks"
         },
     );
+}
+
+/// Страницу положили в закладки или написали к ней заметку (#42): её
+/// картинки, что уже скачаны (память вкладки, недельный кэш), — в архив.
+/// В фоне: это копирование файлов.
+fn gather_pictures(state: &Rc<RefCell<State>>, id: u64) {
+    let Some((document, held)) = state.borrow_mut().find(id).and_then(|tab| {
+        let document = tab.document.clone()?;
+        let held: HashMap<String, Arc<Vec<u8>>> = brevier::markdown::images(&document.markdown)
+            .iter()
+            .filter_map(|link| match media::resolve(&document.address, link)? {
+                Source::Web(url) => tab.blobs.get(&url).map(|bytes| (url, bytes)),
+                Source::File(_) => None,
+            })
+            .collect();
+        Some((document, held))
+    }) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        brevier::pictures::gather(&document, |url| {
+            held.get(url).map(|bytes| (**bytes).clone())
+        });
+    });
 }
 
 /// Зажечь или погасить звёздочку.
@@ -6742,6 +6769,13 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         };
         (tab.generation, cached)
     };
+    // Чья картинка (#42): у страницы, что хранится навсегда, — из архива
+    // раньше сети и в архив, когда скачана.
+    let page = state.borrow_mut().find(id).and_then(|tab| {
+        tab.document
+            .as_ref()
+            .map(|document| document.address.clone())
+    });
 
     // Заглушку «loading…» показываем только когда правда идём в сеть: из кэша
     // картинка встаёт почти в тот же кадр, и мигание заглушкой лишнее.
@@ -6791,12 +6825,27 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
                     Source::File(_) => None,
                 };
                 let from_disk = copy.is_some();
-                let (bytes, mime) = match copy {
+                let kept = match (&source, &page, copy.is_none()) {
+                    (Source::Web(url), Some(page), true) => {
+                        brevier::pictures::from_archive(page, url)
+                    }
+                    _ => None,
+                };
+                let from_archive = kept.is_some();
+                let (bytes, mime) = match copy.or(kept) {
                     Some(bytes) => (bytes, None),
                     None => media::grab(&source, UserAgent::Honest)?,
                 };
                 let raster = media::decode(&bytes, mime.as_deref(), look)?;
-                if !from_disk && let Source::Web(url) = &source {
+                if let (Source::Web(url), Some(page)) = (&source, &page)
+                    && !from_archive
+                {
+                    brevier::pictures::offer(page, url, &bytes);
+                }
+                if !from_disk
+                    && !from_archive
+                    && let Source::Web(url) = &source
+                {
                     disk.keep_image(url, &bytes);
                 }
                 let keep = matches!(source, Source::Web(_)).then_some(bytes);
@@ -7972,6 +8021,7 @@ fn mark_selection(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, write: bool) {
             "",
             store::Stamp::now(local_offset()),
         );
+        gather_pictures(state, id);
         after_notes_with(ui, state, id, Some(note));
         return;
     }
@@ -7986,6 +8036,7 @@ fn mark_selection(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, write: bool) {
                 &words,
                 store::Stamp::now(local_offset()),
             );
+            gather_pictures(&state, id);
             after_notes(&ui, &state, id);
             notice(
                 &ui,

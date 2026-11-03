@@ -28,7 +28,7 @@ object Core {
      * не смогла даже ответить (так ведёт себя arm64-ядро под трансляцией
      * на x86_64-эмуляторе): это отказ одной картинки, а не повод падать.
      */
-    external fun image(source: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray?
+    external fun image(source: String, page: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray?
 
     /** Картинка из ответа [image] — или почему её нет. */
     class Raster(val bitmap: android.graphics.Bitmap?, val trouble: String?)

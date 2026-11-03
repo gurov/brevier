@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Резервная копия с Android 12 (`dataExtractionRules`): в облако — всё,
+     кроме картинок архива (#42), по той же причине, что в backup.xml. Перенос
+     на новый телефон предела не знает и берёт всё. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="archive/_pictures/" />
+    </cloud-backup>
+</data-extraction-rules>

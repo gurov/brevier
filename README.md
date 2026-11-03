@@ -320,8 +320,10 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **Every article you read is kept as your copy**, a Markdown file, so you can read and
   search it after the site has changed or gone; compressed, or plain `.md` for other
   programs to open. The history links each page to
-  its copy; a bookmark keeps its copy for good. **Search what you've read** is in the menu
-  (`Ctrl+Shift+F`), and `brevier:archive` lists every copy.
+  its copy; a bookmark keeps its copy for good, and a bookmarked page or a page with notes
+  keeps its pictures too, the ones already downloaded to show it, with no extra request.
+  **Search what you've read** is in the menu (`Ctrl+Shift+F`), and `brevier:archive` lists
+  every copy.
 
 **Any kind of page**
 
@@ -476,6 +478,7 @@ History, open tabs and bookmarks are plain text, one line per entry:
 ~/.local/share/brevier/session.tsv     # the tabs you left open
 ~/.local/share/brevier/bookmarks.tsv   # the pages you kept
 ~/.local/share/brevier/archive/        # a copy of every article you read
+~/.local/share/brevier/archive/_pictures/  # the pictures of bookmarked and annotated pages
 ~/.local/share/brevier/reading.tsv     # where you stopped in long pages
 ~/.local/share/brevier/notes.tsv       # your highlights and notes
 ~/.local/share/brevier/notes/          # the pictures in your notes
@@ -490,8 +493,12 @@ they are, at about twice the space; the copies kept before stay as they were, an
 reads both. On the phone copies stay compressed: no other app can see the app's own
 folder anyway. A copy stays as long as its line in the history, and a
 bookmarked page, and a page with notes, keeps its latest copy for good, even through
-**Forget everything**. A switch
-in Settings stops new copies.
+**Forget everything**. Such a page keeps its pictures as well, in `archive/_pictures/`,
+one folder per page: the files byte for byte and `index.tsv`, which address is which file,
+up to 32 MB a page. Brevier shows them from there before asking the site, and they leave
+with the page's last copy. The phone's backup to Google leaves them out: past 25 MB
+Android stops backing an app up at all, bookmarks and notes included. A switch in Settings
+stops new copies.
 
 Settings are in `~/.config/brevier/settings.tsv`. The cache — the fonts, and week-old
 copies of pages (up to 64 MB of text and 256 MB of images) — is in `~/.cache/brevier`.

@@ -923,7 +923,7 @@ class MainActivity : Activity(), ArticleHost {
                 // в другой вкладке на той же странице. До показа: по ним
                 // режется колонка под карточки (#42).
                 tab.notes = if (readable(tab) != null) Core.notes(shown.address) else emptyList()
-                view.show(shown.page, metrics(), theme, eager = images && shown.ok, offer = shown.offer, ways = shown.ways, notes = tab.notes)
+                view.show(shown.page, metrics(), theme, eager = images && shown.ok, offer = shown.offer, ways = shown.ways, notes = tab.notes, address = shown.address)
                 val resume = tab.resume
                 tab.resume = null
                 val anchor = if (tab.anchorPending) shown.anchor?.let { shown.page.anchor(it) } else null
@@ -1333,7 +1333,7 @@ class MainActivity : Activity(), ArticleHost {
         App.work.execute {
             val bitmap = Core.holdingPicture {
                 val bytes = try {
-                    Core.image(path, width, paper, metrics().text, false)
+                    Core.image(path, "", width, paper, metrics().text, false)
                 } catch (failure: Throwable) {
                     null
                 }

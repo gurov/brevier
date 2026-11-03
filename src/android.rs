@@ -207,6 +207,7 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
     mut unowned: EnvUnowned<'caller>,
     _class: JClass<'caller>,
     source: JString<'caller>,
+    page: JString<'caller>,
     width: i32,
     paper: i32,
     font_size: f32,
@@ -214,6 +215,7 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
 ) -> JByteArray<'caller> {
     let outcome = unowned.with_env(|env| -> Result<JByteArray<'caller>, JniError> {
         let source = source.try_to_string(env)?;
+        let page = page.try_to_string(env)?;
         let look = Look {
             width: width.max(1) as u32,
             paper: [(paper >> 16) as u8, (paper >> 8) as u8, paper as u8],
@@ -222,7 +224,7 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
             // Телефон считает в пикселях экрана сразу.
             density: 1.0,
         };
-        let bytes = deep(move || image(&source, look));
+        let bytes = deep(move || image(&source, &page, look));
         env.byte_array_from_slice(&bytes)
     });
     outcome.resolve::<ThrowRuntimeExAndDefault>()
@@ -401,13 +403,20 @@ fn call(method: &str, arg: &str) -> String {
         "save" => save(field(0), field(1)),
         "picture.keep" => keep_picture(field(0), field(1)),
         "notes.of" => notes_of(arg),
-        "notes.add" => add_note(
-            field(0).parse().unwrap_or(0),
-            field(1),
-            field(2).parse().unwrap_or(0),
-            field(3).parse().unwrap_or(0),
-            field(4),
-        ),
+        "notes.add" => {
+            let out = add_note(
+                field(0).parse().unwrap_or(0),
+                field(1),
+                field(2).parse().unwrap_or(0),
+                field(3).parse().unwrap_or(0),
+                field(4),
+            );
+            // Страница с заметкой хранится навсегда — с картинками (#42).
+            if out.starts_with("{\"ok\":true") {
+                gather_pictures(field(1));
+            }
+            out
+        }
         "notes.edit" => {
             let done = core().notes.edit(field(0).parse().unwrap_or(0), field(1));
             format!("{{\"ok\":{done}}}")
@@ -892,7 +901,41 @@ fn bookmark(offset: i32, typed: &str, title: &str) -> String {
         return "{\"kept\":false}".to_owned();
     };
     let kept = core().marks.toggle(&address, title, offset);
+    if kept {
+        gather_pictures(typed);
+    }
     format!("{{\"kept\":{kept}}}")
+}
+
+/// Страницу положили в закладки или написали к ней заметку (#42): её
+/// картинки, что уже скачаны, — в архив. В фоне: это копирование файлов.
+fn gather_pictures(address: &str) {
+    let key = address.split('#').next().unwrap_or(address);
+    let (document, held) = {
+        let core = core();
+        let Some(document) = core
+            .documents
+            .iter()
+            .rev()
+            .find(|(known, _)| known == key)
+            .map(|(_, document)| document.clone())
+        else {
+            return;
+        };
+        let held: HashMap<String, Arc<Vec<u8>>> = crate::markdown::images(&document.markdown)
+            .iter()
+            .filter_map(|link| match media::resolve(&document.address, link)? {
+                Source::Web(url) => core.blobs.get(&url).map(|bytes| (url, bytes)),
+                Source::File(_) => None,
+            })
+            .collect();
+        (document, held)
+    };
+    std::thread::spawn(move || {
+        crate::pictures::gather(&document, |url| {
+            held.get(url).map(|bytes| (**bytes).clone())
+        });
+    });
 }
 
 /// Секунда чтения (#19): видимое `[from, to)` в UTF-16. Ответ — доли
@@ -1388,22 +1431,40 @@ fn source_of(source: &str) -> Source {
 }
 
 /// Скачать или взять из кэша, затем разобрать.
-fn image(source: &str, look: Look) -> Vec<u8> {
+fn image(source: &str, page: &str, look: Look) -> Vec<u8> {
     let source = source_of(source);
+    // Страница, чья это картинка (#42): хранится навсегда — картинка
+    // берётся из архива раньше сети и ложится туда, когда скачана.
+    let page = address::parse(page).ok();
     let cached = match &source {
         Source::Web(url) => core().blobs.get(url),
         Source::File(_) => None,
     };
-    // Нет в памяти — недельная копия на диске, её тоже в память.
+    // Нет в памяти — недельная копия на диске, затем архив; их тоже в память.
     let disk = Cache::open();
+    let mut from_archive = false;
     let cached = cached.or_else(|| match &source {
-        Source::Web(url) => disk.image(url).map(|bytes| {
-            let bytes = Arc::new(bytes);
-            core().blobs.put(url.clone(), bytes.clone());
-            bytes
-        }),
+        Source::Web(url) => disk
+            .image(url)
+            .or_else(|| {
+                let kept = page
+                    .as_ref()
+                    .and_then(|page| crate::pictures::from_archive(page, url));
+                from_archive = kept.is_some();
+                kept
+            })
+            .map(|bytes| {
+                let bytes = Arc::new(bytes);
+                core().blobs.put(url.clone(), bytes.clone());
+                bytes
+            }),
         Source::File(_) => None,
     });
+    if let (Some(page), Some(bytes), Source::Web(url)) = (&page, &cached, &source)
+        && !from_archive
+    {
+        crate::pictures::offer(page, url, bytes);
+    }
     let decoded = match cached {
         Some(bytes) => media::decode(&bytes, None, look),
         // В кэш — только то, что разобралось: битые байты хранить незачем.
@@ -1411,6 +1472,9 @@ fn image(source: &str, look: Look) -> Vec<u8> {
             let raster = media::decode(&bytes, mime.as_deref(), look)?;
             if let Source::Web(url) = &source {
                 disk.keep_image(url, &bytes);
+                if let Some(page) = &page {
+                    crate::pictures::offer(page, url, &bytes);
+                }
                 core().blobs.put(url.clone(), Arc::new(bytes));
             }
             Ok(raster)

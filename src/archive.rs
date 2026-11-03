@@ -40,6 +40,16 @@
 //! ссылкой «your copy» в истории и закладках, поиск — «Search what you've
 //! read». `brevier:archive` остаётся адресом.
 //!
+//! **Картинки** (#42) — только у страниц, что хранятся навсегда (закладки
+//! и страницы с заметками): `archive/_pictures/<host>/<ключ адреса>/`, файлы
+//! как есть, байт в байт (LZ4 на JPEG и PNG ничего не выигрывает), и
+//! `index.tsv` — «адрес картинки ⇥ файл». Папка — у страницы, а не у копии:
+//! копия каждого дня — свой файл, и папка при копии теряла бы картинки,
+//! прочитанные раньше, — в тот день, когда картинки были выключены. Живёт,
+//! пока жива хоть одна копия страницы. Отдельным корнем — ради резервной
+//! копии Android: её правила маски не знают, а папку с префиксом исключают.
+//! Новых запросов ради неё нет: кладётся то, что уже скачано (`pictures`).
+//!
 //! **Пишет только интерфейс**, как и историю: cli — инструмент конвейера.
 //! Читать архив cli может: `brevier brevier:archive/<путь>` печатает копию
 //! как есть.
@@ -125,6 +135,21 @@ const RESULTS: usize = 200;
 
 /// Знаков текста вокруг найденного слова.
 const SNIPPET_CHARS: usize = 90;
+
+/// Папка картинок страниц (#42) — внутри архива, но не хостом: подчёркивания
+/// в имени хоста не бывает.
+const PICTURES: &str = "_pictures";
+/// Строки «адрес картинки ⇥ файл» в папке страницы.
+const PICTURES_INDEX: &str = "index.tsv";
+/// Сколько картинок одной страницы храним: на страницу документации
+/// со снимками экрана хватает с запасом, а фотогалерея целиком не ляжет.
+pub const PICTURES_PER_PAGE: u64 = 32 * 1024 * 1024;
+/// Картинка больше этого — не наша: столько же отрезает загрузка (`media`).
+const PICTURE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Картинки пишут потоки загрузки разом (по четыре на страницу): номер
+/// файла и строку указателя берут по одному.
+static PICTURE_WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Архив: папка с копиями. `None` — положить некуда; тогда архива нет,
 /// а чтение идёт как шло.
@@ -317,6 +342,132 @@ impl Archive {
         }
     }
 
+    /// С какой страницы снята копия — по одной шапке, без текста: так
+    /// картинки копии (#42) находят свою страницу.
+    pub fn source_of(&self, path: &str) -> Option<String> {
+        let dir = self.dir.as_ref()?;
+        [Some(path.to_owned()), twin(path)]
+            .into_iter()
+            .flatten()
+            .find_map(|path| read_head(&dir.join(checked(&path)?)))
+            .map(|head| head.source)
+    }
+
+    /// Папка картинок страницы (#42): по хосту и ключу адреса.
+    fn pictures_dir(&self, source: &str) -> Option<PathBuf> {
+        let dir = self.dir.as_ref()?;
+        let source = source.split('#').next().unwrap_or_default();
+        let host = crate::address::parse(source)
+            .ok()
+            .and_then(|address| host_of(&address))?;
+        Some(dir.join(PICTURES).join(host).join(picture_key(source)))
+    }
+
+    /// Указатель папки: адрес картинки → имя файла.
+    fn picture_index(folder: &Path) -> Vec<(String, String)> {
+        fs::read_to_string(folder.join(PICTURES_INDEX))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| {
+                let (address, file) = line.split_once('\t')?;
+                Some((store::unescape(address), file.to_owned()))
+            })
+            .collect()
+    }
+
+    /// Картинка страницы `source` по её адресу `url`, если она в архиве.
+    pub fn picture(&self, source: &str, url: &str) -> Option<Vec<u8>> {
+        let folder = self.pictures_dir(source)?;
+        let (_, file) = Self::picture_index(&folder)
+            .into_iter()
+            .find(|(address, _)| address == url)?;
+        // Имя из указателя — только имя: из папки страницы не выходит.
+        if file.contains(['/', '\\']) || file.starts_with('.') {
+            return None;
+        }
+        fs::read(folder.join(file)).ok()
+    }
+
+    /// Положить картинку страницы `source`: байты как есть, расширение —
+    /// по подписи (`ext`). Уже лежит, больше `PICTURE_BYTES` или папка
+    /// дошла до `PICTURES_PER_PAGE` — не кладём. Хранится ли страница
+    /// навсегда, решает вызывающий (`pictures`).
+    pub fn keep_picture(&self, source: &str, url: &str, bytes: &[u8], ext: &str) {
+        if bytes.is_empty() || bytes.len() as u64 > PICTURE_BYTES || url.contains(['\n', '\r']) {
+            return;
+        }
+        let Some(folder) = self.pictures_dir(source) else {
+            return;
+        };
+        let _one = PICTURE_WRITER
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let index = Self::picture_index(&folder);
+        if index.iter().any(|(address, _)| address == url) {
+            return;
+        }
+        let held: u64 = fs::read_dir(&folder)
+            .map(|files| {
+                files
+                    .flatten()
+                    .filter_map(|file| file.metadata().ok())
+                    .map(|meta| meta.len())
+                    .sum()
+            })
+            .unwrap_or(0);
+        if held + bytes.len() as u64 > PICTURES_PER_PAGE {
+            return;
+        }
+        let ext: String = ext
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .take(5)
+            .collect();
+        let name = format!(
+            "{:03}.{}",
+            index.len() + 1,
+            if ext.is_empty() { "bin" } else { &ext }
+        );
+        cache::write_atomically(&folder.join(&name), bytes);
+        if !folder.join(&name).exists() {
+            return;
+        }
+        let mut text = if index.is_empty() {
+            format!(
+                "# Pictures of {}, kept with its copy for good: address<TAB>file.\n",
+                source.split('#').next().unwrap_or_default()
+            )
+        } else {
+            fs::read_to_string(folder.join(PICTURES_INDEX)).unwrap_or_default()
+        };
+        text.push_str(&format!("{}\t{name}\n", store::escape(url)));
+        cache::write_atomically(&folder.join(PICTURES_INDEX), text.as_bytes());
+    }
+
+    /// Убрать папки картинок страниц, у которых не осталось ни одной копии
+    /// (`alive` — их адреса), и опустевшие папки хостов.
+    fn sweep_pictures(&self, alive: &HashSet<String>) {
+        let Some(dir) = &self.dir else { return };
+        let root = dir.join(PICTURES);
+        let keys: HashSet<String> = alive.iter().map(|source| picture_key(source)).collect();
+        let Ok(hosts) = fs::read_dir(&root) else {
+            return;
+        };
+        for host in hosts.flatten() {
+            if let Ok(pages) = fs::read_dir(host.path()) {
+                for page in pages.flatten() {
+                    let name = page.file_name().to_string_lossy().into_owned();
+                    if !keys.contains(&name) {
+                        let _ = fs::remove_dir_all(page.path());
+                    }
+                }
+            }
+            let _ = fs::remove_dir(host.path());
+        }
+        let _ = fs::remove_dir(&root);
+    }
+
     /// Все копии, свежие сверху: шапки без текста.
     pub fn list(&self) -> Vec<Copy> {
         let mut copies: Vec<Copy> = self
@@ -492,15 +643,21 @@ impl Archive {
             heads.push((path, file));
         }
         let marked_copies: HashSet<String> = newest.into_values().map(|(_, path)| path).collect();
+        // Страницы, у которых копия осталась: их картинки (#42) живут.
+        let mut alive = HashSet::new();
         for (path, file) in heads {
             // Журнал мог запомнить копию под именем другого вида (#43).
             let in_history =
                 kept.contains(&path) || twin(&path).is_some_and(|other| kept.contains(&other));
             if in_history || marked_copies.contains(&path) || spare(&file) {
+                if let Some(head) = read_head(&file) {
+                    alive.insert(head.source);
+                }
                 continue;
             }
             let _ = fs::remove_file(&file);
         }
+        self.sweep_pictures(&alive);
         if let Ok(hosts) = fs::read_dir(dir) {
             for host in hosts.flatten() {
                 // Удаляется только пустая: `remove_dir` с содержимым не справится.
@@ -564,6 +721,18 @@ impl Archive {
         }
         out
     }
+}
+
+/// Ключ папки картинок страницы: FNV-1a адреса, 16 знаков. Слаг не годится:
+/// у двух страниц с одним заголовком он один.
+fn picture_key(source: &str) -> String {
+    let source = source.split('#').next().unwrap_or_default();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in source.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 /// Адрес копии в Brevier.
@@ -1277,6 +1446,87 @@ mod tests {
         assert!(dir.join(&newer).exists());
         // Папка хоста без копий убрана.
         assert!(!dir.join("b.org").exists());
+    }
+
+    /// Картинки страницы (#42): кладутся байт в байт, находятся по адресу,
+    /// дважды не кладутся, а сверх потолка страницы — не кладутся вовсе.
+    #[test]
+    fn a_kept_pages_pictures_are_found_by_their_address() {
+        let dir = temporary("pictures");
+        let archive = Archive::at(&dir);
+        let page = "https://docs.example.org/guide#setup";
+        let png = b"\x89PNG\r\n\x1a\nfirst".to_vec();
+        archive.keep_picture(page, "https://cdn.example.org/a.png", &png, "png");
+        archive.keep_picture(page, "https://cdn.example.org/a.png", b"other", "png");
+        archive.keep_picture(
+            page,
+            "https://cdn.example.org/b.jpg",
+            b"\xff\xd8\xffjpeg",
+            "jpg",
+        );
+        // Решётка адреса — та же страница.
+        assert_eq!(
+            archive.picture(
+                "https://docs.example.org/guide",
+                "https://cdn.example.org/a.png"
+            ),
+            Some(png)
+        );
+        assert!(
+            archive
+                .picture(page, "https://cdn.example.org/b.jpg")
+                .is_some()
+        );
+        assert_eq!(archive.picture(page, "https://cdn.example.org/c.gif"), None);
+        assert_eq!(
+            archive.picture(
+                "https://docs.example.org/other",
+                "https://cdn.example.org/a.png"
+            ),
+            None
+        );
+        let folder = archive.pictures_dir(page).unwrap();
+        let names: Vec<String> = Archive::picture_index(&folder)
+            .into_iter()
+            .map(|(_, file)| file)
+            .collect();
+        assert_eq!(names, ["001.png", "002.jpg"]);
+
+        // Больше потолка картинки — нет.
+        let huge = vec![0u8; PICTURE_BYTES as usize + 1];
+        archive.keep_picture(page, "https://cdn.example.org/huge.png", &huge, "png");
+        assert_eq!(
+            archive.picture(page, "https://cdn.example.org/huge.png"),
+            None
+        );
+    }
+
+    /// Картинки живут, пока жива копия страницы, и уходят вместе с последней.
+    #[test]
+    fn pictures_leave_with_the_last_copy_of_their_page() {
+        let dir = temporary("pictures-prune");
+        let archive = Archive::at(&dir);
+        let page = |url: &str, title: &str| article(url, title, "text");
+        let kept_url = "https://a.org/kept";
+        let gone_url = "https://b.org/gone";
+        let kept = archive
+            .keep(&page(kept_url, "Kept"), &stamp("2026-01-01T08:00:00Z"))
+            .unwrap();
+        archive
+            .keep(&page(gone_url, "Gone"), &stamp("2026-01-01T08:00:00Z"))
+            .unwrap();
+        archive.keep_picture(kept_url, "https://a.org/1.png", b"one", "png");
+        archive.keep_picture(gone_url, "https://b.org/1.png", b"two", "png");
+
+        let later = SystemTime::now() + Duration::from_secs(48 * 3600);
+        archive.prune_at(&[kept].into(), &HashSet::new(), later);
+        assert!(archive.picture(kept_url, "https://a.org/1.png").is_some());
+        assert_eq!(archive.picture(gone_url, "https://b.org/1.png"), None);
+        assert!(!dir.join(PICTURES).join("b.org").exists());
+
+        // «Забыть всё» без закладок — и картинок нет.
+        archive.forget(&HashSet::new());
+        assert_eq!(archive.picture(kept_url, "https://a.org/1.png"), None);
     }
 
     #[test]

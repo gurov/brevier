@@ -110,6 +110,8 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     var page: Page? = null
         private set
+    /** Адрес показанной страницы: картинки её, хранящейся навсегда, — из архива (#42). */
+    private var address = ""
     private lateinit var metrics: Metrics
     private lateinit var palette: Palette
     private var theme = Theme(dark = false, high = false)
@@ -203,8 +205,10 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         offer: String? = null,
         ways: List<Entry> = emptyList(),
         notes: List<NoteSpot> = emptyList(),
+        address: String = "",
     ) {
         this.page = page
+        this.address = address
         this.metrics = metrics
         this.theme = theme
         palette = metrics.type.palette(theme)
@@ -926,10 +930,12 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     private fun fetch(source: String, look: Look, done: (Decoded) -> Unit) {
         val shown = generation
+        // Адрес — сейчас: пока задача ждёт потока, вид мог показать другое.
+        val page = address
         App.work.execute {
             val raster = Core.holdingPicture {
                 val bytes = try {
-                    Core.image(source, look.width, look.paper, look.fontSize, look.natural)
+                    Core.image(source, page, look.width, look.paper, look.fontSize, look.natural)
                 } catch (failure: Throwable) {
                     null
                 }
