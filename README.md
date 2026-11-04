@@ -54,8 +54,7 @@ anyone else, or older than what you have, is refused. The key's fingerprint:
 6B4E DDB5 9942 1591 7552  C75F CE2B EBF8 1389 1B3B
 ```
 
-Each release also has the
-same app as one file,
+Each release also has the same app as one file,
 [`brevier.flatpak`](https://github.com/gurov/brevier/releases/download/v0.22.0/brevier.flatpak)
 (`flatpak install --user ./brevier.flatpak`). Files released after 0.14.0 update from the
 repository as well; Brevier installed from an older one does not — run
@@ -118,13 +117,14 @@ F-Droid builds Brevier from source and publishes this same APK, signed with this
 when its build matches ours byte for byte. So an install from either place updates from the
 other. A new version reaches F-Droid a few days after it appears in Releases.
 
-Google Play comes next. Before a new developer's app goes public there, Google wants a
-closed test: 12 testers for 14 days in a row. If you would like to be one,
+Google Play comes next, and Brevier is in a closed test there now. Before a new developer's
+app goes public, Google wants 12 testers for 14 days in a row. If you would like to be one,
 [#48](https://github.com/gurov/brevier/issues/48) says how. The Play build is signed with the
-same key, so it installs over the one from F-Droid or Releases, history and notes included.
+same key, so it should install over the one from F-Droid or Releases, history and notes
+included, as long as that one is not newer.
 
 **The command line alone**, one file with nothing to install beside it: no GTK, no OpenSSL,
-on Linux statically linked, so any distribution will do. From 0.15.0 on, every release has
+on Linux statically linked, so any distribution will do. Every release has
 an archive for Linux on x86_64 and on 64-bit ARM, for macOS (one file for Apple silicon and
 Intel) and for Windows, always at the same address:
 
@@ -417,6 +417,9 @@ text — not in a WebView — with the same typography and colours as the window
   search or select, and with TalkBack or Switch Access on. A setting keeps it in place.
 - **Full screen**, as a setting: while you read, the system's status and navigation bars
   go away too; a swipe from the edge brings them back for a moment.
+- **Turning the page**, three settings, all off until you want them: a tap on the text (the
+  left third goes back), a sideways swipe, or the volume keys. The last line stays in sight,
+  and **Left hand** swaps the sides for taps.
 - With a keyboard attached, the window's shortcuts work, `Alt+←` / `Alt+→` included.
 
 The maintainer uses it every day. It hasn't been tested with TalkBack yet.
@@ -465,7 +468,7 @@ Extraction breaks as sites change their markup. Keeping up with that never ends.
   specialised one for pages the rules can't read, say — they will be a separate module, off
   until you turn it on, with whatever they produce marked as theirs.
 - **Screen readers outside Linux** — GTK's accessibility works only on Linux: on Windows a
-  screen reader doesn't see the window, and that is one reason there is no macOS build yet.
+  screen reader doesn't see the window, and that is one reason there is no macOS window yet.
   The Android app uses native text, which TalkBack should read, but that hasn't been tested.
 - **Privacy** — not promised. Sites can track you as they always could.
 
@@ -507,8 +510,8 @@ On Windows all of it is in `%LOCALAPPDATA%\Brevier`; on Android, in the app's ow
 
 There is no database: delete a line to forget a page. **Forget everything** in Settings
 clears the history, the cache of pages and the archive, and keeps your bookmarks and notes
-with their copies, and your tabs. Only the window writes these files; `brevier <url>` on the command
-line keeps no history.
+with their copies, and your tabs. Only the window writes these files; `brevier <url>` on the
+command line keeps no history.
 
 ## On the network
 
@@ -522,9 +525,8 @@ line keeps no history.
   markup, since the general extractor drops the author of every comment, or every comment
   but one; Habr's comments are asked for at the address its own script uses, one more
   request to habr.com for an article that has any; rustdoc pages are read from their main
-  column;
-  royallib's books open part by part; DuckDuckGo Lite results are unwrapped from its click
-  tracker. Your search queries go to DuckDuckGo.
+  column; royallib's books open part by part; DuckDuckGo Lite results are unwrapped from its
+  click tracker. Your search queries go to DuckDuckGo.
 - **The Wayback Machine is asked only when you press the button.** A page that is gone
   does not send its address to archive.org by itself.
 - **An honest User-Agent:** `Brevier/0.1`. On our test set, pretending to be a browser lost
