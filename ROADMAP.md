@@ -419,8 +419,43 @@ append to a notes directory, print, run through `pandoc`. Anything that reads st
 
 ### Subscriptions
 
-Feeds on the shelf, `brevier:feeds`, unread marked. Refreshed when the reader asks;
-whether to refresh on a timer as well is a question for when there are subscribers.
+Feeds on the shelf, `brevier:feeds`, what is new marked but never counted. To be worked
+through before it is built: an edition rather than a stream. Entries arrive once or
+twice a day, and the list ends with a plain "That's all for today". A refresh at will
+with a number beside it is a lever with a prize that may or may not be there, and it is
+the prize that keeps people pulling, not the gesture. This is reasoning, not a
+measurement: the experiments on stopping are about social media, not reading. How an
+edition sits with a feed opened by its address, which is always fetched, is part of
+the work.
+
+### What do you remember?
+
+At the end of a long article, an offer to write one line in the reader's own words,
+with the article out of sight, kept as a note on the page. Recalling does more for
+memory than rereading: self-testing is one of the two study techniques rated highest
+in the review by Dunlosky and others (2013). But that is research on studying, and
+someone reading for pleasure may only be irritated, so it stays off until the reader
+turns it on. To be worked through before it is built, starting with the papers
+themselves: what counts as a long article read to its end, how to offer this without
+interrupting, and whether the reader's line should come back later (next item).
+
+### Notes that come back
+
+One old note on the start page, some weeks after it was written: the reader's own
+words rather than a bare highlight, since going back over one's highlighting does
+little for memory. No counter, no queue, nothing owed; a note left unread simply goes
+away again. Spaced review is well supported, but this way of showing notes has not been
+tested directly that we know of. Off until the reader turns it on. To be worked through
+before it is built: how long to wait, which note, and what the phone does.
+
+### Pages to turn, made known
+
+Turning pages on the phone exists (#55) and is off by default. Scrolling has been found
+to hurt the understanding of complex text, the more so for readers with less working
+memory, because the words lose their place on a page; the findings are not uniform, and
+one study found no difference. To be worked through before anything changes: how a
+reader comes to know about it, and whether a page should begin at the same word every
+time, since a place on a page is the whole argument.
 
 ### A readable-web note
 
@@ -431,58 +466,15 @@ Written after the check has run on enough sites to know which findings matter.
 
 ### Android
 
-A second front-end, not a second build — which is what separates it from the two
-desktop builds below. The core crosses as it is: the library links no toolkit, its
-dependencies are Rust the whole way down, and the dependency graph for
-`aarch64-linux-android` holds no X11, no fontconfig, no GTK. CI cross-compiles it into
-a shared library for arm64 on every push so that it stays that way, long before
-anybody writes the front-end.
-
-The window does not cross. GTK's Android backend is experimental, and the interaction
-is keyboard and mouse throughout — Ctrl+L, a tooltip on hover, a middle click, a
-divider dragged to width. None of those exist on a phone. So the front-end is native,
-Kotlin over the core, and what travels with the core is the typographic model: the
-measure is stated in ems rather than pixels, and it holds wherever it is drawn.
-
-It draws the article itself, in native text, rather than handing it to a WebView. The
-WebView is the cheaper road and an honest one to weigh: our Markdown, our HTML, our
-CSS, scripts off by the toolkit's own default, and hyphenation, tables, selection and
-TalkBack all arrive for free. What it costs is the promise. Reading the web through a
-browser engine is the thing this program exists to stop doing, and the type would move
-into a CSS layer that the desktop does not have, so one article would be set two ways
-on two platforms. Drawing it natively is direct work rather than clever work: the core
-hands a front-end a parsed structure instead of a blob of text, and the type is already
-a handful of constants.
-
-Nor is that front-end as large as the desktop window makes it look. Of the window's
-five thousand lines, a quarter draw the article; the rest are tabs, the session,
-history, the shelf, search, zoom and system glue, and a first release on a phone needs
-almost none of it.
-
-Two things argue for the platform rather than merely allowing it. That measure — 36
-ems, some 65 characters — is a phone's natural column instead of a compromise on it.
-And accessibility improves rather than degrades: native views speak to TalkBack, so
-the gap the README states for every platform but Linux closes here instead of widening.
-
-A spike has run, so what follows is measured rather than assumed. The core builds for
-`aarch64-linux-android` and links into a 6 MB shared library; two JNI entry points are
-enough for a phone to read a page; and the failure texts in the core serve an Android
-front-end unchanged, which is what they were put in the core for.
-
-Three of the four seams are small: the folders learn a fourth place, for which
-`BREVIER_DATA_DIR` is the hook and it exists already; font fallback beyond the shipped
-Noto has no fontconfig to ask and must ask the system instead; "open in your browser"
-becomes an Intent.
-
-The fourth is not small. The platform verifier needs a JNI initialisation and a Kotlin
-component in the Gradle build, and with both in place it refuses most of the web:
-Android's trust manager insists on OCSP revocation checking, Let's Encrypt stopped
-publishing OCSP responders in August 2025, and the verifier reports the resulting
-exception as a revoked certificate. Wikipedia, GitHub and the Rust blog all fail that
-way, while a site whose certificate still carries an OCSP URL reads fine. The bug is
-upstream and open (rustls/rustls-platform-verifier#221). That leaves three ways: wait
-for the fix, patch the Kotlin component we already ship, or stop delegating trust to
-the operating system — and the third costs a promise, so it is not a way.
+Done. A second front-end, not a second build: Kotlin over the same core, on F-Droid since
+0.11.0. The window did not cross, its interaction being keyboard and mouse throughout;
+what travelled with the core is the typographic model, so the measure holds wherever it
+is drawn. The article is drawn in native text rather than in a WebView, because reading
+the web through a browser engine is the thing this program exists to stop doing. The wall
+that refused most of the web on Android, OCSP revocation checks after Let's Encrypt
+stopped publishing responders, fell with `rustls-platform-verifier` 0.7.1, so trust stayed
+with the operating system. Google Play comes next (#48). TalkBack should read the native
+text, but that has not been tested yet.
 
 ### macOS and Windows
 
@@ -557,3 +549,18 @@ Recorded so that nobody rediscovers them in six months.
   is a copy and how old it is; Reload (`Ctrl+R`) fetches it as it is now;
   "forget everything" deletes the copies. This is a cache, not the archive
   (#8): the archive keeps pages for good.
+- **Kept out on purpose.** None of these is to be built, however good the case for it
+  sounds:
+  - **Pull-to-refresh.** An article does not change while it is read, and Reload is
+    there; on a list it is the lever described under Subscriptions.
+  - **Streaks, points and reading statistics.** The aim would move from the text to the
+    number.
+  - **A countdown of the time left in an article.** Hurry is when a screen loses most
+    to paper.
+  - **One word at a time (RSVP).** Going back over a line is part of understanding it.
+  - **Bionic Reading.** We found no peer-reviewed evidence that it helps.
+  - **Fonts said to help memory.** Sans Forgetica did not hold up when the experiments
+    were repeated.
+  - **A dark theme by default.** Dark text on a light page did better in proofreading
+    experiments. Dark stays one choice away.
+  - **Lectures.** No message tells the reader how to spend their time.
