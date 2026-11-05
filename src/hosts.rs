@@ -32,7 +32,7 @@
 //! это сотни запросов, а прочтут, может быть, одну главу. Зато у каждой
 //! порции своё место в истории, своё место чтения и своя недельная копия.
 
-use dom_query::Document;
+use dom_query::{Document, NodeRef};
 use url::Url;
 
 pub mod discourse;
@@ -427,6 +427,13 @@ pub fn without_wiki_edits(doc: &Document) {
     if wiki {
         doc.select(".mw-editsection").remove();
     }
+}
+
+/// Исходник формулы MediaWiki: Parsoid кладёт его в `data-mw` у `<math>`,
+/// а в самом MathML, если картинки нет, его может и не быть (#16).
+pub fn wiki_formula(math: &NodeRef) -> Option<String> {
+    let extension = crate::json::parse(&math.attr("data-mw")?)?;
+    Some(extension.get("body")?.text("extsrc")?.to_owned())
 }
 
 /// Снимок ли это Wayback, и если да — чей и от какого дня. Строка над

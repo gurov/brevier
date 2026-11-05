@@ -262,5 +262,5 @@ but never replaced.
 
 Contributions are licensed as the project is: MIT OR Apache-2.0, at the user's option. The
 sign-off on each commit (see above) records where the contribution came from; no separate
-agreement is asked for. The bundled fonts are under the SIL Open Font License, and `assets/fonts/OFL-NotoSans.txt` must
-travel with any distribution.
+agreement is asked for. The bundled fonts are under the SIL Open Font License, and `assets/fonts/OFL-NotoSans.txt` and
+`assets/fonts/OFL-NotoSansMath.txt` must travel with any distribution.

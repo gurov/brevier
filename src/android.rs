@@ -210,6 +210,7 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
     page: JString<'caller>,
     width: i32,
     paper: i32,
+    ink: i32,
     font_size: f32,
     natural: bool,
 ) -> JByteArray<'caller> {
@@ -219,6 +220,7 @@ pub extern "system" fn Java_io_github_gurov_brevier_Core_image<'caller>(
         let look = Look {
             width: width.max(1) as u32,
             paper: [(paper >> 16) as u8, (paper >> 8) as u8, paper as u8],
+            ink: [(ink >> 16) as u8, (ink >> 8) as u8, ink as u8],
             font_size,
             fit: if natural { Fit::Natural } else { Fit::Column },
             // Телефон считает в пикселях экрана сразу.
@@ -927,7 +929,7 @@ fn gather_pictures(address: &str) {
             .iter()
             .filter_map(|link| match media::resolve(&document.address, link)? {
                 Source::Web(url) => core.blobs.get(&url).map(|bytes| (url, bytes)),
-                Source::File(_) => None,
+                Source::File(_) | Source::Formula(_) => None,
             })
             .collect();
         (document, held)
@@ -1393,7 +1395,7 @@ fn keep_picture(source: &str, dir: &str) -> String {
     let source = source_of(source);
     let held = match &source {
         Source::Web(url) => core().blobs.get(url),
-        Source::File(_) => None,
+        Source::File(_) | Source::Formula(_) => None,
     };
     let kept = save::picture(&source, held, UserAgent::Honest).and_then(|bytes| {
         let name = save::picture_name(&source, &bytes);
@@ -1426,6 +1428,8 @@ fn keep_picture(source: &str, dir: &str) -> String {
 fn source_of(source: &str) -> Source {
     if source.starts_with("http://") || source.starts_with("https://") {
         Source::Web(source.to_owned())
+    } else if source.starts_with(crate::math::DRAWN) {
+        Source::Formula(source.to_owned())
     } else {
         Source::File(PathBuf::from(source))
     }
@@ -1439,7 +1443,7 @@ fn image(source: &str, page: &str, look: Look) -> Vec<u8> {
     let page = address::parse(page).ok();
     let cached = match &source {
         Source::Web(url) => core().blobs.get(url),
-        Source::File(_) => None,
+        Source::File(_) | Source::Formula(_) => None,
     };
     // Нет в памяти — недельная копия на диске, затем архив; их тоже в память.
     let disk = Cache::open();
@@ -1459,7 +1463,7 @@ fn image(source: &str, page: &str, look: Look) -> Vec<u8> {
                 core().blobs.put(url.clone(), bytes.clone());
                 bytes
             }),
-        Source::File(_) => None,
+        Source::File(_) | Source::Formula(_) => None,
     });
     if let (Some(page), Some(bytes), Source::Web(url)) = (&page, &cached, &source)
         && !from_archive
@@ -1484,9 +1488,10 @@ fn image(source: &str, page: &str, look: Look) -> Vec<u8> {
     match decoded {
         Ok(raster) => {
             let mut out = raster.rgba;
-            out.reserve_exact(9);
+            out.reserve_exact(13);
             out.extend_from_slice(&raster.width.to_be_bytes());
             out.extend_from_slice(&raster.height.to_be_bytes());
+            out.extend_from_slice(&raster.depth.to_be_bytes());
             out.push(0);
             out
         }

@@ -223,6 +223,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // Первым: остальные проходы должны видеть статью на её месте.
     unstream(&doc);
     deicon(&doc);
+    formulas(&doc);
     keep_lang(&doc);
     keep_verse_class(&doc);
     unglue(&doc);
@@ -1548,6 +1549,83 @@ fn shot_key(node: &NodeRef, base: Option<&Url>) -> Option<String> {
 fn head_key(node: &NodeRef) -> Option<String> {
     let text = squeeze(&node.text());
     (!text.is_empty()).then_some(text)
+}
+
+/// Формула — один раз и такой, какой её задумал автор (#16).
+///
+/// В разметке она лежит сразу в нескольких видах, а извлечение читает всё
+/// как текст: «a² + b²» выходило «a2+b2», дробь ½ — числом «12», и рядом тот
+/// же исходник ещё раз. Что с ней делать, решает `math`: текстом или рисунком.
+///
+/// - MathML, спрятанный рядом с картинкой (Википедия), заменяет её: так
+///   без запроса на формулу, и в тёмной теме нет светлых прямоугольников.
+///   Рисовать нечем — остаётся картинка, копия для диктора уходит.
+/// - Спрятанный без картинки — копия чего-то видимого: просто уходит.
+/// - KaTeX рядом с MathML кладёт свою вёрстку на `span` — заменяем обе.
+/// - Ни нарисовать, ни написать — исходник кодом; нет и его — не трогаем.
+///
+/// До снимка `source`: сверка абзацев в `restore` ждёт тот же текст.
+fn formulas(doc: &Document) {
+    for math in doc.select("math").nodes() {
+        let hidden = math.parent().filter(is_hidden);
+        let beside = hidden
+            .as_ref()
+            .and_then(NodeRef::parent)
+            .filter(|up| dom_query::Selection::from(*up).select("img").exists());
+        if hidden.is_some() && beside.is_none() {
+            hidden.iter().for_each(NodeRef::remove_from_parent);
+            continue;
+        }
+        let source = formula_source(math);
+        let written = crate::math::spelled(math).or_else(|| {
+            crate::math::drawn(math).map(|address| {
+                let alt = source.as_deref().unwrap_or_default();
+                format!(r#"<img src="{address}" alt="{}">"#, escape(alt))
+            })
+        });
+        let written = written.or_else(|| {
+            let code = source.as_ref().filter(|_| beside.is_none());
+            code.map(|code| format!("<code>{}</code>", escape(code)))
+        });
+        let Some(written) = written else {
+            hidden.iter().for_each(NodeRef::remove_from_parent);
+            continue;
+        };
+        let written = if math.attr("display").as_deref() == Some("block") {
+            format!("<br>{written}<br>")
+        } else {
+            written
+        };
+        let katex = math.ancestors_it(None).find(|up| up.has_class("katex"));
+        beside
+            .or(katex)
+            .as_ref()
+            .unwrap_or(math)
+            .replace_with_html(written);
+    }
+}
+
+fn is_hidden(node: &NodeRef) -> bool {
+    node.attr("style").is_some_and(|style| {
+        style
+            .split(';')
+            .filter_map(|rule| rule.split_once(':'))
+            .any(|(name, value)| name.trim() == "display" && value.trim() == "none")
+    })
+}
+
+fn formula_source(math: &NodeRef) -> Option<String> {
+    let annotation =
+        dom_query::Selection::from(*math).select("annotation[encoding=\"application/x-tex\"]");
+    let source = if annotation.exists() {
+        annotation.text().to_string()
+    } else {
+        math.attr("alttext")
+            .map(|text| text.to_string())
+            .or_else(|| crate::hosts::wiki_formula(math))?
+    };
+    let source = squeeze(&source);
+    (!source.is_empty()).then_some(source)
 }
 
 /// Где ленивая картинка держит адрес, пока скрипт не переставит его в `src`.
@@ -3938,6 +4016,47 @@ mod tests {
         );
     }
 
+    /// KaTeX: MathML с исходником и рядом та же формула вёрсткой на `span`.
+    const KATEX: &str = r#"<span class="katex"><span class="katex-mathml"><math><semantics><mrow><msup><mi>a</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">a^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="mord">a</span><span class="mord mtight">2</span></span></span>"#;
+
+    fn with_formula(formula: &str) -> String {
+        let html = page(&format!("Правило гласит: {formula} и только так."));
+        extract(&html, "https://example.org/wiki/Arrow")
+            .unwrap()
+            .content_html
+            .to_string()
+    }
+
+    #[test]
+    fn a_katex_formula_reads_once_as_text() {
+        let html = with_formula(KATEX);
+        assert!(html.contains("<em>a</em><sup>2</sup>"));
+        assert!(!html.contains("a^2"));
+        assert!(!html.contains("katex"));
+        assert_eq!(html.matches("Правило гласит").count(), 1);
+    }
+
+    /// Parsoid: ни картинки, ни `annotation`, исходник только в `data-mw`.
+    #[test]
+    fn a_mediawiki_formula_keeps_its_source_on_the_drawing() {
+        let html = with_formula(
+            r#"<math data-mw='{"name":"math","attrs":{},"body":{"extsrc":"\\frac{1}{2}"}}'><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"#,
+        );
+        assert!(html.contains(crate::math::DRAWN));
+        assert!(html.contains(r"\frac{1}{2}"));
+    }
+
+    /// LaTeXML (arXiv): дробь рисуется, текстом она слиплась бы в «12».
+    #[test]
+    fn a_fraction_is_drawn_not_flattened() {
+        let html = with_formula(
+            r#"<math alttext="\frac{1}{2}"><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"#,
+        );
+        assert!(html.contains(crate::math::DRAWN));
+        assert!(!html.contains("<math"));
+        assert!(!html.contains("12"));
+    }
+
     /// Класс статьи arXiv похож на подпись, а вся статья подписью не бывает.
     #[test]
     fn an_article_with_a_byline_class_is_not_a_byline() {
@@ -3949,6 +4068,54 @@ mod tests {
         );
         let article = extract(&html, "https://example.org/wiki/Arrow").unwrap();
         assert!(article.content_html.contains("<em>d</em><sub>k</sub>"));
+    }
+
+    #[test]
+    fn a_block_formula_stands_on_its_own_line() {
+        let html = with_formula(r#"<math display="block"><mi>a</mi><mo>=</mo><mi>b</mi></math>"#);
+        assert!(html.contains("<br") && html.contains("<em>a</em> = <em>b</em>"));
+    }
+
+    #[test]
+    fn what_cannot_be_written_or_drawn_is_shown_as_its_source() {
+        let html = with_formula(
+            r#"<math alttext="a&lt;b"><menclose notation="box"><mi>a</mi></menclose></math>"#,
+        );
+        assert!(html.contains("<code>a&lt;b</code>"));
+    }
+
+    /// Википедия: MathML — для диктора, картинка — глазам. Рисуем сами,
+    /// и запрос за картинкой уходит вместе с ней.
+    #[test]
+    fn hidden_mathml_replaces_the_picture_beside_it() {
+        let html = with_formula(
+            r#"<span class="mwe-math-element"><span class="mwe-math-mathml-a11y" style="display: none;"><math alttext="{\displaystyle x^{2}}"><semantics><msup><mi>x</mi><mn>2</mn></msup><annotation encoding="application/x-tex">{\displaystyle x^{2}}</annotation></semantics></math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/220de5" class="mwe-math-fallback-image-inline" alt="{\displaystyle x^{2}}"></span>"#,
+        );
+        assert!(html.contains("<em>x</em><sup>2</sup>"));
+        assert!(!html.contains("media/math/render"));
+        assert!(!html.contains("displaystyle"));
+    }
+
+    /// Нарисовать нечем: картинка Википедии лучше исходника кодом.
+    #[test]
+    fn hidden_mathml_leaves_a_picture_it_cannot_better() {
+        let html = with_formula(
+            r#"<span class="mwe-math-element"><span style="display: none;"><math><menclose notation="box"><mi>x</mi></menclose></math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/220de5" alt="x"></span>"#,
+        );
+        assert!(html.contains("media/math/render"));
+        assert!(!html.contains("<math"));
+    }
+
+    #[test]
+    fn hidden_mathml_with_nothing_beside_it_is_only_a_copy() {
+        let html = with_formula(r#"<span style="display:none"><math><mi>y</mi></math></span>"#);
+        assert!(!html.contains("<em>y</em>"));
+    }
+
+    #[test]
+    fn a_formula_with_no_source_and_no_way_to_draw_it_is_left_alone() {
+        let html = with_formula(r#"<math><menclose notation="box"><mi>y</mi></menclose></math>"#);
+        assert!(html.contains("<math"));
     }
 
     /// `Readability` снимает спрятанное, а на странице оно осталось: ключи

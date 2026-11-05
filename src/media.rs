@@ -56,6 +56,9 @@ pub struct Look {
     pub width: u32,
     /// Цвет бумаги под прозрачным; см. [`flatten`].
     pub paper: [u8; 3],
+    /// Цвет своей формулы (`Source::Formula`): это текст, а не иллюстрация,
+    /// и в тёмной теме она светлая на тёмном. Чужим картинкам не указ.
+    pub ink: [u8; 3],
     /// Кегль текста в точках. В svg размеры бывают в `em` и `ex` — MathJax
     /// именно так и печатает формулы, — и считаться они обязаны от текста,
     /// рядом с которым картинка стоит.
@@ -91,6 +94,9 @@ pub struct Raster {
 pub enum Source {
     Web(String),
     File(PathBuf),
+    /// Формула, нарисованная своими силами (`math::drawn`): адрес и есть
+    /// байты, в сеть за ней не ходят.
+    Formula(String),
 }
 
 impl Source {
@@ -99,6 +105,7 @@ impl Source {
         match self {
             Source::Web(url) => url.clone(),
             Source::File(path) => path.display().to_string(),
+            Source::Formula(address) => address.clone(),
         }
     }
 }
@@ -126,6 +133,9 @@ pub fn resolve(base: &Address, src: &str) -> Option<Source> {
     }
     if src.starts_with("http://") || src.starts_with("https://") {
         return Some(Source::Web(src.to_owned()));
+    }
+    if src.starts_with(crate::math::DRAWN) {
+        return Some(Source::Formula(src.to_owned()));
     }
     // Схема есть, но не наша: data:, blob:, javascript:.
     if has_scheme(src) {
@@ -293,6 +303,9 @@ pub fn grab(source: &Source, ua: UserAgent) -> Result<(Vec<u8>, Option<String>),
             Ok((blob.bytes, Some(blob.mime)))
         }
         Source::File(path) => Ok((std::fs::read(path).map_err(Error::Convert)?, None)),
+        Source::Formula(address) => crate::math::picture(address)
+            .map(|bytes| (bytes, Some("image/svg+xml".to_owned())))
+            .ok_or_else(|| Error::Media("the formula is damaged".to_owned())),
     }
 }
 
@@ -418,6 +431,8 @@ fn vector(bytes: &[u8], look: Look) -> Result<Raster, Error> {
     if crate::nesting::xml_too_deep(&String::from_utf8_lossy(bytes)) {
         return Err(Error::Media("the image is nested too deeply".to_owned()));
     }
+    let tinted = crate::math::tinted(bytes, look.ink);
+    let bytes = tinted.as_deref().unwrap_or(bytes);
     let options = usvg::Options {
         fontdb: fonts(),
         // Кегль страницы: от него считаются `em` и `ex`, а формулы MathJax
@@ -633,6 +648,7 @@ mod tests {
         Look {
             width,
             paper: PAPER,
+            ink: [0, 0, 0],
             font_size: 22.0,
             fit,
             density: 1.0,

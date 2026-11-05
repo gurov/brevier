@@ -41,6 +41,7 @@ install -Dm644 "$here/io.github.gurov.brevier.metainfo.xml" \
 # Текст OFL обязан ехать с дистрибутивом: гарнитуры вшиты в бинарник,
 # и это условие их лицензии, отдельное от нашей MIT+Apache на код.
 install -Dm644 "$here/OFL-NotoSans.txt" "$docs/OFL-NotoSans.txt"
+install -Dm644 "$here/OFL-NotoSansMath.txt" "$docs/OFL-NotoSansMath.txt"
 install -Dm644 "$here/LICENSE-MIT"      "$docs/LICENSE-MIT"
 install -Dm644 "$here/LICENSE-APACHE"   "$docs/LICENSE-APACHE"
 

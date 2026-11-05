@@ -27,6 +27,7 @@ install -m644 packaging/io.github.gurov.brevier.desktop      "$stage/"
 install -m644 packaging/io.github.gurov.brevier.metainfo.xml "$stage/"
 install -m644 assets/brevier.svg          "$stage/brevier.svg"
 install -m644 assets/fonts/OFL-NotoSans.txt "$stage/OFL-NotoSans.txt"
+install -m644 assets/fonts/OFL-NotoSansMath.txt "$stage/OFL-NotoSansMath.txt"
 install -m644 LICENSE-MIT LICENSE-APACHE  "$stage/"
 
 tar -C "$out" -czf "$out/$name.tar.gz" "$name"

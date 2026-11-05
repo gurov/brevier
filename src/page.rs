@@ -678,18 +678,9 @@ pub fn anchor_in(address: &Address) -> Option<String> {
 /// и читателю эта обёртка не нужна. Им формула показывается, пока картинки
 /// нет.
 pub fn formula(alt: &str) -> String {
-    let text = alt.trim();
-    let inner = text
-        .strip_prefix('{')
-        .and_then(|text| text.strip_suffix('}'))
-        .map(|text| text.trim())
-        .and_then(|text| text.strip_prefix("\\displaystyle").or(Some(text)))
-        .unwrap_or(text);
-    let inner = inner.trim();
-    if inner.is_empty() {
-        "formula".to_owned()
-    } else {
-        inner.to_owned()
+    match crate::math::bare(alt) {
+        "" => "formula".to_owned(),
+        inner => inner.to_owned(),
     }
 }
 
@@ -1215,6 +1206,9 @@ impl Writer<'_> {
                     // формулы: википедия печатает их картинками MathJax.
                     let inline = !stands_alone(child);
                     match media::resolve(self.base, &image.url) {
+                        // Формула своим абзацем — всё равно формула: ростом
+                        // с текст, без рамки и подписи.
+                        Some(source @ Source::Formula(_)) => self.image(source, alt, true),
                         Some(source) => self.image(source, alt, inline),
                         // Чего сами не достанем (`data:`, `blob:`) — оставляем
                         // строкой: честнее пустой рамки.
@@ -2247,6 +2241,19 @@ mod tests {
         assert_eq!(raised, ["2", "6"]);
         assert!(page.text.contains("H2O"));
         assert_eq!(page.faults(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_drawn_formula_stays_in_the_line_even_alone_in_its_paragraph() {
+        let page = Page::of(&doc(&format!("![x]({}AAAA)", crate::math::DRAWN)));
+        assert!(matches!(
+            &page.blocks[0].block,
+            Block::Image {
+                source: Source::Formula(_),
+                inline: true,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -1548,7 +1548,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             zoom_seen: ZOOM_NORMAL,
             type_seen: Type::USUAL,
             density_seen: 1,
-            paper_seen: picture_paper(Theme::default()),
+            paper_seen: rgb(colors(Theme::default()).paper),
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: true,
@@ -2696,7 +2696,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             zoom_seen: ZOOM_NORMAL,
             type_seen: Type::USUAL,
             density_seen: 1,
-            paper_seen: picture_paper(Theme::default()),
+            paper_seen: rgb(colors(Theme::default()).paper),
             pages: HashMap::new(),
             blobs: Blobs::default(),
             settings: false,
@@ -3274,7 +3274,7 @@ fn gather_pictures(state: &Rc<RefCell<State>>, id: u64) {
             .iter()
             .filter_map(|link| match media::resolve(&document.address, link)? {
                 Source::Web(url) => tab.blobs.get(&url).map(|bytes| (url, bytes)),
-                Source::File(_) => None,
+                Source::File(_) | Source::Formula(_) => None,
             })
             .collect();
         Some((document, held))
@@ -4010,7 +4010,7 @@ fn show_document(
     );
     let seen = current_zoom(&borrowed);
     let typography = borrowed.typography;
-    let paper = picture_paper(borrowed.theme());
+    let paper = rgb(colors(borrowed.theme()).paper);
     // Прогресс чтения (#19) — у статьи, не у списка ссылок и не у своих
     // страниц. Записанное о ней поднимаем сразу: доли на полке видны с порога.
     let readable = document.kind == brevier::Kind::Article
@@ -4077,7 +4077,7 @@ fn show_document(
         place_shot(ui, state, id, shot, None);
         // Именно в эту вкладку, а не в открытую: пока страница грузилась,
         // читатель мог уйти смотреть другую.
-        if eager {
+        if eager || matches!(shot.source, Source::Formula(_)) {
             load_shot(ui, state, id, shot);
         }
     }
@@ -4778,7 +4778,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
         let mut borrowed = state.borrow_mut();
         let seen = current_zoom(&borrowed);
         let typography = borrowed.typography;
-        let paper = picture_paper(borrowed.theme());
+        let paper = rgb(colors(borrowed.theme()).paper);
         if let Some(tab) = borrowed.find(id) {
             tab.links = page.links;
             tab.focus = None;
@@ -4802,7 +4802,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
     let eager = state.borrow().images;
     for shot in &page.shots {
         place_shot(ui, state, id, shot, None);
-        if eager {
+        if eager || matches!(shot.source, Source::Formula(_)) {
             load_shot(ui, state, id, shot);
         }
     }
@@ -4834,7 +4834,7 @@ fn rezoom_current(ui: &Ui, state: &Rc<RefCell<State>>) {
                 && (tab.zoom_seen != current_zoom(&borrowed)
                     || tab.type_seen != borrowed.typography
                     || tab.density_seen != density(ui)
-                    || tab.paper_seen != picture_paper(borrowed.theme()))
+                    || tab.paper_seen != rgb(colors(borrowed.theme()).paper))
         })
     };
     if stale {
@@ -5556,7 +5556,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
     let mut borrowed = state.borrow_mut();
     let seen = current_zoom(&borrowed);
     let typography = borrowed.typography;
-    let paper = picture_paper(borrowed.theme());
+    let paper = rgb(colors(borrowed.theme()).paper);
     if let Some(tab) = borrowed.find(id) {
         tab.links = page.links;
         tab.focus = None;
@@ -6668,7 +6668,8 @@ fn place_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, trouble
     // решить, чем её показывать до картинки. Исходник `{\displaystyle b}`
     // читается плохо, но лучше пустого места посреди фразы.
     if let Slot::Canvas(canvas, _) = &shot.slot {
-        let waiting = trouble.is_some() || !state.borrow().images;
+        let drawn = matches!(shot.source, Source::Formula(_));
+        let waiting = trouble.is_some() || !(state.borrow().images || drawn);
         let layout = waiting.then(|| {
             let view = view_of(state, id);
             let layout = match &view {
@@ -6785,7 +6786,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
         // Файловые картинки не кэшируем: диск и так рядом, тянуть нечего.
         let cached = match &shot.source {
             Source::Web(url) => tab.blobs.get(url),
-            Source::File(_) => None,
+            Source::File(_) | Source::Formula(_) => None,
         };
         (tab.generation, cached)
     };
@@ -6812,9 +6813,16 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     }
 
     let source = shot.source.clone();
+    // Своя формула — текст, а не иллюстрация: цветом текста на его бумаге.
+    let theme = state.borrow().theme();
+    let (paper, ink) = match source {
+        Source::Formula(_) => (rgb(colors(theme).paper), rgb(colors(theme).ink)),
+        _ => (picture_paper(theme), [0, 0, 0]),
+    };
     let look = media::Look {
         width: measure_px().max(1) as u32,
-        paper: picture_paper(state.borrow().theme()),
+        paper,
+        ink,
         font_size: text_px(),
         fit: if shot.inline {
             media::Fit::Natural
@@ -6842,7 +6850,7 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
                 let disk = brevier::cache::Cache::open();
                 let copy = match &source {
                     Source::Web(url) => disk.image(url),
-                    Source::File(_) => None,
+                    Source::File(_) | Source::Formula(_) => None,
                 };
                 let from_disk = copy.is_some();
                 let kept = match (&source, &page, copy.is_none()) {
@@ -7088,7 +7096,7 @@ fn ask_where_to_save_picture(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, sourc
             .borrow_mut()
             .find(id)
             .and_then(|tab| tab.blobs.get(url)),
-        Source::File(_) => None,
+        Source::File(_) | Source::Formula(_) => None,
     };
     let ui = ui.clone();
     let source = source.clone();
@@ -7846,6 +7854,7 @@ fn show_picture(ui: &Ui, state: &Rc<RefCell<State>>, path: &std::path::Path) {
     let look = media::Look {
         width: (width * 4 / 5).max(1) as u32,
         paper: picture_paper(state.borrow().theme()),
+        ink: [0, 0, 0],
         font_size: text_px(),
         fit: media::Fit::Column,
         density: density(ui) as f32,

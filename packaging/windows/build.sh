@@ -129,7 +129,7 @@ done
 # и каждой библиотеки — по пакету, из которого она взята.
 licenses="$stage/licenses"
 mkdir -p "$licenses"
-cp LICENSE-MIT LICENSE-APACHE assets/fonts/OFL-NotoSans.txt "$licenses/"
+cp LICENSE-MIT LICENSE-APACHE assets/fonts/OFL-NotoSans.txt assets/fonts/OFL-NotoSansMath.txt "$licenses/"
 owner() {
     if command -v pacman > /dev/null; then
         pacman -Qqo "$1" 2> /dev/null || true

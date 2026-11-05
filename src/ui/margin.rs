@@ -637,6 +637,7 @@ impl Margin {
         let look = media::Look {
             width: shown_w.max(1) as u32,
             paper: room.paper,
+            ink: [0, 0, 0],
             font_size: room.font_px,
             fit: media::Fit::Column,
             density: room.density,

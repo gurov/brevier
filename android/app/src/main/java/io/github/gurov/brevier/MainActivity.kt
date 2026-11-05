@@ -1333,7 +1333,7 @@ class MainActivity : Activity(), ArticleHost {
         App.work.execute {
             val bitmap = Core.holdingPicture {
                 val bytes = try {
-                    Core.image(path, "", width, paper, metrics().text, false)
+                    Core.image(path, "", width, paper, 0, metrics().text, false)
                 } catch (failure: Throwable) {
                     null
                 }

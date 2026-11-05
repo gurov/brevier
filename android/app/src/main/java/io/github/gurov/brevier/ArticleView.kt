@@ -320,6 +320,8 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         val spannable = view.text as Spannable
         for (span in spannable.getSpans(0, spannable.length, FormulaSpan::class.java)) {
             formulas += span to view
+            // Своя формула — часть текста: сети за ней нет, настройка картинок ей не указ.
+            if (eager || span.drawn) load(span, view)
         }
         proses += view
         column.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -920,13 +922,23 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         // посреди слоновой кости заметна, а схеме нужен только светлый фон.
         // Высокому контрасту — его белую (`palette::picture_paper`).
         paper = metrics.type.palette(theme.copy(dark = false)).paper and 0xffffff,
+        ink = 0,
         fontSize = metrics.text,
         natural = natural,
     )
 
-    private class Look(val width: Int, val paper: Int, val fontSize: Float, val natural: Boolean)
+    /** Своя формула — это текст: цветом текста на его бумаге, в тёмной теме тоже. */
+    private fun drawnLook() = Look(
+        width = columnWidth(),
+        paper = palette.paper and 0xffffff,
+        ink = palette.ink and 0xffffff,
+        fontSize = metrics.text,
+        natural = true,
+    )
 
-    private class Decoded(val bitmap: Bitmap?, val trouble: String?)
+    private class Look(val width: Int, val paper: Int, val ink: Int, val fontSize: Float, val natural: Boolean)
+
+    private class Decoded(val bitmap: Bitmap?, val trouble: String?, val depth: Int)
 
     private fun fetch(source: String, look: Look, done: (Decoded) -> Unit) {
         val shown = generation
@@ -935,23 +947,23 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         App.work.execute {
             val raster = Core.holdingPicture {
                 val bytes = try {
-                    Core.image(source, page, look.width, look.paper, look.fontSize, look.natural)
+                    Core.image(source, page, look.width, look.paper, look.ink, look.fontSize, look.natural)
                 } catch (failure: Throwable) {
                     null
                 }
                 Core.raster(bytes)
             }
-            val decoded = Decoded(raster.bitmap, raster.trouble)
+            val decoded = Decoded(raster.bitmap, raster.trouble, raster.depth)
             post { if (shown == generation) done(decoded) }
         }
     }
 
     private fun load(span: FormulaSpan, view: ProseView) {
-        if (span.busy) return
+        if (span.busy || span.ready) return
         span.busy = true
-        fetch(span.block.source, look(natural = true)) { decoded ->
+        fetch(span.block.source, if (span.drawn) drawnLook() else look(natural = true)) { decoded ->
             span.busy = false
-            decoded.bitmap?.let { span.picture(it, view) }
+            decoded.bitmap?.let { span.picture(it, decoded.depth, view) }
         }
     }
 
@@ -970,10 +982,16 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     /** Формула в строке: исходник, пока картинки нет; картинка ростом с текст. */
     inner class FormulaSpan(val block: Block.Image, private val fallback: String, private val ink: Int) : ReplacementSpan() {
         private var bitmap: Bitmap? = null
+        private var depth = 0
         var busy = false
+        val ready get() = bitmap != null
 
-        fun picture(bitmap: Bitmap, view: ProseView) {
+        /** Нарисована ядром (`math::drawn`), а не приехала из сети. */
+        val drawn get() = block.source.startsWith("data:")
+
+        fun picture(bitmap: Bitmap, depth: Int, view: ProseView) {
             this.bitmap = bitmap
+            this.depth = depth
             val text = view.text as? Spannable ?: return
             val start = text.getSpanStart(this)
             val end = text.getSpanEnd(this)
@@ -986,9 +1004,9 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             val picture = bitmap ?: return paint.measureText(fallback).toInt()
             if (fm != null) {
                 val own = paint.fontMetricsInt
-                val middle = -(paint.textSize * 0.3f).toInt()
-                val top = middle - picture.height / 2
-                val bottom = top + picture.height
+                // Сколько рядов под базовой линией, ядро знает (#14).
+                val top = depth - picture.height
+                val bottom = depth
                 fm.ascent = min(own.ascent, top)
                 fm.top = min(own.top, top)
                 fm.descent = max(own.descent, bottom)
@@ -1006,8 +1024,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 paint.color = was
                 return
             }
-            val middle = y - paint.textSize * 0.3f
-            canvas.drawBitmap(picture, x, middle - picture.height / 2f, null)
+            canvas.drawBitmap(picture, x, (y + depth - picture.height).toFloat(), null)
         }
     }
 
@@ -1271,7 +1288,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             }
             val holder = FrameLayout(context)
             holder.addView(image, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
-            val look = Look(inner, look(false).paper, metrics.text, natural = false)
+            val look = Look(inner, look(false).paper, 0, metrics.text, natural = false)
             fetch(path, look) { decoded ->
                 val bitmap = decoded.bitmap ?: return@fetch
                 // Как у картинки статьи: пиксели монитора — множителем кегля,

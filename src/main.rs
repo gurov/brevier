@@ -445,6 +445,7 @@ fn plain_url(arg: String) -> String {
 /// Печать с оглядкой на `| less`: если пейджер закрыли раньше, чем мы дописали,
 /// это не ошибка, а нормальный конец чтения.
 fn out(text: &str) -> ExitCode {
+    let text = brevier::math::exported(text);
     let mut stdout = io::stdout();
     match stdout
         .write_all(text.as_bytes())

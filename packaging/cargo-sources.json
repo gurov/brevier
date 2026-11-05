@@ -769,6 +769,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/formulary/formulary-0.3.0.crate",
+        "sha256": "e68d99a551c55caf338c86c3aac0acfb6b11eb6000fab237a12e7a80d9396bbc",
+        "dest": "cargo/vendor/formulary-0.3.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"e68d99a551c55caf338c86c3aac0acfb6b11eb6000fab237a12e7a80d9396bbc\", \"files\": {}}",
+        "dest": "cargo/vendor/formulary-0.3.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/fst/fst-0.4.7.crate",
         "sha256": "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a",
         "dest": "cargo/vendor/fst-0.4.7"
@@ -2186,6 +2199,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/read-fonts/read-fonts-0.43.3.crate",
+        "sha256": "005c8acf251756c478b0bf402885bfd88a1476020c4c7e6060edc1aa68da38ea",
+        "dest": "cargo/vendor/read-fonts-0.43.3"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"005c8acf251756c478b0bf402885bfd88a1476020c4c7e6060edc1aa68da38ea\", \"files\": {}}",
+        "dest": "cargo/vendor/read-fonts-0.43.3",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/redox_syscall/redox_syscall-0.5.18.crate",
         "sha256": "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d",
         "dest": "cargo/vendor/redox_syscall-0.5.18"
@@ -2623,6 +2649,19 @@
         "type": "inline",
         "contents": "{\"package\": \"819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68\", \"files\": {}}",
         "dest": "cargo/vendor/skrifa-0.44.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/skrifa/skrifa-0.46.2.crate",
+        "sha256": "d4febebda507fb889c545a37a135517769d1391941013561292897961d1887d6",
+        "dest": "cargo/vendor/skrifa-0.46.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"d4febebda507fb889c545a37a135517769d1391941013561292897961d1887d6\", \"files\": {}}",
+        "dest": "cargo/vendor/skrifa-0.46.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {

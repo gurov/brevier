@@ -96,7 +96,8 @@ pub fn write_with(
     ua: UserAgent,
 ) -> Result<Saved, Error> {
     if !is_zip(path) {
-        std::fs::write(path, document.markdown.as_bytes()).map_err(Error::Convert)?;
+        let text = crate::math::exported(&document.markdown);
+        std::fs::write(path, text.as_bytes()).map_err(Error::Convert)?;
         let images = beside(path, attached)?;
         return Ok(Saved {
             path: path.to_path_buf(),
@@ -256,11 +257,12 @@ fn gather(
     attached: &[Attached],
     ua: UserAgent,
 ) -> (String, Vec<(String, Vec<u8>)>, usize) {
-    let mut markdown = document.markdown.clone();
+    let exported = crate::math::exported(&document.markdown);
+    let mut markdown = exported.to_string();
     let mut images = Vec::new();
     let mut missed = 0;
 
-    for (number, url) in markdown::images(&document.markdown).iter().enumerate() {
+    for (number, url) in markdown::images(&exported).iter().enumerate() {
         if attached.iter().any(|picture| &picture.link == url) {
             continue;
         }
@@ -286,6 +288,9 @@ fn read(source: &Source, ua: UserAgent) -> Option<(Vec<u8>, String)> {
             .ok()
             .map(|blob| (blob.bytes, blob.mime)),
         Source::File(path) => std::fs::read(path).ok().map(|bytes| (bytes, String::new())),
+        Source::Formula(address) => {
+            crate::math::picture(address).map(|bytes| (bytes, "image/svg+xml".to_owned()))
+        }
     }
 }
 
@@ -380,6 +385,7 @@ pub fn picture_name(source: &Source, bytes: &[u8]) -> String {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
+        Source::Formula(_) => "formula.svg".to_owned(),
     };
     // Своё расширение — короткое слово после последней точки: `photo.php`,
     // `chart.jpg`. «v2.0-final» расширения не имеет, и имя остаётся целым.
@@ -439,7 +445,7 @@ pub fn picture_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
 }
 
 fn has_images(document: &Document) -> bool {
-    markdown::images(&document.markdown)
+    markdown::images(&crate::math::exported(&document.markdown))
         .iter()
         .any(|url| media::resolve(&document.address, url).is_some())
 }

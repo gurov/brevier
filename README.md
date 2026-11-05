@@ -278,8 +278,8 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   system's contrast setting (Linux, Android 14 and later, Windows).
 - **Zoom (67–300%) scales the whole layout**, so a line still holds about 65 characters.
   The window goes only as far as the column fits the screen; a shorter line makes room.
-- **Fonts are built in** — Noto Sans and Noto Sans Mono — so a page looks the same on every
-  system, unless you pick your system's serif or sans.
+- **Fonts are built in** — Noto Sans, Noto Sans Mono, and Noto Sans Math for formulas — so a
+  page looks the same on every system, unless you pick your system's serif or sans.
 - **Poems keep their lines and stanzas.**
 
 **Finding your way**
@@ -349,6 +349,12 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 - **Rust documentation reads whole.** docs.rs and the standard library's pages are read
   from rustdoc's own layout: signatures as highlighted code, every method and
   implementation, none of the buttons.
+- **Formulas are set on your own machine.** Wikipedia, arXiv and pages built with KaTeX carry
+  their maths as MathML, so Brevier reads it and asks no server for a picture. Letters, numbers
+  and indices stay text in your type, to be found and copied; a fraction, a root or a matrix is
+  drawn, in your ink on your paper. In the terminal and in a saved file a drawn formula is its
+  TeX source, `$\frac{1}{2}$`. A page that sets its formulas with a script shows what the author
+  typed. Everywhere else, 10<sup>6</sup> and H<sub>2</sub>O keep their raised and lowered figures.
 - **Tables of labels and values** — Wikipedia's infoboxes, MDN's summaries — keep their
   labels: each row becomes a line, **Developer:** The Rust Team.
 - **Repository folders can be listed:** end the address with a slash
@@ -548,5 +554,5 @@ in the [roadmap](ROADMAP.md) and in the issues labelled `roadmap`.
 
 MIT OR Apache-2.0, at your option.
 
-The bundled fonts are under the SIL Open Font License; `assets/fonts/OFL-NotoSans.txt`
-must travel with any copy you distribute.
+The bundled fonts are under the SIL Open Font License; `assets/fonts/OFL-NotoSans.txt` and
+`assets/fonts/OFL-NotoSansMath.txt` must travel with any copy you distribute.

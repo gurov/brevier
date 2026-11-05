@@ -37,6 +37,7 @@ pub mod intro;
 /// JSON в дерево — своим разбором, для JSON Feed.
 pub mod json;
 pub mod markdown;
+pub mod math;
 /// Картинки. За фичей `images`: корпусу M0 декодеры не нужны, а лишний
 /// код в бинарнике про безопасность — лишняя поверхность.
 #[cfg(feature = "images")]

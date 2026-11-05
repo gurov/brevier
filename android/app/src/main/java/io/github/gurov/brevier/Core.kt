@@ -28,10 +28,10 @@ object Core {
      * не смогла даже ответить (так ведёт себя arm64-ядро под трансляцией
      * на x86_64-эмуляторе): это отказ одной картинки, а не повод падать.
      */
-    external fun image(source: String, page: String, width: Int, paper: Int, fontSize: Float, natural: Boolean): ByteArray?
+    external fun image(source: String, page: String, width: Int, paper: Int, ink: Int, fontSize: Float, natural: Boolean): ByteArray?
 
     /** Картинка из ответа [image] — или почему её нет. */
-    class Raster(val bitmap: android.graphics.Bitmap?, val trouble: String?)
+    class Raster(val bitmap: android.graphics.Bitmap?, val trouble: String?, val depth: Int = 0)
 
     /**
      * Разобрать ответ [image]: последний байт — что это; `0` — RGBA с нулевого
@@ -46,15 +46,16 @@ object Core {
         if (bytes == null || bytes.isEmpty()) return Raster(null, "The load fell through")
         val size = bytes.size
         if (bytes[size - 1].toInt() != 0) return Raster(null, String(bytes, 0, size - 1))
-        if (size < 9) return Raster(null, "The load fell through")
-        val tail = java.nio.ByteBuffer.wrap(bytes, size - 9, 8)
+        if (size < 13) return Raster(null, "The load fell through")
+        val tail = java.nio.ByteBuffer.wrap(bytes, size - 13, 12)
         val w = tail.int
         val h = tail.int
-        if (w <= 0 || h <= 0 || w.toLong() * h * 4 > size - 9) return Raster(null, "The load fell through")
+        val depth = tail.int
+        if (w <= 0 || h <= 0 || w.toLong() * h * 4 > size - 13) return Raster(null, "The load fell through")
         return try {
             val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
             bitmap.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(bytes))
-            Raster(bitmap, null)
+            Raster(bitmap, null, depth)
         } catch (failure: Throwable) {
             Raster(null, "The image did not fit in memory")
         }

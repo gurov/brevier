@@ -69,6 +69,8 @@ modules:
       # гарнитуры, отдельное от нашей MIT+Apache на код.
       - install -Dm644 assets/fonts/OFL-NotoSans.txt
         /app/share/licenses/io.github.gurov.brevier/OFL-NotoSans.txt
+      - install -Dm644 assets/fonts/OFL-NotoSansMath.txt
+        /app/share/licenses/io.github.gurov.brevier/OFL-NotoSansMath.txt
       - install -Dm644 LICENSE-MIT /app/share/licenses/io.github.gurov.brevier/LICENSE-MIT
       - install -Dm644 LICENSE-APACHE /app/share/licenses/io.github.gurov.brevier/LICENSE-APACHE
     sources:
