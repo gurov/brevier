@@ -153,7 +153,7 @@ const RULES: &[Rule] = &[
         id: "text-lazy-images",
         stage: Stage::Text,
         cost: Cost::Deduct(4),
-        advice: "Give images a real `src`: an address parked in a `data-` attribute for a script to move never loads here.",
+        advice: "Give images a real `src`: an address parked in a `data-` attribute waits for a script to move it, and a client without one has to guess where it went.",
     },
     Rule {
         id: "text-image-headings",
@@ -507,8 +507,8 @@ fn text_findings(
     doc: &Document,
     findings: &mut Vec<Finding>,
 ) -> Option<String> {
-    // Ленивые картинки — про страницу, а не про наш обходной путь: адрес,
-    // спрятанный в `data-`, у любого клиента без скрипта не загрузится.
+    // Ленивые картинки — про страницу, а не про наш обходной путь: Brevier
+    // адрес из `data-` угадывает, но клиент без скрипта не обязан.
     if let Some(count) = lazy_images(doc) {
         let seen = if count == 1 {
             "one image carries its address in a `data-` attribute, not `src`".to_owned()

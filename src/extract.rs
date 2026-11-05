@@ -269,6 +269,9 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     // Копия — под сверку с извлечённым: `Readability` документ забирает себе
     // и чистит на месте, а сироты ищутся в исходном дереве (см. `restore`).
     let source = doc.clone();
+    // После копии: иначе `restore` принял бы за сирот картинки, которые
+    // `Readability` выбросила как дубли карточек (главная eldiario.es).
+    unlazy(&doc);
 
     let mut readability =
         Readability::with_document(doc, Some(url), Some(cfg)).map_err(|e| match e {
@@ -1534,6 +1537,40 @@ fn shot_key(node: &NodeRef, base: Option<&Url>) -> Option<String> {
 fn head_key(node: &NodeRef) -> Option<String> {
     let text = squeeze(&node.text());
     (!text.is_empty()).then_some(text)
+}
+
+/// Где ленивая картинка держит адрес, пока скрипт не переставит его в `src`.
+const LAZY_ADDRESS: [&str; 3] = ["data-src", "data-lazy-src", "data-original"];
+
+/// Тело SVG-заглушки короче этого, в знаках записи. Пустой `<svg>` занимает
+/// около ста: на 1120 сохранённых страницах самая длинная заглушка — 106.
+const PLACEHOLDER_SVG: usize = 256;
+
+/// Адрес ленивой картинки вместо крошечной SVG-заглушки (#63).
+///
+/// Заглушку GIF подменит и `dom_smoothie`, как Readability.js, а SVG в base64
+/// он пропускает нарочно: маленький SVG бывает настоящей картинкой. Поэтому
+/// признаков два: размер заглушки и адрес рядом. Без адреса маленький SVG
+/// остаётся картинкой, большой не трогаем и с адресом.
+///
+/// Заглушка в base64 и в процентной записи — одно и то же, и класс `lazy`
+/// не обязателен: на него `dom_smoothie` смотрит, а страницы ставят не всегда.
+/// `data-srcset` без `data-src` на сохранённых страницах не встретился,
+/// а `srcset` дальше никто не читает.
+fn unlazy(doc: &Document) {
+    for image in doc.select("img[src^=\"data:image/svg+xml\" i]").nodes() {
+        let placeholder = image.attr("src").is_some_and(|src| {
+            src.split_once(',')
+                .is_some_and(|(_, body)| body.len() < PLACEHOLDER_SVG)
+        });
+        let address = LAZY_ADDRESS
+            .iter()
+            .filter_map(|name| image.attr(name))
+            .find(|address| !address.trim().is_empty());
+        if let (true, Some(address)) = (placeholder, address) {
+            image.set_attr("src", address.trim());
+        }
+    }
 }
 
 /// Значок ссылки на сам заголовок — не текст заголовка.
@@ -3875,6 +3912,54 @@ mod tests {
                 .content_html
                 .contains("upload.example.org/commons/portrait.jpg")
         );
+    }
+
+    /// Заглушка Smush на WordPress (#63): пустой `<svg>` 1×1 в base64.
+    const SVG_PLACEHOLDER: &str = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==";
+
+    #[test]
+    fn a_tiny_svg_gives_way_to_the_lazy_address() {
+        let img = format!(
+            r#"<img class="lazyload" src="{SVG_PLACEHOLDER}" data-src="https://upload.example.org/commons/portrait.jpg?w=250">"#
+        );
+        let article = extract(&page(&img), "https://example.org/wiki/Arrow").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("upload.example.org/commons/portrait.jpg")
+        );
+        assert!(!article.content_html.contains("data:image/svg"));
+    }
+
+    /// Так заглушка выглядит на сохранённых страницах: процентной записью,
+    /// без класса `lazy` и с адресом от корня сайта.
+    #[test]
+    fn a_tiny_svg_in_percent_form_gives_way_too() {
+        let img = r#"<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 880 495'%3E%3C/svg%3E" data-lazy-src="/uploads/portrait.jpg">"#;
+        let article = extract(&page(img), "https://example.org/wiki/Arrow").unwrap();
+        assert!(
+            article
+                .content_html
+                .contains("https://example.org/uploads/portrait.jpg")
+        );
+        assert!(!article.content_html.contains("data:image/svg"));
+    }
+
+    #[test]
+    fn a_small_svg_with_no_lazy_address_stays() {
+        let img = format!(r#"<img src="{SVG_PLACEHOLDER}" alt="Схема голосования">"#);
+        let article = extract(&page(&img), "https://example.org/wiki/Arrow").unwrap();
+        assert!(article.content_html.contains("data:image/svg"));
+    }
+
+    #[test]
+    fn a_drawing_in_svg_keeps_its_place_beside_a_lazy_address() {
+        let drawing = "%3Cpath d='M0 0h9v9z'/%3E".repeat(20);
+        let img = format!(
+            r#"<img src="data:image/svg+xml,%3Csvg%3E{drawing}%3C/svg%3E" data-src="https://upload.example.org/commons/portrait.jpg">"#
+        );
+        let article = extract(&page(&img), "https://example.org/wiki/Arrow").unwrap();
+        assert!(article.content_html.contains("data:image/svg"));
     }
 
     /// Ссылка на абзац, внутри которого она же и лежит, — постоянная

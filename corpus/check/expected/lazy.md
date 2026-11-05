@@ -12,7 +12,7 @@ Not fetched — the HTML came from stdin, so access, redirects and content type 
 
 ## Text
 
-- **−4 · text-lazy-images** — 3 images carry their address in a `data-` attribute, not `src`. Give images a real `src`: an address parked in a `data-` attribute for a script to move never loads here.
+- **−4 · text-lazy-images** — 3 images carry their address in a `data-` attribute, not `src`. Give images a real `src`: an address parked in a `data-` attribute waits for a script to move it, and a client without one has to guess where it went.
 
 ## Structure
 
