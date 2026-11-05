@@ -1449,6 +1449,7 @@ fn convert(html: &str, notes: &HashMap<String, usize>) -> Result<String, Error> 
         .skip_tags(SKIP.to_vec())
         .add_handler(vec!["code"], code_handler)
         .add_handler(vec!["span"], span_handler)
+        .add_handler(vec!["sup", "sub"], script_handler)
         .add_handler(
             vec!["a"],
             move |handlers: &dyn Handlers, element: Element| match note_number(&element, &notes) {
@@ -1639,6 +1640,27 @@ fn code_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResu
     let language = language_from_attrs(&element).unwrap_or_default();
 
     Some(format!("\n\n{fence}{language}\n{code}\n{fence}\n\n").into())
+}
+
+/// Верхний и нижний индекс. Своего знака в markdown у них нет, а без них
+/// `10<sup>6</sup>` читалось как «106»: остаются сырым HTML, это обычный
+/// CommonMark, и `^` в тексте страниц значит то, что значил.
+///
+/// Метка сноски — уже метка, поднимать её второй раз незачем.
+fn script_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
+    let tag = element.tag;
+    let content = handlers.walk_children(element.node).content;
+    let text = content.trim();
+    if text.is_empty() || text.contains('\n') || text.starts_with("[^") {
+        return Some(content.into());
+    }
+    // Пробел на краю — между словами, а не в индексе: внутри тега он
+    // пропал бы, и `<sup>th </sup>of` склеилось бы.
+    let (before, after) = (
+        &content[..content.len() - content.trim_start().len()],
+        &content[content.trim_end().len()..],
+    );
+    Some(format!("{before}<{tag}>{text}</{tag}>{after}").into())
 }
 
 /// `<span>` с переводом строки внутри.
@@ -2320,6 +2342,31 @@ mod tests {
         // такая ширина не бывает — иначе в цитату уехала бы вся страница.
         let md = thread(&[(1, "Первый абзац."), (1, "Второй."), (1, "Третий.")]);
         assert_eq!(md, "Первый абзац.\n\nВторой.\n\nТретий.\n");
+    }
+
+    #[test]
+    fn scripts_survive_the_conversion() {
+        let md = from_html("<p>Вода H<sub>2</sub>O и 10<sup>6</sup> метров.</p>").unwrap();
+        assert!(
+            md.contains("H<sub>2</sub>O и 10<sup>6</sup> метров"),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn a_space_at_the_edge_of_a_script_stays_between_the_words() {
+        let md = from_html("<p>The 5<sup>th </sup>of May and H<sub> 2</sub>O.</p>").unwrap();
+        assert!(
+            md.contains("5<sup>th</sup> of May and H <sub>2</sub>O"),
+            "{md}"
+        );
+    }
+
+    /// Курсив перед индексом: htmd отбивал его пробелом, и `dₖ` распадалось.
+    #[test]
+    fn an_italic_letter_keeps_its_script() {
+        let md = from_html("<p>Размер <em>d</em><sub><em>k</em></sub> ключей.</p>").unwrap();
+        assert!(md.contains("*d*<sub>*k*</sub> ключей"), "{md}");
     }
 
     #[test]

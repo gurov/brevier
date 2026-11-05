@@ -103,6 +103,10 @@ pub enum Style {
     Alert,
     /// Метка сноски в тексте.
     NoteRef,
+    /// Верхний индекс: `10⁶`, степень в формуле.
+    Sup,
+    /// Нижний индекс: `H₂O`.
+    Sub,
     /// Сама сноска под статьёй.
     Note,
     /// Абзац прозы прямо за другим абзацем прозы (#59). Сам по себе ничего
@@ -139,6 +143,8 @@ impl Style {
             Style::Dim => "dim".to_owned(),
             Style::Alert => "alert".to_owned(),
             Style::NoteRef => "noteref".to_owned(),
+            Style::Sup => "sup".to_owned(),
+            Style::Sub => "sub".to_owned(),
             Style::Note => "note".to_owned(),
             Style::Continued => "continued".to_owned(),
         }
@@ -1154,7 +1160,11 @@ impl Writer<'_> {
     }
 
     fn inlines<'n>(&mut self, node: &'n AstNode<'n>, styles: &[Style]) {
+        // Индекс в markdown — сырым HTML: открывающий тег и закрывающий тут
+        // соседи, а не родитель текста.
+        let mut scripted = styles.to_vec();
         for child in node.children() {
+            let styles = scripted.as_slice();
             match &child.data.borrow().value {
                 NodeValue::Text(text) => match self.typeset {
                     // Проза: переносы и неразрывные пробелы. Заголовки мимо —
@@ -1246,6 +1256,15 @@ impl Writer<'_> {
                 NodeValue::HtmlInline(html) => {
                     for name in html_anchors(html) {
                         self.page.anchors.push((anchor(&name), self.chars));
+                    }
+                    match script_tag(html) {
+                        Some((style, true)) => scripted.push(style),
+                        Some((style, false)) => {
+                            if let Some(at) = scripted.iter().rposition(|on| *on == style) {
+                                scripted.remove(at);
+                            }
+                        }
+                        None => {}
                     }
                 }
                 _ => self.inlines(child, styles),
@@ -1352,6 +1371,21 @@ fn fill_cell<'n>(node: &'n AstNode<'n>, cell: &mut Cell, chars: &mut usize, styl
             NodeValue::SoftBreak | NodeValue::LineBreak => put(cell, chars, " ", styles),
             _ => fill_cell(child, cell, chars, styles),
         }
+    }
+}
+
+/// Тег индекса: какой стиль и открывает ли он. Страницы с разметкой пишут
+/// их и с атрибутами, а README — как угодно.
+fn script_tag(html: &str) -> Option<(Style, bool)> {
+    let tag = html.trim().strip_prefix('<')?.strip_suffix('>')?;
+    let (name, opens) = match tag.strip_prefix('/') {
+        Some(name) => (name.trim(), false),
+        None => (tag.split_whitespace().next()?, true),
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "sup" => Some((Style::Sup, opens)),
+        "sub" => Some((Style::Sub, opens)),
+        _ => None,
     }
 }
 
@@ -2187,6 +2221,32 @@ mod tests {
         let page = Page::message("Не открылось", "Сервер ответил 403.");
         assert_eq!(page.text, "Не открылось\n\nСервер ответил 403.");
         assert_eq!(styles_at(&page, 0), vec!["h2"]);
+    }
+
+    #[test]
+    fn scripts_are_styled_and_carry_their_text() {
+        let page = Page::of(&doc(
+            "Вода H<sub>2</sub>O и 10<sup class=\"x\">6</sup> метров.",
+        ));
+        let raised: Vec<String> = page
+            .runs
+            .iter()
+            .filter(|run| {
+                run.styles
+                    .iter()
+                    .any(|style| matches!(style, Style::Sup | Style::Sub))
+            })
+            .map(|run| {
+                page.text
+                    .chars()
+                    .skip(run.start)
+                    .take(run.end - run.start)
+                    .collect()
+            })
+            .collect();
+        assert_eq!(raised, ["2", "6"]);
+        assert!(page.text.contains("H2O"));
+        assert_eq!(page.faults(), Vec::<String>::new());
     }
 
     #[test]

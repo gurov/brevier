@@ -102,9 +102,13 @@ private fun look(styles: List<String>, m: Metrics, palette: Palette): Look {
                 size = type.alertSize
                 tracking = type.alertTracking
             }
-            "noteref" -> {
+            "noteref", "sup" -> {
                 size = type.noterefSize
                 rise = type.noterefRise
+            }
+            "sub" -> {
+                size = type.noterefSize
+                rise = -type.subDrop
             }
             "note" -> size = type.noteSize
         }

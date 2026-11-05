@@ -32,6 +32,7 @@ class Typography(json: JSONObject) {
     val noteSize = json.getDouble("noteSize").toFloat()
     val noterefSize = json.getDouble("noterefSize").toFloat()
     val noterefRise = json.getDouble("noterefRise").toFloat()
+    val subDrop = json.getDouble("subDrop").toFloat()
     val alertSize = json.getDouble("alertSize").toFloat()
     val alertTracking = json.getDouble("alertTracking").toFloat()
     val ruleWidth = json.getDouble("ruleWidth").toFloat()

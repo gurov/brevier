@@ -96,7 +96,7 @@ SQLite does not compete with client/server databases. SQLite competes with [fope
 
 - **Very large datasets**
 
-  An SQLite database is limited in size to 281 terabytes (248 bytes, 256 tibibytes). And even if it could handle larger databases, SQLite stores the entire database in a single disk file and many filesystems limit the maximum size of files to something less than this. So if you are contemplating databases of this magnitude, you would do well to consider using a client/server database engine that spreads its content across multiple disk files, and perhaps across multiple volumes.
+  An SQLite database is limited in size to 281 terabytes (2<sup>48</sup> bytes, 256 tibibytes). And even if it could handle larger databases, SQLite stores the entire database in a single disk file and many filesystems limit the maximum size of files to something less than this. So if you are contemplating databases of this magnitude, you would do well to consider using a client/server database engine that spreads its content across multiple disk files, and perhaps across multiple volumes.
 
 - **High Concurrency**
 

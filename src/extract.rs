@@ -1170,8 +1170,19 @@ const BYLINE: &str = "[rel=\"author\"],[itemprop*=\"author\" i],[class*=\"author
 /// настоящая — `<b>по</b><i>лу</i>слово`, ссылка внутри слова, дробь
 /// из `<sup>` и `<sub>`. Подпись же тем и отличается, что склеены в ней
 /// разные сведения: имя, дата, время чтения.
+///
+/// Статья подписью не бывает, а класс у неё может быть похожим: у arXiv —
+/// `ltx_authors_1line`, и пробел вставал и в тексте, и в формулах, между `d`
+/// и её индексом. Отличают её оба признака разом: абзацы бывают и в подписи
+/// (имя и должность у thedailybeast), и длинной она бывает (виджет Tickaroo).
 fn unglue(doc: &Document) {
+    const BYLINE_CHARS: usize = 200;
+
     for byline in doc.select(BYLINE).nodes() {
+        let paragraphs = dom_query::Selection::from(*byline).select("p").exists();
+        if paragraphs && byline.text().chars().count() >= BYLINE_CHARS {
+            continue;
+        }
         for node in byline.descendants() {
             if !node.is_element() {
                 continue;
@@ -1822,12 +1833,25 @@ fn lost_shot<'a>(image: &NodeRef<'a>) -> NodeRef<'a> {
 }
 
 fn para_key(node: &NodeRef) -> Option<(String, usize)> {
-    let text = squeeze(&node.text());
+    let text = squeeze(&shown_text(node));
     let words = text.split_whitespace().count();
     if words < KEY_WORDS {
         return None;
     }
     Some((text.chars().take(KEY_LEN).collect(), words))
+}
+
+/// Текст абзаца без того, что снимет `Readability`. Иначе один абзац дал бы
+/// два ключа, на странице и в статье, и вернулся бы второй копией.
+fn shown_text(node: &NodeRef) -> String {
+    const HIDDEN: &str =
+        "[aria-hidden=\"true\"], [hidden], [style*=\"display:none\"], [style*=\"display: none\"]";
+    if !dom_query::Selection::from(*node).select(HIDDEN).exists() {
+        return node.text().to_string();
+    }
+    let copy = Document::from(node.html().to_string());
+    copy.select(HIDDEN).remove();
+    copy.select("body").text().to_string()
 }
 
 /// Стоит ли возвращать выпавший абзац.
@@ -3912,6 +3936,44 @@ mod tests {
                 .content_html
                 .contains("upload.example.org/commons/portrait.jpg")
         );
+    }
+
+    /// Класс статьи arXiv похож на подпись, а вся статья подписью не бывает.
+    #[test]
+    fn an_article_with_a_byline_class_is_not_a_byline() {
+        let text = TEXT;
+        let html = format!(
+            "<html><body><article class=\"ltx_authors_1line\"><h1>Эрроу</h1><p>{text}</p>\
+             <p>Размер <em>d</em><sub>k</sub> у ключей и у запросов, как сказано выше в статье.</p>\
+             <p>{text}</p></article></body></html>"
+        );
+        let article = extract(&html, "https://example.org/wiki/Arrow").unwrap();
+        assert!(article.content_html.contains("<em>d</em><sub>k</sub>"));
+    }
+
+    /// `Readability` снимает спрятанное, а на странице оно осталось: ключи
+    /// абзаца расходились, и `restore` возвращал его второй копией.
+    #[test]
+    fn a_paragraph_with_a_hidden_piece_is_not_repeated() {
+        let text = TEXT;
+        for hidden in [
+            r#"<span aria-hidden="true">двойник</span>"#,
+            r#"<span style="display:none">двойник</span>"#,
+            "<span hidden>двойник</span>",
+        ] {
+            let html = format!(
+                "<html><body><article><h1>Эрроу</h1><p>{text}</p>\
+                 <p>Правило {hidden} гласит, что абзац с этим куском стоит ровно один раз, \
+                 сколько бы раз его ни сверяли с исходной страницей.</p>\
+                 <p>{text}</p><p>{text}</p></article></body></html>"
+            );
+            let article = extract(&html, "https://example.org/wiki/Arrow").unwrap();
+            assert_eq!(
+                article.content_html.matches("гласит").count(),
+                1,
+                "{hidden}"
+            );
+        }
     }
 
     /// Заглушка Smush на WordPress (#63): пустой `<svg>` 1×1 в base64.

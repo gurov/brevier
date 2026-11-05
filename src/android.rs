@@ -482,7 +482,7 @@ fn typography() -> String {
          \"zoomSteps\":[{}],\"zoomNormal\":{},\
          \"indent\":{},\"hang\":{},\"numberHangs\":[{}],\"noteIndent\":{},\"noteHang\":{},\"codeGap\":{},\
          \"codeSize\":{},\"padSize\":{},\"noteSize\":{},\"noterefSize\":{},\
-         \"noterefRise\":{},\"alertSize\":{},\"alertTracking\":{},\
+         \"noterefRise\":{},\"subDrop\":{},\"alertSize\":{},\"alertTracking\":{},\
          \"ruleWidth\":{},\"ruleX\":{},\"ruleInset\":{},\
          \"listLevels\":{},\"quoteLevels\":{},\"hints\":{},\
          \"found\":\"{}\",\"foundHere\":\"{}\",\"foundInk\":\"{}\",\
@@ -508,6 +508,7 @@ fn typography() -> String {
         outline::NOTE_SIZE,
         outline::NOTEREF_SIZE,
         outline::NOTEREF_RISE,
+        outline::SUB_DROP,
         outline::ALERT_SIZE,
         outline::ALERT_TRACKING,
         outline::RULE_WIDTH,

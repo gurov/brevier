@@ -76,7 +76,7 @@ One of the biggest moments of any astronaut’s career is to perform a spacewalk
 
 During this six-hour EVA, he had to route and rig hundreds of meters of power cables to the station’s starboard (right) side. One point that Virts stressed was how confusing it was. At first, he wasn’t sure if he was in the right position followed shortly by becoming disoriented. Luckily, Mission Control in Houston is in constant communication with the astronauts conducting the EVA. “After a few words with ground control, I verified that I was in the right spot.”
 
-During Virts and Expedition 42 Commander Barry Wilmore’s spacewalks, they laid the groundwork for the station to accept Commercial Crew vehicles. They re-routed cables and attached vehicle communication antennas on the American ports. Their work prepared the ISS for the attachment of the International Docking Adapter (IDA) at docking ports PMA-2 and 3.1  Commercial Crew vehicles use the IDA to dock with the ISS, so their EVAs contributed to next week’s Crew Dragon mission.  During these spacewalks, he spent just over 19 hours outside the ISS.
+During Virts and Expedition 42 Commander Barry Wilmore’s spacewalks, they laid the groundwork for the station to accept Commercial Crew vehicles. They re-routed cables and attached vehicle communication antennas on the American ports. Their work prepared the ISS for the attachment of the International Docking Adapter (IDA) at docking ports PMA-2 and 3.<sup>1</sup>  Commercial Crew vehicles use the IDA to dock with the ISS, so their EVAs contributed to next week’s Crew Dragon mission.  During these spacewalks, he spent just over 19 hours outside the ISS.
 
 [![Terry Virts, in white space suit with a blue Earth behind him](https://everydayastronaut.com/wp-content/uploads/2020/05/16105358343_958be9aa63_o-1024x680.jpg)](https://everydayastronaut.com/wp-content/uploads/2020/05/16105358343_958be9aa63_o.jpg)
 
@@ -112,7 +112,7 @@ Virts had the rare opportunity to ride in both the Russian Soyuz spacecraft and 
 
 ### The Space Shuttle
 
-He described the Space Shuttle experience as almost similar to a muscle truck. The sudden acceleration provided by the Solid Rocket Boosters (SRBs) at liftoff vibrated the entire shuttle stack upon ignition until cutoff and separation.2
+He described the Space Shuttle experience as almost similar to a muscle truck. The sudden acceleration provided by the Solid Rocket Boosters (SRBs) at liftoff vibrated the entire shuttle stack upon ignition until cutoff and separation.<sup>2</sup>
 
 [![](https://everydayastronaut.com/wp-content/uploads/2020/05/SRB-diagram.jpg)](https://everydayastronaut.com/wp-content/uploads/2020/05/SRB-diagram.jpg)
 
@@ -120,7 +120,7 @@ Diagram of the Shuttle Solid Rocket Boosters (SRBs). They are attached to the si
 
 ### Soyuz
 
-The Russians based the Soyuz rocket on the R-7 Intercontinental Ballistic Missile (ICBM). Its name comes from its main original payload, the Soyuz spacecraft. It soars off the pad quickly and inserts the spacecraft into its initial orbit in under ten minutes. According to Virts, the roller coaster ride on Soyuz is more jolting and violent than Shuttle. Reentry into the atmosphere is also unique for each spacecraft.3
+The Russians based the Soyuz rocket on the R-7 Intercontinental Ballistic Missile (ICBM). Its name comes from its main original payload, the Soyuz spacecraft. It soars off the pad quickly and inserts the spacecraft into its initial orbit in under ten minutes. According to Virts, the roller coaster ride on Soyuz is more jolting and violent than Shuttle. Reentry into the atmosphere is also unique for each spacecraft.<sup>3</sup>
 
 ## Virts Post-NASA Career
 
@@ -148,10 +148,10 @@ Colonel Terry Virts, a test pilot, astronaut, author, filmmaker, and speaker con
 
 ## Footnotes
 
-1 The Pressurized Mating Adapter is a spacecraft adapter that converts the Common Berthing Mechanism on the US Segment of the station to a docking port that spacecraft can attach to.
+<sup>1</sup> The Pressurized Mating Adapter is a spacecraft adapter that converts the Common Berthing Mechanism on the US Segment of the station to a docking port that spacecraft can attach to.
 
-2 Returning from space, Shuttle uses its flat blunt bottom with delta wings to reenter the Earth’s atmosphere. These blunt surfaces help to induce drag on the shuttle to slow it down from its orbital velocity of 28,163 km/h (17,500 mph) to it’s landing velocity of 354 km/h (220 mph). This is a drastic change in velocity. If you want more information on the shuttle landing process exactly, watch this video on [How to Land the Space Shuttle… from Space](https://www.youtube.com/watch?v=Jb4prVsXkZU).
+<sup>2</sup> Returning from space, Shuttle uses its flat blunt bottom with delta wings to reenter the Earth’s atmosphere. These blunt surfaces help to induce drag on the shuttle to slow it down from its orbital velocity of 28,163 km/h (17,500 mph) to it’s landing velocity of 354 km/h (220 mph). This is a drastic change in velocity. If you want more information on the shuttle landing process exactly, watch this video on [How to Land the Space Shuttle… from Space](https://www.youtube.com/watch?v=Jb4prVsXkZU).
 
-3 The Soyuz spacecraft has a smaller capsule shape. It looks more like a capsule with a blunt end that tapers to a smaller one. The Soyuz Decent Module has an ablative heat shield on the bottom to protect the crew when reentering the atmosphere. The flight profile, once in the atmosphere, uses the spacecraft’s natural lift to raise and lower itself to bleed off speed. Crew members have compared this reentry to a very violent roller coaster ride. If there is an issue with the flight control system, an even rougher ballistic descent occurs which puts more G-force loads on the crew.
+<sup>3</sup> The Soyuz spacecraft has a smaller capsule shape. It looks more like a capsule with a blunt end that tapers to a smaller one. The Soyuz Decent Module has an ablative heat shield on the bottom to protect the crew when reentering the atmosphere. The flight profile, once in the atmosphere, uses the spacecraft’s natural lift to raise and lower itself to bleed off speed. Crew members have compared this reentry to a very violent roller coaster ride. If there is an issue with the flight control system, an even rougher ballistic descent occurs which puts more G-force loads on the crew.
 
 Unlike most human-rated spacecraft, the Soyuz touches down on land after deploying a parachute followed by a landing rocket fired about 10 metres from the ground. The jolt from the landing rocket adds to the rough touchdown usually in the desert plains of Kazakhstan. Shuttle by comparison is like a military jet landing at high speed, but a relatively soft touchdown compared to Soyuz.

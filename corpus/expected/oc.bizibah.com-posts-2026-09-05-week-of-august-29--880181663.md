@@ -6,11 +6,11 @@ September 5, 2026
 
 On this page
 
-Between 29 August and 4 September 2026 this project collected **30,467 articles** and grouped them into **1,364 stories** across four markets. A story is a cluster of articles close enough in meaning to be the same event[3](https://oc.bizibah.com/method/#n3 "What a story is"); independence is counted in owners, not outlets[4](https://oc.bizibah.com/method/#n4 "Owners, not outlets"). Superscripts link into the [method page](https://oc.bizibah.com/method/), where each measurement is defined once.
+Between 29 August and 4 September 2026 this project collected **30,467 articles** and grouped them into **1,364 stories** across four markets. A story is a cluster of articles close enough in meaning to be the same event<sup>[3](https://oc.bizibah.com/method/#n3 "What a story is")</sup>; independence is counted in owners, not outlets<sup>[4](https://oc.bizibah.com/method/#n4 "Owners, not outlets")</sup>. Superscripts link into the [method page](https://oc.bizibah.com/method/), where each measurement is defined once.
 
 ## Volume
 
-Counts are after duplicate feed entries are merged[2](https://oc.bizibah.com/method/#n2 "Duplicate feed entries"), and they are not flat across the week: a weekend day runs about half a weekday[1](https://oc.bizibah.com/method/#n1 "Volume is not flat across the week").
+Counts are after duplicate feed entries are merged<sup>[2](https://oc.bizibah.com/method/#n2 "Duplicate feed entries")</sup>, and they are not flat across the week: a weekend day runs about half a weekday<sup>[1](https://oc.bizibah.com/method/#n1 "Volume is not flat across the week")</sup>.
 
 | Market | Articles | Stories | In a story | Baseline share |
 | --- | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ Counts are after duplicate feed entries are merged[2](https://oc.bizibah.com/met
 
 The ranking is by owners, not by article count: what matters is how widely a story travelled, not how much was written.
 
-The three widest stories in each market, with the words that separate each from the rest of its week[6](https://oc.bizibah.com/method/#n6 "The words under a headline"):
+The three widest stories in each market, with the words that separate each from the rest of its week<sup>[6](https://oc.bizibah.com/method/#n6 "The words under a headline")</sup>:
 
 **us-national.** JD Vance Says He Wouldn’t Call Iran Conflict a War — 23 owners, 40 articles, published over 11 hours (Fox, Vance, Bartiromo, Maria). Key things to know about Lindsay Clancy's case after judge declares mistrial — 21 owners, 102 articles, published over 23 hours (Clancy, Lindsay, mistrial, trial). U.S. Strikes Iran in First Military Action in a Month — 21 owners, 71 articles, published over 23 hours (Iran, Island, Iranian, strikes).
 
@@ -37,7 +37,7 @@ The three widest stories in each market, with the words that separate each from 
 
 ## The same day in four markets
 
-Stories are clustered inside a market and never across them[7](https://oc.bizibah.com/method/#n7 "Why stories are clustered inside a market"). The boundary is worth reading on its own, because most of what a market carries never crosses it.
+Stories are clustered inside a market and never across them<sup>[7](https://oc.bizibah.com/method/#n7 "Why stories are clustered inside a market")</sup>. The boundary is worth reading on its own, because most of what a market carries never crosses it.
 
 | Market | Stories | Also carried in another market |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ Stories are clustered inside a market and never across them[7](https://oc.biziba
 | uk-regional | 350 | 30% |
 | intl-state | 240 | 46% |
 
-The match behind that last column is deliberately loose[8](https://oc.bizibah.com/method/#n8 "The cross-market match is deliberately loose"): the claim being made is “nobody else ran this”, so it should fail towards saying a story travelled. At the strict threshold the same shares are 19%, 41%, 24% and 34%, in the order above.
+The match behind that last column is deliberately loose<sup>[8](https://oc.bizibah.com/method/#n8 "The cross-market match is deliberately loose")</sup>: the claim being made is “nobody else ran this”, so it should fail towards saying a story travelled. At the strict threshold the same shares are 19%, 41%, 24% and 34%, in the order above.
 
 Where an event did cross, the wording is the interesting part. The same day, the same event, as each market ran it:
 
@@ -75,7 +75,7 @@ Where an event did cross, the wording is the interesting part. The same day, the
 | uk-national | Iran retaliates after US strikes reportedly kill wedding guests - The Latest | 4 | 6 |
 | intl-state | Iran, US exchange new attacks: Who was hit in latest strikes? | 8 | 45 |
 
-The other side of the same measurement is what one market carried and nobody else did[9](https://oc.bizibah.com/method/#n9 "Carried by one market alone"). For `intl-state` that is 54% of its stories this week:
+The other side of the same measurement is what one market carried and nobody else did<sup>[9](https://oc.bizibah.com/method/#n9 "Carried by one market alone")</sup>. For `intl-state` that is 54% of its stories this week:
 
 | Carried only by state broadcasters | Day | Owners | Articles |
 | --- | --- | --- | --- |
@@ -92,7 +92,7 @@ The other side of the same measurement is what one market carried and nobody els
 
 Most stories stop at three or four owners. The tail to the right is what a week actually shares.
 
-Owner counts here are corrected for wire copy: two owners running one agency text under two mastheads count once between them[5](https://oc.bizibah.com/method/#n5 "Wire copy is counted once").
+Owner counts here are corrected for wire copy: two owners running one agency text under two mastheads count once between them<sup>[5](https://oc.bizibah.com/method/#n5 "Wire copy is counted once")</sup>.
 
 ## How long a story lasts
 
@@ -100,13 +100,13 @@ Owner counts here are corrected for wire copy: two owners running one agency tex
 
 One panel per story that ran more than a single day. The line is how many owners carried it that day, so the shape says whether it spread, held, or faded.
 
-A week-long story is a chain of daily clusters rather than one object[10](https://oc.bizibah.com/method/#n10 "How days are chained into one story"). Ordering is by how much of **this week** a story occupied, and it has to hold at least 3 days of it to appear[11](https://oc.bizibah.com/method/#n11 "What gets into the table of long stories"). The column worth reading is the last one: a story that opens wide was already everyone’s on day one, and one that opens narrow had to travel first[12](https://oc.bizibah.com/method/#n12 "Opening wide against widening over days").
+A week-long story is a chain of daily clusters rather than one object<sup>[10](https://oc.bizibah.com/method/#n10 "How days are chained into one story")</sup>. Ordering is by how much of **this week** a story occupied, and it has to hold at least 3 days of it to appear<sup>[11](https://oc.bizibah.com/method/#n11 "What gets into the table of long stories")</sup>. The column worth reading is the last one: a story that opens wide was already everyone’s on day one, and one that opens narrow had to travel first<sup>[12](https://oc.bizibah.com/method/#n12 "Opening wide against widening over days")</sup>.
 
 ![Each owner’s first, middle and last article in one story](https://oc.bizibah.com/posts/2026-09-05-week-of-august-29/arrival.svg)
 
 The week’s largest story, one row per owner, ordered by when that owner first published. The dot sits on that owner’s first article and its area is how many they ran; the line runs on to their last. The bars along the top are how many articles ran in each 6-hour window.
 
-Counting owners per day says how wide a story got; the rows above say how it filled up[13](https://oc.bizibah.com/method/#n13 "How a story fills up"). It is one story, though, not a claim about how these owners behave[14](https://oc.bizibah.com/method/#n14 "One story is not a claim about owners").
+Counting owners per day says how wide a story got; the rows above say how it filled up<sup>[13](https://oc.bizibah.com/method/#n13 "How a story fills up")</sup>. It is one story, though, not a claim about how these owners behave<sup>[14](https://oc.bizibah.com/method/#n14 "One story is not a claim about owners")</sup>.
 
 | Story | Where it ended | Market | Ran | Articles | Owners, day 1 → total |
 | --- | --- | --- | --- | --- | --- |
@@ -125,7 +125,7 @@ Counting owners per day says how wide a story got; the rows above say how it fil
 
 Measured against a null model that keeps both the size of each story and the output of each owner, so neither big news nor a prolific outlet can produce a score on its own. Computed over the whole archive, not just this week: the signal is longitudinal and a single week is too noisy to read.
 
-A high score means two owners run the same stories more often than their volumes explain, which is not the same as coordination[15](https://oc.bizibah.com/method/#n15 "Co-occurrence is not coordination"). What it cannot say is whether either is following the other; for that the next section uses the clock.
+A high score means two owners run the same stories more often than their volumes explain, which is not the same as coordination<sup>[15](https://oc.bizibah.com/method/#n15 "Co-occurrence is not coordination")</sup>. What it cannot say is whether either is following the other; for that the next section uses the clock.
 
 ## How stories move between newsrooms
 
@@ -133,7 +133,7 @@ A high score means two owners run the same stories more often than their volumes
 
 Inside every story each pair of owners is ranked by how close together the two published, measured against all the other pairs in that same story. Scoring against the story itself is what keeps big news out of the result: an event everybody reaches within the hour makes every pair look fast, and only a pair that is fast relative to its own story survives.
 
-Direction is what separates the mechanisms, and it is the part a co-occurrence count cannot see[16](https://oc.bizibah.com/method/#n16 "The three shapes a tight pair can have").
+Direction is what separates the mechanisms, and it is the part a co-occurrence count cannot see<sup>[16](https://oc.bizibah.com/method/#n16 "The three shapes a tight pair can have")</sup>.
 
 | Pair | Market | Relationship | Typical gap | Stories |
 | --- | --- | --- | --- | --- |
@@ -147,9 +147,9 @@ Direction is what separates the mechanisms, and it is the part a co-occurrence c
 | Nation.Cymru ↔ Gannett | uk-regional | both ways | 81 min | 21 |
 | Axel Springer ↔ Nikkei | uk-national | both ways | 97 min | 25 |
 
-Measured over the whole archive rather than this week, and only after two controls: each owner’s own speed is subtracted, and the pair’s tightest quarter of stories is dropped[17](https://oc.bizibah.com/method/#n17 "The two controls a pair has to survive").
+Measured over the whole archive rather than this week, and only after two controls: each owner’s own speed is subtracted, and the pair’s tightest quarter of stories is dropped<sup>[17](https://oc.bizibah.com/method/#n17 "The two controls a pair has to survive")</sup>.
 
-The same measurement can be asked of a single owner: is it **upstream** of the newsrooms it shares stories with, or downstream of them[18](https://oc.bizibah.com/method/#n18 "Upstream and downstream of one owner")?
+The same measurement can be asked of a single owner: is it **upstream** of the newsrooms it shares stories with, or downstream of them<sup>[18](https://oc.bizibah.com/method/#n18 "Upstream and downstream of one owner")</sup>?
 
 | Market | Upstream of its partners | Downstream of them |
 | --- | --- | --- |
@@ -158,13 +158,13 @@ The same measurement can be asked of a single owner: is it **upstream** of the n
 | uk-regional | Reach plc z 2.0 | — |
 | intl-state | Anadolu Ajansi z 6.4 | France Medias z −2.0 |
 
-The two ends read differently, and neither is an accusation[19](https://oc.bizibah.com/method/#n19 "How to read the two ends").
+The two ends read differently, and neither is an accusation<sup>[19](https://oc.bizibah.com/method/#n19 "How to read the two ends")</sup>.
 
 ## What the headline said first
 
-Every version of an article’s text is kept, so a headline that changes after publication is visible. This week **1,985 headlines were rewritten**, 940 of them substantially — less than half the words survived — and the median rewrite landed 4.3 hours after the article first appeared. Not all of that is a newsroom changing its mind[20](https://oc.bizibah.com/method/#n20 "What looks like a rewrite and is not"): requiring the two versions to be recognisably the same sentence, changed within a day, leaves **703** — and those are the ones below.
+Every version of an article’s text is kept, so a headline that changes after publication is visible. This week **1,985 headlines were rewritten**, 940 of them substantially — less than half the words survived — and the median rewrite landed 4.3 hours after the article first appeared. Not all of that is a newsroom changing its mind<sup>[20](https://oc.bizibah.com/method/#n20 "What looks like a rewrite and is not")</sup>: requiring the two versions to be recognisably the same sentence, changed within a day, leaves **703** — and those are the ones below.
 
-This is the one place in the corpus where an editorial decision is observed twice — the same newsroom, the same story, two framings hours apart[21](https://oc.bizibah.com/method/#n21 "The only decision observed twice").
+This is the one place in the corpus where an editorial decision is observed twice — the same newsroom, the same story, two framings hours apart<sup>[21](https://oc.bizibah.com/method/#n21 "The only decision observed twice")</sup>.
 
 - **Warner Bros** — “US strikes Iranian rocket launchers, official says, marking first attack in a month” → “US and Iran trade attacks, marking first major military escalation in a month”
 - **Warner Bros** — “What the jury in Lindsay Clancy’s trial is deliberating” → “Judge urges jury in Lindsay Clancy murder trial to ‘stay the course’ as it enters Day 4 of deliberations”
@@ -173,15 +173,15 @@ This is the one place in the corpus where an editorial decision is observed twic
 - **Disney** — “Massachusetts Sen. Ed Markey faces younger, more moderate primary challenger” → “Mass. Sen. Ed Markey will defeat Rep. Seth Moulton in Democratic primary, AP projects”
 - **Global** — “Doctor colleague of child serial killer Lucy Letby named” → “Lucy Letby's consultant doctor 'boyfriend' named, two months after being found dead in car”
 
-The examples are drawn from stories that at least 4 owners carried, not from the largest rewrites[22](https://oc.bizibah.com/method/#n22 "Where the examples come from").
+The examples are drawn from stories that at least 4 owners carried, not from the largest rewrites<sup>[22](https://oc.bizibah.com/method/#n22 "Where the examples come from")</sup>.
 
-Rewriting is not evenly spread. **Emerson Collective** changed the headline on 36% of what it published this week; across the owners with enough output to measure the rate runs from that down to a percent or two[23](https://oc.bizibah.com/method/#n23 "Comparing rewrite rates between owners").
+Rewriting is not evenly spread. **Emerson Collective** changed the headline on 36% of what it published this week; across the owners with enough output to measure the rate runs from that down to a percent or two<sup>[23](https://oc.bizibah.com/method/#n23 "Comparing rewrite rates between owners")</sup>.
 
 What the rewrites do **not** show is a softening of language. Quotation marks appear in 116 rewritten headlines and disappear from 94; words that hold a claim at arm’s length — *so-called*, *alleged*, *reportedly* — move in 16 and out of 15. At that size neither is a finding. Distancing is thin enough in headlines that it has to be measured across the whole corpus rather than inside its edits, which is the next section.
 
 ## Words that have to be quoted
 
-This project is named after the Overton window, and everything above measures something else: the shape of distribution. The window is answered by how a word is marked, not by how far it travels[24](https://oc.bizibah.com/method/#n24 "Why marking rather than distribution").
+This project is named after the Overton window, and everything above measures something else: the shape of distribution. The window is answered by how a word is marked, not by how far it travels<sup>[24](https://oc.bizibah.com/method/#n24 "Why marking rather than distribution")</sup>.
 
 ![How often each term appears inside quotation marks](https://oc.bizibah.com/posts/2026-09-05-week-of-august-29/voice.svg)
 
@@ -199,8 +199,8 @@ Counted over headlines and summaries in all four markets this week. A quoted ter
 | police | 1,611 | 21 | 1% |
 | far-right | 122 | 1 | 1% |
 
-The separation is an order of magnitude and it is not subtle. Nothing about the count knows which words are contested — the list is fixed in advance, and it has to be[25](https://oc.bizibah.com/method/#n25 "Why the list of terms is fixed in advance"). Read the shares as a level, not as a movement[26](https://oc.bizibah.com/method/#n26 "A level, not a movement"): the window is the change in them over months.
+The separation is an order of magnitude and it is not subtle. Nothing about the count knows which words are contested — the list is fixed in advance, and it has to be<sup>[25](https://oc.bizibah.com/method/#n25 "Why the list of terms is fixed in advance")</sup>. Read the shares as a level, not as a movement<sup>[26](https://oc.bizibah.com/method/#n26 "A level, not a movement")</sup>: the window is the change in them over months.
 
 ## Method
 
-Every measurement above is defined once, on the [method page](https://oc.bizibah.com/method/) — the superscripts throughout this report link straight into it. Reports are generated without human editing and without a language model[27](https://oc.bizibah.com/method/#n27 "Generated, not written").
+Every measurement above is defined once, on the [method page](https://oc.bizibah.com/method/) — the superscripts throughout this report link straight into it. Reports are generated without human editing and without a language model<sup>[27](https://oc.bizibah.com/method/#n27 "Generated, not written")</sup>.

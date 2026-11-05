@@ -46,8 +46,8 @@ use brevier::media::{self, Raster, Source};
 use brevier::notes::{self, Notes};
 use brevier::outline::{
     self, ALERT_SIZE, ALERT_TRACKING, CODE_GAP, CODE_SIZE, Face, HANG, HEADING_WEIGHTS, HEADINGS,
-    INDENT, NOTE_HANG, NOTE_INDENT, NOTE_SIZE, NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE, TEXT_SIZE,
-    Type, ZOOM_NORMAL, ZOOM_STEPS, clip,
+    INDENT, NOTE_HANG, NOTE_INDENT, NOTE_SIZE, NOTEREF_RISE, NOTEREF_SIZE, PAD_SIZE, SUB_DROP,
+    TEXT_SIZE, Type, ZOOM_NORMAL, ZOOM_STEPS, clip,
 };
 use brevier::page::{self, Block};
 use brevier::palette::{FOUND, FOUND_HERE, FOUND_INK, Paper, Theme, colors, picture_paper, rgb};
@@ -5836,6 +5836,26 @@ fn tags(buffer: &gtk::TextBuffer, theme: Theme, scale: f32, typography: &Type) {
                 "rise",
                 &px(f64::from(pango::SCALE) * f64::from(NOTEREF_RISE)),
             ),
+        ],
+    );
+    // Индексы — как метка сноски: мельче и выше, нижний — мельче и ниже.
+    style(
+        buffer,
+        "sup",
+        &[
+            ("size-points", &(body * f64::from(NOTEREF_SIZE))),
+            (
+                "rise",
+                &px(f64::from(pango::SCALE) * f64::from(NOTEREF_RISE)),
+            ),
+        ],
+    );
+    style(
+        buffer,
+        "sub",
+        &[
+            ("size-points", &(body * f64::from(NOTEREF_SIZE))),
+            ("rise", &px(-f64::from(pango::SCALE) * f64::from(SUB_DROP))),
         ],
     );
     // Сама сноска под статьёй: мельче текста, с висячим отступом, как пункт

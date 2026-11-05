@@ -103,7 +103,7 @@ Perhaps no one embodies first-principles thinking more than Elon Musk. He is one
 
 What’s most interesting about Musk is not what he thinks but *how* he thinks:
 
-> I think people’s thinking process is too bound by convention or analogy to prior experiences. It’s rare that people try to think of something on a first principles basis. They’ll say, “We’ll do that because it’s always been done that way.” Or they’ll not do it because “Well, nobody’s ever done that, so it must not be good. But that’s just a ridiculous way to think. You have to build up the reasoning from the ground up—“from the first principles” is the phrase that’s used in physics. You look at the fundamentals and construct your reasoning from that, and then you see if you have a conclusion that works or doesn’t work, and it may or may not be different from what people have done in the past.[\[4\]](#_ftn4)
+> I think people’s thinking process is too bound by convention or analogy to prior experiences. It’s rare that people try to think of something on a first principles basis. They’ll say, “We’ll do that because it’s always been done that way.” Or they’ll not do it because “Well, nobody’s ever done that, so it must not be good. But that’s just a ridiculous way to think. You have to build up the reasoning from the ground up—“from the first principles” is the phrase that’s used in physics. You look at the fundamentals and construct your reasoning from that, and then you see if you have a conclusion that works or doesn’t work, and it may or may not be different from what people have done in the past.[<sup>\[4\]</sup>](#_ftn4)
 
 His approach to [understanding reality](https://fs.blog/alignment/) is to begin with what is true, rather than relying on his intuition. The problem is that we don’t know as much as we think we do, so our intuition isn’t very good. We trick ourselves into thinking we know what’s possible and what’s not.
 
@@ -111,15 +111,15 @@ Musk’s approach is quite different.
 
 He starts out with something he wants to achieve, like building a rocket. Then he starts with the first principles of the problem. Running through how Musk would think, Larry Page said in an
 
-interview, “What are the physics of it? How much time will it take? How much will it cost? How much cheaper can I make it? There’s this level of engineering and physics that you need to make judgments about what’s possible and interesting. Elon is unusual in that he knows that, and he also knows business and organization and leadership and governmental issues.”[\[5\]](#_ftn5)
+interview, “What are the physics of it? How much time will it take? How much will it cost? How much cheaper can I make it? There’s this level of engineering and physics that you need to make judgments about what’s possible and interesting. Elon is unusual in that he knows that, and he also knows business and organization and leadership and governmental issues.”[<sup>\[5\]</sup>](#_ftn5)
 
-Rockets are absurdly expensive, which is a problem because Musk wants to send people to Mars. And to send people to Mars, you need cheaper rockets. So he asked himself, “What is a rocket made of? Aerospace-grade aluminum alloys, plus some titanium, copper, and carbon fiber. And … what is the value of those materials on the commodity market? It turned out that the materials cost of a rocket was around two percent of the typical price.”[\[6\]](#_ftn6)
+Rockets are absurdly expensive, which is a problem because Musk wants to send people to Mars. And to send people to Mars, you need cheaper rockets. So he asked himself, “What is a rocket made of? Aerospace-grade aluminum alloys, plus some titanium, copper, and carbon fiber. And … what is the value of those materials on the commodity market? It turned out that the materials cost of a rocket was around two percent of the typical price.”[<sup>\[6\]</sup>](#_ftn6)
 
 Why, then, is it so expensive to get a rocket into space? Musk, a notorious self-learner with degrees in both economics and physics, literally taught himself rocket science. He figured that the only reason getting a rocket into space is so expensive is that people are stuck in a mindset that doesn’t hold up to first principles. With that, Musk decided to create SpaceX and see if he could build rockets from scratch.
 
 In an interview with Kevin Rose, Musk summarized his approach:
 
-> I think it’s important to reason from first principles rather than by analogy. So the normal way we conduct our lives is, we reason by analogy. We are doing this because it’s like something else that was done, or it is like what other people are doing… with slight iterations on a theme. And it’s … mentally easier to reason by analogy rather than from first principles. First principles is kind of a physics way of looking at the world, and what that really means is, you … boil things down to the most fundamental truths and say, “okay, what are we sure is true?” … and then reason up from there. That takes a lot more mental energy.[\[7\]](#_ftn7)
+> I think it’s important to reason from first principles rather than by analogy. So the normal way we conduct our lives is, we reason by analogy. We are doing this because it’s like something else that was done, or it is like what other people are doing… with slight iterations on a theme. And it’s … mentally easier to reason by analogy rather than from first principles. First principles is kind of a physics way of looking at the world, and what that really means is, you … boil things down to the most fundamental truths and say, “okay, what are we sure is true?” … and then reason up from there. That takes a lot more mental energy.[<sup>\[7\]</sup>](#_ftn7)
 
 Musk then gave an example of how SpaceX uses first principles to innovate at low prices:
 
@@ -135,7 +135,7 @@ After studying the psychology of virality, Jonah Peretti founded BuzzFeed in 200
 
 Peretti figured out early on the first principle of a successful website: wide distribution. Rather than publishing articles people should read, BuzzFeed focuses on publishing those that people want to read. This means aiming to garner maximum social shares to put distribution in the hands of readers.
 
-Peretti recognized the first principles of online popularity and used them to take a new approach to journalism. He also ignored SEO, saying, “Instead of making content robots like, it was more satisfying to make content humans want to share.”[\[8\]](#_ftn8) Unfortunately for us, we share a lot of cat videos.
+Peretti recognized the first principles of online popularity and used them to take a new approach to journalism. He also ignored SEO, saying, “Instead of making content robots like, it was more satisfying to make content humans want to share.”[<sup>\[8\]</sup>](#_ftn8) Unfortunately for us, we share a lot of cat videos.
 
 A common aphorism in the field of viral marketing is, “content might be king, but distribution is queen, and she wears the pants” (or “and she has the dragons”; pick your metaphor). BuzzFeed’s distribution-based approach is based on obsessive measurement, using A/B testing and analytics.
 
@@ -211,26 +211,26 @@ In a world focused on incremental improvement, first-principles thinking offers 
 
 *[The Great Mental Models](https://fs.blog/tgmm)*, Volume 1: General Thinking Tools. Specifically, the chapter on first principles forms the basis of a large part of this article. (I am the co-author of this series).
 
-[\[1\]](#_ftnref1) Aristotle, Physics 184a10–21
+[<sup>\[1\]</sup>](#_ftnref1) Aristotle, Physics 184a10–21
 
-[\[2\]](#_ftnref2) Aristotle, Metaphysics 1013a14-15
+[<sup>\[2\]</sup>](#_ftnref2) Aristotle, Metaphysics 1013a14-15
 
-[\[3\]](#_ftnref3) https://waitbutwhy.com/2015/11/the-cook-and-the-chef-musks-secret-sauce.html
+[<sup>\[3\]</sup>](#_ftnref3) https://waitbutwhy.com/2015/11/the-cook-and-the-chef-musks-secret-sauce.html
 
-[\[4\]](#_ftnref4) Elon Musk, quoted by Tim Urban in “The Cook and the Chef: Musk’s Secret Sauce,” Wait But Why https://waitbutwhy.com/2015/11/the-cook-and-the-chef-musks-secret-sauce.html
+[<sup>\[4\]</sup>](#_ftnref4) Elon Musk, quoted by Tim Urban in “The Cook and the Chef: Musk’s Secret Sauce,” Wait But Why https://waitbutwhy.com/2015/11/the-cook-and-the-chef-musks-secret-sauce.html
 
-[\[5\]](#_ftnref5) Vance, Ashlee. *Elon Musk: Tesla, SpaceX, and the Quest for a Fantastic Future* (p. 354)
+[<sup>\[5\]</sup>](#_ftnref5) Vance, Ashlee. *Elon Musk: Tesla, SpaceX, and the Quest for a Fantastic Future* (p. 354)
 
-[\[6\]](#_ftnref6) https://www.wired.com/2012/10/ff-elon-musk-qa/all/
+[<sup>\[6\]</sup>](#_ftnref6) https://www.wired.com/2012/10/ff-elon-musk-qa/all/
 
-[\[7\]](#_ftnref7) https://www.youtube.com/watch?v=L-s\_3b5fRd8
+[<sup>\[7\]</sup>](#_ftnref7) https://www.youtube.com/watch?v=L-s\_3b5fRd8
 
-[\[8\]](#_ftnref8) David Rowan, “How BuzzFeed mastered social sharing to become a media giant for a new era,” Wired.com. 2 January 2014. https://www.wired.co.uk/article/buzzfeed
+[<sup>\[8\]</sup>](#_ftnref8) David Rowan, “How BuzzFeed mastered social sharing to become a media giant for a new era,” Wired.com. 2 January 2014. https://www.wired.co.uk/article/buzzfeed
 
-[\[9\]](#_ftnref9) [What does Elon Musk mean when he said “I think it’s important to reason from first principles rather than by analogy?”](https://www.quora.com/What-does-Elon-Musk-mean-when-he-said-I-think-it%E2%80%99s-important-to-reason-from-first-principles-rather-than-by-analogy/answer/Bruce-Achterberg)
+[<sup>\[9\]</sup>](#_ftnref9) [What does Elon Musk mean when he said “I think it’s important to reason from first principles rather than by analogy?”](https://www.quora.com/What-does-Elon-Musk-mean-when-he-said-I-think-it%E2%80%99s-important-to-reason-from-first-principles-rather-than-by-analogy/answer/Bruce-Achterberg)
 
-[\[10\]](#_ftnref10) https://www.scientificamerican.com/article/new-estimate-boosts-the-human-brain-s-memory-capacity-10-fold/
+[<sup>\[10\]</sup>](#_ftnref10) https://www.scientificamerican.com/article/new-estimate-boosts-the-human-brain-s-memory-capacity-10-fold/
 
-[\[11\]](#_ftnref11) Breakpoint and Beyond: Mastering the Future Today, George Land
+[<sup>\[11\]</sup>](#_ftnref11) Breakpoint and Beyond: Mastering the Future Today, George Land
 
-[\[12\]](#_ftnref12) [I am Elon Musk, CEO/CTO of a rocket company, AMA!](https://www.reddit.com/r/IAmA/comments/2rgsan/i_am_elon_musk_ceocto_of_a_rocket_company_ama/cnfre0a/)
+[<sup>\[12\]</sup>](#_ftnref12) [I am Elon Musk, CEO/CTO of a rocket company, AMA!](https://www.reddit.com/r/IAmA/comments/2rgsan/i_am_elon_musk_ceocto_of_a_rocket_company_ama/cnfre0a/)
