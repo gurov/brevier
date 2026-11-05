@@ -1,0 +1,4 @@
+• Formulas are set on your phone: text in your type, or drawn in your ink. Dark paper stays dark, and no picture is fetched.
+• 10⁶ and H₂O keep their raised and lowered figures.
+• Pictures hidden behind a tiny placeholder come back.
+• A paragraph with a hidden piece is no longer printed twice.
