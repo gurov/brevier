@@ -4037,6 +4037,7 @@ mod tests {
     }
 
     /// Parsoid: ни картинки, ни `annotation`, исходник только в `data-mw`.
+    #[cfg(feature = "images")]
     #[test]
     fn a_mediawiki_formula_keeps_its_source_on_the_drawing() {
         let html = with_formula(
@@ -4047,6 +4048,7 @@ mod tests {
     }
 
     /// LaTeXML (arXiv): дробь рисуется, текстом она слиплась бы в «12».
+    #[cfg(feature = "images")]
     #[test]
     fn a_fraction_is_drawn_not_flattened() {
         let html = with_formula(
@@ -4055,6 +4057,16 @@ mod tests {
         assert!(html.contains(crate::math::DRAWN));
         assert!(!html.contains("<math"));
         assert!(!html.contains("12"));
+    }
+
+    /// Сборке без картинок рисовать нечем, и дробь остаётся исходником, а не «12».
+    #[cfg(not(feature = "images"))]
+    #[test]
+    fn a_fraction_with_nothing_to_draw_it_is_its_source() {
+        let html = with_formula(
+            r#"<math alttext="\frac{1}{2}"><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"#,
+        );
+        assert!(html.contains(r"<code>\frac{1}{2}</code>"), "{html}");
     }
 
     /// Класс статьи arXiv похож на подпись, а вся статья подписью не бывает.
