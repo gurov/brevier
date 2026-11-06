@@ -2547,7 +2547,7 @@ class MainActivity : Activity(), ArticleHost {
                 addresses = tab.addresses.toList(),
             )
         }
-        App.work.execute { Core.remember(tabs) }
+        App.session.execute { Core.remember(tabs) }
     }
 
     /**
@@ -2555,7 +2555,7 @@ class MainActivity : Activity(), ArticleHost {
      * что была впереди; остальные ждут, пока на них переключатся.
      */
     private fun restoreSession(): Boolean {
-        val session = Core.session()
+        val session = App.session.submit<org.json.JSONArray> { Core.session() }.get()
         var front = -1
         for (index in 0 until session.length()) {
             val item = session.getJSONObject(index)

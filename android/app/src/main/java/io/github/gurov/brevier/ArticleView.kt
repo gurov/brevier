@@ -944,7 +944,9 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         val shown = generation
         // Адрес — сейчас: пока задача ждёт потока, вид мог показать другое.
         val page = address
-        App.work.execute {
+        App.pictures.execute {
+            // Читатель ушёл, пока задача ждала потока: качать уже некому.
+            if (shown != generation) return@execute
             val raster = Core.holdingPicture {
                 val bytes = try {
                     Core.image(source, page, look.width, look.paper, look.ink, look.fontSize, look.natural)
@@ -963,8 +965,23 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         span.busy = true
         fetch(span.block.source, if (span.drawn) drawnLook() else look(natural = true)) { decoded ->
             span.busy = false
-            decoded.bitmap?.let { span.picture(it, decoded.depth, view) }
+            decoded.bitmap?.let { span.picture(if (span.drawn) it else inLine(it), decoded.depth, view) }
         }
+    }
+
+    /**
+     * Значок в строке. Ядро отдаёт картинку в пикселях монитора, на телефоне
+     * они втрое мельче: растим, как и картинку в рамке, но не выше строки —
+     * файл для плотных экранов (`@2x`) и так вдвое больше, чем на странице.
+     * Что выше строки уже в файле, оставляем как есть.
+     */
+    private fun inLine(bitmap: Bitmap): Bitmap {
+        val line = metrics.text * 1.3f
+        val height = min(bitmap.height * metrics.unit, max(bitmap.height.toFloat(), line))
+        if (height <= bitmap.height) return bitmap
+        val width = bitmap.width * height / bitmap.height
+        val fits = min(1f, columnWidth() / width)
+        return Bitmap.createScaledBitmap(bitmap, max(1, (width * fits).toInt()), max(1, (height * fits).toInt()), true)
     }
 
     /**
@@ -998,6 +1015,11 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             if (start < 0) return
             text.removeSpan(this)
             text.setSpan(this, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            // Строка выросла, а строк столько же: Android сдвигает готовые блоки
+            // текста, только когда меняется их число, и абзац ниже остаётся на
+            // старом месте, поверх соседа. Перерисовать блоки целиком напрямую
+            // нельзя; из открытых вызовов это делает только смена тени.
+            view.setShadowLayer(0f, 0f, 0f, 0)
         }
 
         override fun getSize(paint: Paint, text: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
