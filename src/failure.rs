@@ -108,6 +108,12 @@ pub fn describe(error: &Error) -> Failure {
                 .to_owned(),
             true,
         ),
+        cut @ Error::Network(_) if cut.was_cut_off() => failure(
+            "The connection broke off",
+            "The site hung up before the page arrived, twice. That is usually the network, not the page: try again in a moment."
+                .to_owned(),
+            true,
+        ),
         Error::Network(e) => failure(
             "Could not connect",
             format!("{e}. The host may be down, or there is no network."),

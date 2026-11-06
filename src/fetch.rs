@@ -179,7 +179,12 @@ pub fn fetch(url: &str, ua: UserAgent) -> Result<Page, Error> {
     let mut redirects = 0u8;
 
     loop {
-        let mut page = fetch_once(&target, ua)?;
+        // Обрыв повторяем один раз, как браузер: иначе случайность сети
+        // стоила читателю страницы.
+        let mut page = match fetch_once(&target, ua) {
+            Err(error) if error.was_cut_off() => fetch_once(&target, ua)?,
+            other => other?,
+        };
         redirects = redirects.saturating_add(page.redirects);
 
         match meta_refresh(&page) {
@@ -279,7 +284,10 @@ fn book(url: &str, part: usize, ua: UserAgent) -> Result<Page, Error> {
 /// это дело того, кто заказывал: `media` умеет отличить svg от png в байтах,
 /// а сервера ошибаются в заголовке чаще, чем хотелось бы.
 pub fn binary(url: &str, ua: UserAgent, accept: &str, limit: u64) -> Result<Blob, Error> {
-    binary_within(url, ua, accept, limit, TIMEOUT)
+    match binary_within(url, ua, accept, limit, TIMEOUT) {
+        Err(error) if error.was_cut_off() => binary_within(url, ua, accept, limit, TIMEOUT),
+        other => other,
+    }
 }
 
 /// То же со своим потолком времени: для ответа, который заведомо долгий

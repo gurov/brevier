@@ -109,6 +109,28 @@ impl std::error::Error for Error {
     }
 }
 
+impl Error {
+    /// Соединение оборвалось на полпути. Это сеть, а не страница: мобильная
+    /// сеть и шлюзы так делают, а TLS зовёт это «no close_notify».
+    pub fn was_cut_off(&self) -> bool {
+        use std::io::ErrorKind;
+
+        let Error::Network(error) = self else {
+            return false;
+        };
+        match error.as_ref() {
+            ureq::Error::Io(error) => matches!(
+                error.kind(),
+                ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::BrokenPipe
+                    | ErrorKind::UnexpectedEof
+            ),
+            _ => false,
+        }
+    }
+}
+
 impl From<ureq::Error> for Error {
     fn from(e: ureq::Error) -> Self {
         match e {

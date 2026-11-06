@@ -99,6 +99,26 @@ const ARTICLE: &str = r#"<html><head><title>Настоящий заголово�
 потому что короткие страницы алгоритм извлечения не считает статьями вовсе.</p></article>
 <footer>копирайт и прочий низ страницы</footer></body></html>"#;
 
+/// Сеть оборвала первое соединение: браузер спрашивает снова, и мы тоже.
+#[test]
+fn a_connection_cut_off_once_is_asked_again() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("порт");
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let routes = vec![route("/a", "text/markdown", "# Still here\n")];
+    thread::spawn(move || {
+        let mut incoming = listener.incoming();
+        drop(incoming.next());
+        for stream in incoming {
+            let Ok(stream) = stream else { continue };
+            answer(stream, &routes);
+        }
+    });
+
+    let output = brevier(&[&format!("{base}/a")]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("Still here"));
+}
+
 #[test]
 fn html_article_becomes_markdown() {
     let base = serve(vec![route("/a", "text/html; charset=utf-8", ARTICLE)]);
