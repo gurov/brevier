@@ -157,6 +157,26 @@ impl Style {
     fn is_verse(self) -> bool {
         matches!(self, Style::Verse)
     }
+
+    /// Свойство абзаца — поля, воздух, — а не отдельных знаков.
+    fn shapes_paragraph(self) -> bool {
+        !matches!(
+            self,
+            Style::Em
+                | Style::Strong
+                | Style::Code
+                | Style::Keyword
+                | Style::Literal
+                | Style::Number
+                | Style::Comment
+                | Style::Link
+                | Style::Dim
+                | Style::Alert
+                | Style::NoteRef
+                | Style::Sup
+                | Style::Sub
+        )
+    }
 }
 
 /// Участок текста и чем он набран. Порядок стилей — порядок наложения:
@@ -811,10 +831,17 @@ impl Writer<'_> {
     }
 
     /// Картинка: иллюстрация — своей строкой, формула — прямо в строке.
-    fn image(&mut self, source: Source, alt: String, inline: bool) {
+    fn image(&mut self, source: Source, alt: String, inline: bool, styles: &[Style]) {
         if inline {
             let at = self.chars;
-            self.sign();
+            // Абзац бывает начат картинкой, а GTK берёт воздух и поля по первому
+            // знаку строки: без них такой абзац садился вплотную к соседям.
+            let shape: Vec<Style> = styles
+                .iter()
+                .copied()
+                .filter(|style| style.shapes_paragraph())
+                .collect();
+            self.push(&OBJECT.to_string(), &shape);
             self.page.blocks.push(Placed {
                 at,
                 block: Block::Image {
@@ -1069,12 +1096,29 @@ impl Writer<'_> {
                         }
                         _ => "•\t".to_owned(),
                     };
+                    // Снимок, открывающий пункт, — над маркером: иначе маркер
+                    // стоял один на строке над картинкой, у карточек лент
+                    // это каждый пункт. Пункт из одного снимка маркера не ждёт.
+                    let picture = item
+                        .first_child()
+                        .filter(|first| marker.starts_with('•') && is_lone_picture(first));
+                    if let Some(picture) = picture {
+                        self.inlines(picture, &styles);
+                        if picture.next_sibling().is_none() {
+                            continue;
+                        }
+                    }
                     self.put(&marker, &styles);
 
                     let start = self.chars;
-                    for child in item.children() {
+                    for child in item.children().skip(picture.iter().count()) {
                         match &child.data.borrow().value {
                             NodeValue::Paragraph => {
+                                // Без маркера абзац начался бы у края висячего
+                                // отступа, левее текста пункта.
+                                if self.chars != start {
+                                    self.put("\t", &styles);
+                                }
                                 self.inlines(child, &styles);
                                 self.put("\n", &styles);
                             }
@@ -1208,8 +1252,8 @@ impl Writer<'_> {
                     match media::resolve(self.base, &image.url) {
                         // Формула своим абзацем — всё равно формула: ростом
                         // с текст, без рамки и подписи.
-                        Some(source @ Source::Formula(_)) => self.image(source, alt, true),
-                        Some(source) => self.image(source, alt, inline),
+                        Some(source @ Source::Formula(_)) => self.image(source, alt, true, styles),
+                        Some(source) => self.image(source, alt, inline, styles),
                         // Чего сами не достанем (`data:`, `blob:`) — оставляем
                         // строкой: честнее пустой рамки.
                         None => {
@@ -1441,6 +1485,15 @@ fn stands_alone<'n>(image: &'n AstNode<'n>) -> bool {
         return true;
     };
     !has_words(block)
+}
+
+/// Абзац из одной картинки или ссылки на неё.
+fn is_lone_picture<'n>(node: &'n AstNode<'n>) -> bool {
+    matches!(node.data.borrow().value, NodeValue::Paragraph)
+        && !has_words(node)
+        && node
+            .descendants()
+            .any(|inner| matches!(inner.data.borrow().value, NodeValue::Image(_)))
 }
 
 /// Продолжает ли абзац прозу (#59): перед ним, в том же блоке, — абзац
@@ -1950,6 +2003,51 @@ mod tests {
     /// Аватарка в строке «**Author:** ![имя](…) [@имя](…)» (markdown
     /// Discourse) — часть строки, хотя по бокам у неё пробелы. Значки
     /// ссылками в абзаце без текста — картинки своими строками, как были.
+    #[test]
+    fn a_second_paragraph_of_an_item_lines_up_with_the_first() {
+        let page = Page::of(&doc("- first\n\n  second\n- next\n"));
+        assert!(
+            page.text.contains("•\tfirst\n\tsecond\n•\tnext"),
+            "{:?}",
+            page.text
+        );
+    }
+
+    /// У карточек лент маркер стоял один на строке над снимком.
+    #[test]
+    fn a_picture_opening_an_item_stands_above_the_marker() {
+        let page = Page::of(&doc(
+            "- ![a](https://e.com/a.png)\n\n  Title\n- ![b](https://e.com/b.png)\n- plain\n",
+        ));
+        assert!(
+            page.text.contains("\u{FFFC}\n•\tTitle\n\u{FFFC}\n•\tplain"),
+            "{:?}",
+            page.text
+        );
+    }
+
+    /// Номер пункта значит порядок: его оставляем.
+    #[test]
+    fn a_numbered_item_keeps_its_number_over_a_picture() {
+        let page = Page::of(&doc("1. ![a](https://e.com/a.png)\n2. two\n"));
+        assert!(page.text.starts_with("1.\t"), "{:?}", page.text);
+    }
+
+    /// GTK берёт воздух абзаца по первому знаку строки, а ссылка на картинке
+    /// подчеркнула бы её.
+    #[test]
+    fn a_picture_opening_a_paragraph_carries_the_paragraph_not_the_link() {
+        let page = Page::of(&doc(
+            "[![f](https://e.com/f.png)](https://e.com) and words\n",
+        ));
+        let sign = page
+            .runs
+            .iter()
+            .find(|run| run.start == 0)
+            .expect("участок знака");
+        assert_eq!(sign.styles, vec![Style::Body]);
+    }
+
     #[test]
     fn an_image_among_words_is_inline_even_between_spaces() {
         let page = Page::of(&doc(

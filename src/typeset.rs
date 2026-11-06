@@ -202,6 +202,7 @@ fn lowercase_keeps_width(ch: char) -> bool {
 /// («13 October», «321 comments») и пробел перед годом после слова
 /// («October 2026») становятся неразрывными. Число с единицей и дату рвать
 /// не принято ни в одной традиции; длина строки та же — знак на знак.
+/// Само число тоже не рвём: «250 000» на двух строках читается как два числа.
 fn keep_numbers(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out: String = String::with_capacity(text.len());
@@ -209,11 +210,19 @@ fn keep_numbers(text: &str) -> String {
         let glue = c == ' '
             && i > 0
             && i + 1 < chars.len()
-            && ((chars[i - 1].is_ascii_digit() && chars[i + 1].is_alphabetic())
+            && ((chars[i - 1].is_ascii_digit()
+                && (chars[i + 1].is_alphabetic() || is_thousands(&chars[i + 1..])))
                 || (chars[i - 1].is_alphabetic() && is_year(&chars[i + 1..])));
         out.push(if glue { NBSP } else { c });
     }
     out
+}
+
+/// Разряд числа — ровно три цифры, за которыми не цифра.
+fn is_thousands(rest: &[char]) -> bool {
+    rest.len() >= 3
+        && rest[..3].iter().all(char::is_ascii_digit)
+        && rest.get(3).is_none_or(|c| !c.is_ascii_digit())
 }
 
 /// Год — ровно четыре цифры, за которыми не цифра.
@@ -348,6 +357,14 @@ mod tests {
                 "the other words still break: {out}"
             );
         }
+    }
+
+    /// «250 000» на двух строках читается как два числа.
+    #[test]
+    fn a_number_with_thousands_stays_on_one_line() {
+        assert_eq!(keep_numbers("250 000 people"), "250\u{A0}000\u{A0}people");
+        assert_eq!(keep_numbers("1 250 000"), "1\u{A0}250\u{A0}000");
+        assert_eq!(keep_numbers("in 12 2024"), "in 12 2024");
     }
 
     #[test]

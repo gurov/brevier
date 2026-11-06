@@ -183,9 +183,10 @@ fn rules(language: &str) -> Rules {
         .to_ascii_lowercase();
 
     match language.as_str() {
-        "python" | "py" | "ruby" | "rb" | "sh" | "bash" | "zsh" | "shell" | "console" | "yaml"
-        | "yml" | "toml" | "ini" | "conf" | "perl" | "r" | "make" | "makefile" | "dockerfile"
-        | "nix" | "elixir" | "ex" | "julia" | "jl" | "awk" | "cmake" | "tcl" | "fish" => Rules {
+        "python" | "python3" | "py" | "pycon" | "ruby" | "rb" | "sh" | "bash" | "zsh" | "shell"
+        | "console" | "yaml" | "yml" | "toml" | "ini" | "conf" | "perl" | "r" | "make"
+        | "makefile" | "dockerfile" | "nix" | "elixir" | "ex" | "julia" | "jl" | "awk"
+        | "cmake" | "tcl" | "fish" => Rules {
             line: HASH,
             block: None,
             quotes: &['"', '\'', '`'],
@@ -237,6 +238,14 @@ fn rules(language: &str) -> Rules {
 /// Разметить код. Куски не пересекаются и идут по порядку; всё, что между
 /// ними, — обычный текст.
 pub fn spans(code: &str, language: &str) -> Vec<Span> {
+    // Текст в `<pre>` — не код: в рассылке LWN красились «for» и «is»,
+    // а `https://` начинал комментарий.
+    if matches!(
+        language.trim().to_ascii_lowercase().as_str(),
+        "text" | "txt" | "plain" | "plaintext" | "none"
+    ) {
+        return Vec::new();
+    }
     let rules = rules(language);
     let bytes = code.as_bytes();
     let mut spans = Vec::new();
@@ -449,5 +458,11 @@ mod tests {
             painted("<p>a</p> <!-- прячем --> <b>b</b>", "html"),
             vec![(Kind::Comment, "<!-- прячем -->")]
         );
+    }
+
+    #[test]
+    fn plain_text_is_not_painted() {
+        assert_eq!(painted("for https://e.com is 1", "text"), vec![]);
+        assert_eq!(painted("for x", "Plain"), vec![]);
     }
 }
