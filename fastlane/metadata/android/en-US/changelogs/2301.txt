@@ -1,0 +1,4 @@
+• Articles cut up by adverts arrive whole: the end of the story no longer goes missing.
+• Code in Python's docs, other Sphinx sites and Wikipedia reads as code.
+• A link from another app no longer lands on the start page, and a page no longer waits for the pictures of the last one.
+• Lines no longer overlap below a tall picture, and stray markup is gone from the text.

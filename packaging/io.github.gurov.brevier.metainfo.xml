@@ -98,6 +98,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.23.1" date="2026-11-06" type="development">
+      <description>
+        <p>Articles cut up by adverts arrive whole, and code on Python's
+          documentation, other Sphinx sites and Wikipedia reads as code. On the
+          phone lines no longer overlap below a tall picture, a link from
+          another app no longer lands on the start page, and a page no longer
+          waits for the pictures of the last one. Headings, asterisks and
+          addresses no longer show up as markup in the text.</p>
+      </description>
+    </release>
     <release version="0.23.0" date="2026-11-05" type="development">
       <description>
         <p>Formulas are set on your own machine: letters and indices as text
