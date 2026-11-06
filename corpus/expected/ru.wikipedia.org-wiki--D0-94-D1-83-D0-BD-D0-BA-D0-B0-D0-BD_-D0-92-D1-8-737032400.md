@@ -1,7 +1,5 @@
 # Дункан Высокий
 
-Contributors to Wikimedia projects
-
 **Дункан Высокий**
 
 [англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Duncan the Tall

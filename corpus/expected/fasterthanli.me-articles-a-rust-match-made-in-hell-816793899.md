@@ -12,7 +12,7 @@ If you read something like [Some mistakes Rust doesn’t catch](https://fasterth
 
 Well today, let’s take a look at a footgun that cost me, infamous Rust advocate, suspected paid shill (I mean… [kinda](https://www.patreon.com/fasterthanlime)?), about a week.
 
-[## The basics](#the-basics)
+## The basics
 
 Let’s start with a little Rust syntax refresher!
 
@@ -90,7 +90,7 @@ fn main() {
 }
 ```
 
-![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~7010eabf1d70d303.jxl)
+![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~1eecd3d081b40415.webp)
 
 It doesn’t *look* more powerful here.
 
@@ -146,7 +146,7 @@ fn main() {
 
 It’s kinda hard to tell from the call site (`process(false)`) what that parameter is doing. If you’re using [Rust Analyzer](https://rust-analyzer.github.io/) in an editor that supports Inlay Hints, like [VS Code](https://code.visualstudio.com/), it’s a little more obvious, because it adds the parameter name:
 
-![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/inlay-hint~86f45f2be4d3fd9e.jxl)
+![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/inlay-hint~822a7782c7eecb9e.webp)
 
 But still, even with just two variants like that, I’d much rather have an enum:
 
@@ -176,7 +176,7 @@ Because that way, the call site is readable even outside of an IDE (say, while r
 
 And also, because `Protection::Secure` and `Protection::Insecure` are unique symbols (as opposed to `true` and `false`), from the comfort of my IDE, I can find places that do insecure processing by asking it to find References to `Protection::Insecure`:
 
-![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/references~8e192a0f11394a91.jxl)
+![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/references~37851db09df5cde7.webp)
 
 I can also, for example, mark it as deprecated, which will generate a warning wherever it’s used, without changing the type signature:
 
@@ -222,23 +222,23 @@ warning: `lox` (bin "lox") generated 1 warning
 
 And because I have the [Error Lens](https://marketplace.visualstudio.com/items?itemName=usernamehw.errorlens) extension, it even shows up inline:
 
-![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/error-lens~48a96b0d178a7cfc.jxl)
+![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/error-lens~a1973ff025a476f0.webp)
 
 And if you’re wondering why I’m spending time showing off tooling, it’s because it is an integral part of “the Rust experience”: great diagnostics? that’s a feature. Being able to see all references to a symbol, or to rename a symbol easily? That’s a feature. That Java has had forever (via Eclipse/NetBeans etc.), but is extremely hard to achieve in languages like Python or C++.
 
-![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~7010eabf1d70d303.jxl)
+![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~1eecd3d081b40415.webp)
 
 Isn’t C++ IDE support pretty okay by now?
 
-![Amos](https://cdn.fasterthanli.me/content/img/reimena/amos-neutral~55a3477398fe0cb1.jxl)
+![Amos](https://cdn.fasterthanli.me/content/img/reimena/amos-neutral~3a98ffaa495414b6.webp)
 
 It’s not non-existent, but several language features makes it really really hard to make it better.
 
-![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~7010eabf1d70d303.jxl)
+![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~1eecd3d081b40415.webp)
 
 Doesn’t Rust have the same issue with macros?
 
-![Amos](https://cdn.fasterthanli.me/content/img/reimena/amos-neutral~55a3477398fe0cb1.jxl)
+![Amos](https://cdn.fasterthanli.me/content/img/reimena/amos-neutral~3a98ffaa495414b6.webp)
 
 In a way! Although [rust-analyzer](https://rust-analyzer.github.io/) is getting pretty good at it, *even proc macros*. There’s still the odd “whoops no autocomplete” or “whoops no suggested imports” occurence, but the situation has improved dramatically over the past few months.
 
@@ -273,7 +273,7 @@ Hacker-safe thanks to protocol v2
 
 You can see that in the first match “arm”, we *destructure* the variant, to extract “version” out of it, which ends up being a local `u64` binding. Here too, inlay hints are useful:
 
-![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/type-hint-u64~099cddc1d53599c8.jxl)
+![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/type-hint-u64~027a820663dea8d6.webp)
 
 It’s unlikely we have [18 quintillion](https://www.wolframalpha.com/input/?i=2**64) versions of our security protocol, though - although we might want to use a fixed-size integer in our actual protocol, when we deal with it in code, we might want to list them out explicitly:
 
@@ -311,7 +311,7 @@ $ cargo run --quiet
 Hacker-safe thanks to protocol V2_1
 ```
 
-[## Clone and Copy](#clone-and-copy)
+## Clone and Copy
 
 Our `Protection` type, so far, is neither `Clone` nor `Copy`. Which means, when we pass it to `process`, it’s *moved* into it. And once a value is moved into something, we don’t have ownership of it anymore. So this doesn’t work, for example:
 
@@ -499,7 +499,7 @@ Here’s a question for you: what’s the type of `version` in the first match a
 
 I don’t have to wonder, because I’m looking at this inlay hint:
 
-![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/match-ref~3a5b284a46dd0082.jxl)
+![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/match-ref~4df2ec71f1606c76.webp)
 
 Which is… interesting. We’re able to match on `Protection` as well as `&Protection`. In the “value” case, we’ll get a `SecureVersion` when we destructure, and in the “reference” case we’ll get a `&SecureVersion`.
 
@@ -507,7 +507,7 @@ Which seems like a good thing! Because it’s exactly what I wanted to do.
 
 And now, for something completely different.
 
-[## Locks!](#locks)
+## Locks!
 
 Rust doesn’t let you create more than one “mutable reference” to something at a time. That’s one way in which it enforces memory safety.
 
@@ -1142,7 +1142,7 @@ For more information about this error, try `rustc --explain E0506`.
 error: could not compile `lox` due to previous error
 ```
 
-[## A couple deadlocks](#a-couple-deadlocks)
+## A couple deadlocks
 
 Let’s get back to mutexes.
 
@@ -1261,7 +1261,7 @@ syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
 
 It’s even better with colors!
 
-![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/gdb-colors~960dc2e1d5817889.jxl)
+![](https://cdn.fasterthanli.me/content/articles/a-rust-match-made-in-hell/assets/gdb-colors~573b5882e44b1b08.webp)
 
 A good way to get rid of that particular deadlock is to push the mutex outside of our type, so that methods are defined on the already-locked version:
 
@@ -1310,7 +1310,7 @@ exiting foo, value = 8
 
 With the added bonus that now, if `State` is not shared across multiple threads, we can use it without any locking whatsoever.
 
-[## All together now](#all-together-now)
+## All together now
 
 Let’s put everything we’ve learned together and look at some more code!
 
@@ -1430,13 +1430,13 @@ $ cargo run --quiet
 
 Huh. HUH!
 
-![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~7010eabf1d70d303.jxl)
+![Cool bear](https://cdn.fasterthanli.me/content/img/reimena/coolbear-neutral~1eecd3d081b40415.webp)
 
 Huh.
 
 That one… does not spark joy.
 
-[## What the fuck is happening?](#what-the-fuck-is-happening)
+## What the fuck is happening?
 
 …is a fair question, considering.
 
@@ -1569,7 +1569,7 @@ fn main() {
 }
 ```
 
-[## And now, async](#and-now-async)
+## And now, async
 
 So, `match` in combination with mutex guards has pretty surprising behavior!
 
@@ -1865,7 +1865,7 @@ res = abcabcabcabcabc
 
 Here’s the more complete lesson: never hold a Mutex guard across await points, *unless* it’s for an async lock (like `tokio::sync::Mutex`).
 
-[## The need for more, better lints](#the-need-for-more-better-lints)
+## The need for more, better lints
 
 Since “holding a sync mutex guard across an await point” is a correctness issue, there is actually a lint for it: [await\_holding\_lock](https://rust-lang.github.io/rust-clippy/master/#await_holding_lock).
 
@@ -2101,7 +2101,7 @@ $ cargo clippy
 
 And that’s *fairly* disappointing.
 
-[## My actual bug](#my-actual-bug)
+## My actual bug
 
 The bug I actually lost a week and a half to (well, I did refactor a bunch of things, which ended up making the codebase a lot nicer, so, no regrets) was a perfect storm of *all of the above*, plus `RwLock` instead of `Mutex`, making the deadlock even more subtle.
 
@@ -2431,7 +2431,7 @@ Then I fixed it, like this:
 
 And that was it. No more deadlocks.
 
-[## What happens now?](#what-happens-now)
+## What happens now?
 
 As soon as I [brought this up on Twitter](https://twitter.com/fasterthanlime/status/1491803585385877519), a bunch of things happened.
 

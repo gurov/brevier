@@ -12,7 +12,7 @@
 //! собираются ссылки, на нём же будет рендер.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use comrak::nodes::{AstNode, NodeValue};
 use comrak::{Arena, Options};
@@ -79,7 +79,10 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
     // картинки в ней свои.
     if let Some(html) = &article.listing_html {
         return Ok(Reading {
-            markdown: strip_chrome(&heading(article.title.trim(), &tidy(&to_markdown(html)?))),
+            markdown: parted(&strip_chrome(&heading(
+                article.title.trim(),
+                &tidy(&to_markdown(html)?),
+            ))),
             kind: Kind::Listing,
         });
     }
@@ -121,7 +124,7 @@ pub fn from_article(article: &Article) -> Result<Reading, Error> {
     // Сноски дописываем последними, уже после вычитания хвоста: тело сноски
     // из одной ссылки для правила про витрину неотличимо от анонса,
     // и весь блок уехал бы в вырезанное.
-    let markdown = with_notes(&markdown, &article.notes)?;
+    let markdown = with_notes(&parted(&markdown), &article.notes)?;
 
     Ok(Reading { markdown, kind })
 }
@@ -140,7 +143,8 @@ fn with_notes(markdown: &str, notes: &extract::Notes) -> Result<String, Error> {
     let mut out = unbracket(markdown.trim_end()).into_owned();
     out.push('\n');
     for (index, body) in notes.bodies.iter().enumerate() {
-        let text = squeeze_lines(&to_markdown(body)?);
+        // Сноска — одной строкой, резать нечего.
+        let text = squeeze_lines(&to_markdown(body)?.replace(BREAK, " "));
         if text.is_empty() {
             continue;
         }
@@ -334,7 +338,7 @@ pub fn from_html(html: &str) -> Result<String, Error> {
     if crate::nesting::html_too_deep(html) {
         return Err(Error::TooDeep(crate::nesting::MAX_DEPTH));
     }
-    Ok(tidy(&to_markdown(html)?))
+    Ok(parted(&tidy(&to_markdown(html)?)))
 }
 
 /// Жёсткий перенос (`\` в конце строки — так пишется `<br>`, #21) там,
@@ -583,7 +587,7 @@ fn tidy(md: &str) -> String {
             continue;
         }
 
-        if is_empty_item(line) {
+        if is_empty_item(line) || is_empty_heading(line) {
             continue;
         }
 
@@ -617,6 +621,13 @@ fn tidy(md: &str) -> String {
     } else {
         trimmed + "\n"
     }
+}
+
+/// Заголовок без слов: от него в тексте оставался только воздух. Так приезжает
+/// заголовок, в котором была одна лишь вырезанная вёрстка.
+fn is_empty_heading(line: &str) -> bool {
+    let text = line.trim();
+    (1..=6).contains(&text.len()) && text.chars().all(|sign| sign == '#')
 }
 
 /// Пункт списка без содержания — маркер и больше ничего.
@@ -990,17 +1001,26 @@ fn drop_repeated_captions(lines: &mut Vec<&str>) {
         let Some(alt) = image_alt(lines[i]) else {
             continue;
         };
-        if alt.chars().count() < CAPTION_MIN {
-            continue;
-        }
         let above = lines[..i].iter().rposition(|line| !line.trim().is_empty());
         let below = lines[i + 1..]
             .iter()
             .position(|line| !line.trim().is_empty())
             .map(|offset| i + 1 + offset);
+        // Подпись-заглушка: «...» под каждым снимком newsweek.com. Тот же снимок
+        // сразу следом — карусель, у которой осталась одна картинка.
+        if let Some(below) = below.filter(|below| {
+            is_empty_caption(lines[*below]) || lines[*below].trim() == lines[i].trim()
+        }) {
+            drop[below] = true;
+        }
+        if alt.chars().count() < CAPTION_MIN {
+            continue;
+        }
 
+        // Заголовок — не подпись: у новостных сайтов `alt` снимка под заголовком
+        // часто равен ему, а статья не должна остаться без заголовка.
         for neighbour in [above, below].into_iter().flatten() {
-            if same_text(lines[neighbour], alt) {
+            if same_text(lines[neighbour], alt) && !is_heading(lines[neighbour].trim()) {
                 drop[neighbour] = true;
             }
         }
@@ -1013,14 +1033,23 @@ fn drop_repeated_captions(lines: &mut Vec<&str>) {
         .collect();
 }
 
-/// Тот же текст с точностью до пробелов.
+fn is_empty_caption(line: &str) -> bool {
+    matches!(line.trim(), "." | ".." | "..." | "…")
+}
+
+/// Тот же текст с точностью до пробелов и знаков.
 ///
 /// habr печатает подпись дважды, но в видимом тексте ставит неразрывные
-/// пробелы, а в `alt` — обычные. Побайтово это разные строки, глазами —
-/// одна и та же, и читателю достаётся дубль.
+/// пробелы, а в `alt` — обычные; другие сайты меняют кавычки или пишут подпись
+/// курсивом. Побайтово это разные строки, глазами — одна и та же, и читателю
+/// достаётся дубль.
 fn same_text(line: &str, alt: &str) -> bool {
-    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    words(line) == words(alt)
+    let letters = |text: &'_ str| {
+        text.chars()
+            .filter(|sign| sign.is_alphanumeric())
+            .collect::<String>()
+    };
+    letters(line) == letters(alt)
 }
 
 /// `![подпись](url)` целой строкой — вернуть подпись.
@@ -1482,20 +1511,256 @@ fn convert(html: &str, notes: &HashMap<String, usize>) -> Result<String, Error> 
 /// есть что чинить, и пишем заново, только если что-то починили.
 fn prepare(html: &str) -> Cow<'_, str> {
     let tables = html.contains("<th");
-    let code = html.contains("<pre");
-    if !tables && !code {
+    let code = html.contains("<pre") || html.contains("<code");
+    let pictures = html.contains("<img");
+    let stressed = ["<strong", "<em", "<b>", "<b ", "<i>", "<i "]
+        .iter()
+        .any(|tag| html.contains(tag));
+    if !tables && !code && !pictures && !stressed {
         return Cow::Borrowed(html);
     }
     let doc = Document::from(html);
     let mut changed = tables && row_headers(&doc);
     if code {
+        changed |= code_in_pre(&doc);
         changed |= code_links(&doc);
+    }
+    if pictures {
+        changed |= picture_addresses(&doc);
+        changed |= illustrations(&doc);
+    }
+    if stressed {
+        changed |= emphasis(&doc);
     }
     if changed {
         Cow::Owned(doc.html().to_string())
     } else {
         Cow::Borrowed(html)
     }
+}
+
+/// Выше этого картинка — уже не знак в строке: строка текста — 26 px,
+/// значки и эмодзи — до 32.
+const LINE_PICTURE_PX: u32 = 40;
+
+/// Разрыв абзаца, отложенный до конца проходов: U+2029 — пробел для `trim`
+/// и `split_whitespace`, поэтому форма строки для них прежняя.
+const BREAK: char = '\u{2029}';
+
+/// Что стоит в строке наравне со словами: всё остальное кончает ряд текста.
+const IN_LINE: &[&str] = &[
+    "a", "abbr", "b", "big", "br", "cite", "del", "em", "font", "i", "img", "ins", "mark", "nobr",
+    "picture", "q", "s", "small", "span", "strike", "strong", "u",
+];
+
+/// Где картинка остаётся на месте, какой бы ни была: ячейке и заголовку абзац
+/// внутри ни к чему.
+const KEEPS_PICTURES: &[&str] = &[
+    "caption", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "td", "th",
+];
+
+/// Иллюстрации — своим абзацем, а не знаком в строке.
+///
+/// Обтекание (`alignleft` старого WordPress) держит снимок внутри абзаца,
+/// и без CSS он встаёт в строку и раздвигает её на свой рост; подпись под
+/// снимком так же попадает в один абзац с ним. Отличаем по размеру: атрибуты
+/// переживают Readability, а классы и стили — нет. Размера нет — картинка
+/// в начале абзаца всё равно снимок (из 995 страниц только снимки и логотипы),
+/// а среди слов это формула или значок, и она остаётся.
+///
+/// Здесь абзац не режем, а только помечаем место разрыва ([`BREAK`]):
+/// `strip_chrome` и `strip_teasers` узнают карточки и счётчики по строке
+/// «картинка и текст», и разрезанное раньше них оставалось на странице.
+/// Режет [`parted`], когда они закончили.
+fn illustrations(doc: &Document) -> bool {
+    let mut changed = false;
+    for image in doc.select("img").nodes() {
+        let Some((picture, spot)) = lifted(image) else {
+            continue;
+        };
+        changed = true;
+        let mark = doc.tree.new_text(BREAK.to_string());
+        match spot {
+            Spot::Opens => picture.insert_after(&mark),
+            Spot::Closes(paragraph) => {
+                picture.remove_from_parent();
+                paragraph.append_child(&mark);
+                paragraph.append_child(&picture);
+            }
+        }
+    }
+    changed
+}
+
+enum Spot<'a> {
+    /// Открывает абзац: разрыв за ней.
+    Opens,
+    /// Стоит среди слов: уходит в конец абзаца.
+    Closes(NodeRef<'a>),
+}
+
+/// Что отделить и как — или `None`, если картинка остаётся где стоит.
+fn lifted<'a>(image: &NodeRef<'a>) -> Option<(NodeRef<'a>, Spot<'a>)> {
+    let side = declared_side(image);
+    if side.is_some_and(|side| side <= LINE_PICTURE_PX) || is_formula(image) {
+        return None;
+    }
+    // Ссылка на одну картинку уходит вместе с ней, ссылка с заголовком — нет.
+    let mut picture = *image;
+    while let Some(up) = picture
+        .parent()
+        .filter(|up| is_in_line(up) && !has_words(up))
+    {
+        picture = up;
+    }
+    let (mut before, mut after) = (false, false);
+    let mut top = picture;
+    loop {
+        before |= words_along(&top, NodeRef::prev_sibling);
+        after |= words_along(&top, NodeRef::next_sibling);
+        match top.parent().filter(is_in_line) {
+            Some(up) => top = up,
+            None => break,
+        }
+    }
+    let block = top.parent()?;
+    let name = block.node_name()?;
+    if KEEPS_PICTURES.contains(&name.as_ref()) {
+        return None;
+    }
+    if !before {
+        return after.then_some((picture, Spot::Opens));
+    }
+    // Среди слов — только снимок заведомо, и только в настоящем абзаце: в тексте
+    // на `<br>` «конец абзаца» бывает концом всей статьи.
+    let breaks = dom_query::Selection::from(block).select("br").exists();
+    (side.is_some() && name.as_ref() == "p" && !breaks).then_some((picture, Spot::Closes(block)))
+}
+
+/// Разрезать абзацы там, где `illustrations` поставил [`BREAK`]. Подпись,
+/// дословно повторяющая `alt`, встала теперь своей строкой и уходит.
+fn parted(md: &str) -> String {
+    if !md.contains(BREAK) {
+        return md.to_owned();
+    }
+    let mut out = String::with_capacity(md.len() + 64);
+    let mut in_code = false;
+    for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if in_code || !line.contains(BREAK) || line.trim_start().starts_with('|') {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        let (mark, body) = line.split_at(container_width(line));
+        // Продолжение пункта — отступом, цитаты — своим знаком.
+        let joint: String = mark
+            .chars()
+            .map(|sign| if sign == '>' { '>' } else { ' ' })
+            .collect();
+        let body = out_of_links(body);
+        let parts = body
+            .split(BREAK)
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+        for (index, part) in parts.enumerate() {
+            if index > 0 {
+                out.push_str(joint.trim_end());
+                out.push('\n');
+            }
+            out.push_str(if index > 0 { &joint } else { mark });
+            out.push_str(part);
+            out.push('\n');
+        }
+    }
+    let mut lines: Vec<&str> = out.lines().collect();
+    drop_repeated_captions(&mut lines);
+    tidy(&lines.join("\n"))
+}
+
+/// Сколько байт в начале строки — цитаты и маркер пункта.
+fn container_width(line: &str) -> usize {
+    let mut at = 0;
+    loop {
+        let rest = &line[at..];
+        let spaces = rest.len() - rest.trim_start_matches(' ').len();
+        let body = &rest[spaces..];
+        let digits = body.chars().take_while(char::is_ascii_digit).count();
+        let sign = if body.starts_with("> ") || body.starts_with("- ") {
+            2
+        } else if digits > 0 && body[digits..].starts_with(". ") {
+            digits + 2
+        } else {
+            return at + spaces;
+        };
+        at += spaces + sign;
+    }
+}
+
+/// `[![a](u)⁋Заголовок](l)` — снимок выходит из ссылки вперёд: разрыв внутри
+/// неё сломал бы разметку, а заголовок остаётся ссылкой.
+fn out_of_links(body: &str) -> String {
+    let mut out = body.to_owned();
+    let mut from = 0;
+    while let Some(found) = out[from..].find(BREAK) {
+        let at = from + found;
+        from = at + BREAK.len_utf8();
+        let Some(image) = out[..at].rfind("![") else {
+            continue;
+        };
+        // Вторая `](` — ссылка закрылась раньше разрыва, и снимок ушёл с ней.
+        let open = out[image..at].matches("](").count() == 1;
+        if open && image > 0 && out.as_bytes()[image - 1] == b'[' {
+            out.remove(image - 1);
+            from -= 1;
+            // Пробел отделял заголовок от снимка, а в начале ссылки он подчёркнут.
+            let spaces = out[from..].len() - out[from..].trim_start_matches(' ').len();
+            out.replace_range(from..from + spaces, "[");
+        }
+    }
+    out
+}
+
+/// Размер из атрибутов: высота, а если её нет — ширина. Проценты — не размер.
+fn declared_side(image: &NodeRef) -> Option<u32> {
+    let side = |name| image.attr(name).and_then(|value| value.trim().parse().ok());
+    side("height").or_else(|| side("width"))
+}
+
+/// Формула — часть фразы: своя (`data:`, см. `math`) или картинка MediaWiki.
+fn is_formula(image: &NodeRef) -> bool {
+    image
+        .attr("src")
+        .is_some_and(|src| src.starts_with("data:"))
+        || image
+            .attr("alt")
+            .is_some_and(|alt| alt.contains(r"\displaystyle"))
+}
+
+fn is_in_line(node: &NodeRef) -> bool {
+    node.node_name()
+        .is_some_and(|name| IN_LINE.contains(&name.as_ref()))
+}
+
+fn has_words(node: &NodeRef) -> bool {
+    node.text().chars().any(char::is_alphanumeric)
+}
+
+/// Есть ли слова в ряду текста рядом с узлом: ряд кончается блоком.
+fn words_along<'a>(from: &NodeRef<'a>, step: fn(&NodeRef<'a>) -> Option<NodeRef<'a>>) -> bool {
+    let mut at = step(from);
+    while let Some(node) = at {
+        if node.is_element() && !is_in_line(&node) {
+            return false;
+        }
+        if has_words(&node) {
+            return true;
+        }
+        at = step(&node);
+    }
+    false
 }
 
 /// Ссылки внутри блока кода — текстом.
@@ -1507,18 +1772,228 @@ fn prepare(html: &str) -> Cow<'_, str> {
 /// снимаем — блок кода ссылок держать не умеет.
 fn code_links(doc: &Document) -> bool {
     let links = doc.select("pre a");
-    let found = links.exists();
+    let mut changed = links.exists();
     for link in links.nodes() {
-        // `unwrap_node` у dom_query снимает родителя, как `unwrap` в jQuery,
-        // а не саму ссылку, — поэтому заменой на её текст.
-        let text = link.text();
-        let escaped = text
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        link.replace_with_html(escaped);
+        as_plain_text(link);
     }
-    found
+    // Вне `<pre>` ссылка внутри `<code>`: бэктики делают из неё буквы,
+    // и `[while](https://…)` так и стояло в тексте у Википедии. Код из одной
+    // ссылки — та же ссылка снаружи кода, в остальных адрес не показать.
+    for link in doc.select("code a").nodes() {
+        changed = true;
+        let code = link.parent().filter(|code| code.has_name("code"));
+        let whole = code.filter(|code| {
+            code.children()
+                .iter()
+                .all(|child| child.id == link.id || child.text().trim().is_empty())
+        });
+        match whole {
+            Some(code) => {
+                code.set_html(link.inner_html());
+                link.remove_children();
+                code.insert_before(link);
+                code.remove_from_parent();
+                link.append_child(&code);
+            }
+            None => as_plain_text(link),
+        }
+    }
+    changed
+}
+
+/// `<pre>` без `<code>` — тоже блок кода.
+///
+/// htmd ограждает только `<pre><code>`, а голый `<pre>` отдавал текстом: строки
+/// склеивались в абзацы, `>>>` становилось тройной цитатой, а комментарии `#` —
+/// заголовками в оглавлении. Так верстают вся документация на Sphinx
+/// (docs.python.org) и примеры кода Википедии.
+pub(crate) fn code_in_pre(doc: &Document) -> bool {
+    let mut changed = false;
+    for pre in doc.select("pre").nodes() {
+        let coded = pre
+            .element_children()
+            .iter()
+            .any(|child| child.has_name("code"));
+        if !coded {
+            // Подсветка верстается `<span>`: без них это, может, и не код.
+            let painted = pre
+                .element_children()
+                .iter()
+                .any(|child| child.has_name("span"));
+            let plain = if painted { "" } else { " data-plain=\"\"" };
+            pre.set_html(format!("<code{plain}>{}</code>", pre.inner_html()));
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// `unwrap_node` у dom_query снимает родителя, как `unwrap` в jQuery,
+/// а не сам узел, — поэтому заменой на его текст.
+fn as_plain_text(node: &NodeRef) {
+    let escaped = node
+        .text()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    node.replace_with_html(escaped);
+}
+
+/// Адрес картинки таким, каким его поймёт markdown.
+///
+/// Шаблоны stripe.com печатают `src` с переводами строк вокруг адреса, браузер
+/// их срезает, а markdown из такого адреса не собирает картинку, и читателю
+/// доставался текст `![…](<`. Slate кладёт в `src` целый список `srcset`:
+/// берём последний адрес — самый крупный.
+fn picture_addresses(doc: &Document) -> bool {
+    let mut changed = false;
+    let mut seen = HashSet::new();
+    for image in doc.select("img[src]").nodes() {
+        let Some(written) = image.attr("src") else {
+            continue;
+        };
+        let address = one_address(&written);
+        let lazy = image.attr("data-src");
+        // Список рядом с настоящей картинкой — её близнец: его собирает
+        // Readability из `data-srcset`, и снимок вставал дважды.
+        let twin = address != written.trim()
+            && lazy
+                .as_ref()
+                .is_some_and(|lazy| seen.contains(lazy.as_ref()));
+        if twin {
+            image.remove_from_parent();
+            changed = true;
+            continue;
+        }
+        if let Some(lazy) = lazy {
+            seen.insert(lazy.to_string());
+        }
+        if address != written.as_ref() {
+            image.set_attr("src", address);
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn one_address(written: &str) -> &str {
+    let address = written.trim();
+    let is_width = |word: &str| {
+        let word = word.trim_end_matches(',');
+        word.len() > 1
+            && word.ends_with(['w', 'x'])
+            && word[..word.len() - 1]
+                .chars()
+                .all(|sign| sign.is_ascii_digit() || sign == '.')
+    };
+    let words: Vec<&str> = address.split_whitespace().collect();
+    if words.len() < 2 || !words.iter().any(|word| is_width(word)) {
+        return address;
+    }
+    words
+        .iter()
+        .rfind(|word| !is_width(word))
+        .map_or(address, |word| word.trim_end_matches(','))
+}
+
+/// Выделение, которое markdown не закроет сам.
+///
+/// `**` работает, только если с его стороны нет стыка «знак и буква»:
+/// `**“**La` и `Figley**[4]**,` остаются звёздочками, и читатель видит их как
+/// есть (редактор жирнит кавычку вместе со словом, сноску вместе с точкой).
+/// Такие знаки выносим за выделение, а выделение из одних знаков снимаем.
+/// Соседние одинаковые теги сливаем: `<em>a</em><em>b</em>` дало бы `*a**b*`.
+fn emphasis(doc: &Document) -> bool {
+    let mut changed = false;
+    let stressed = doc.select("strong, b, em, i");
+    for node in stressed.nodes() {
+        while let Some(next) = node.next_sibling().filter(|next| {
+            next.is_element() && next.node_name() == node.node_name() && node.parent().is_some()
+        }) {
+            if let Some(first) = next.first_child() {
+                node.append_children(&first);
+            }
+            next.remove_from_parent();
+            changed = true;
+        }
+    }
+    for node in stressed.nodes() {
+        if node.parent().is_some() {
+            changed |= flanked(doc, node);
+        }
+    }
+    changed
+}
+
+/// Сосед выделения: `<span>` для markdown не существует, и соседом `<b>`
+/// в `<span>a</span><span><b>[1]</b></span>` остаётся буква за его границей.
+fn beside<'a>(
+    node: &NodeRef<'a>,
+    step: fn(&NodeRef<'a>) -> Option<NodeRef<'a>>,
+) -> Option<NodeRef<'a>> {
+    let mut at = *node;
+    loop {
+        if let Some(side) = step(&at) {
+            return Some(side);
+        }
+        at = at.parent().filter(|up| up.has_name("span"))?;
+    }
+}
+
+/// Вынести знаки с краёв выделения там, где снаружи буква.
+fn flanked(doc: &Document, node: &NodeRef) -> bool {
+    let text = node.text();
+    if text.trim().is_empty() {
+        return false;
+    }
+    if !text.chars().any(char::is_alphanumeric) {
+        node.replace_with_html(node.inner_html());
+        return true;
+    }
+    let is_sign = |sign: char| !sign.is_alphanumeric() && !sign.is_whitespace();
+    let mut changed = false;
+
+    let letter_before = beside(node, NodeRef::prev_sibling)
+        .and_then(|before| before.text().chars().last())
+        .is_some_and(char::is_alphanumeric);
+    if let Some(first) = node.first_child().filter(|_| letter_before) {
+        if first.is_text() {
+            let written = first.text();
+            let rest = written.trim_start_matches(is_sign);
+            if rest.len() < written.len() && !rest.is_empty() {
+                let signs = &written[..written.len() - rest.len()];
+                node.insert_before(&doc.tree.new_text(signs));
+                first.replace_with(&doc.tree.new_text(rest));
+                changed = true;
+            }
+        } else if first.has_name("a") {
+            // Адрес кончается знаком: `**[a](u)**b` звёздочкам не закрыть.
+            first.remove_from_parent();
+            node.insert_before(&first);
+            changed = true;
+        }
+    }
+
+    let letter_after = beside(node, NodeRef::next_sibling)
+        .and_then(|after| after.text().chars().next())
+        .is_some_and(char::is_alphanumeric);
+    if let Some(last) = node.last_child().filter(|_| letter_after) {
+        if last.is_text() {
+            let written = last.text();
+            let rest = written.trim_end_matches(is_sign);
+            if rest.len() < written.len() && !rest.is_empty() {
+                let signs = &written[rest.len()..];
+                node.insert_after(&doc.tree.new_text(signs));
+                last.replace_with(&doc.tree.new_text(rest));
+                changed = true;
+            }
+        } else if last.has_name("a") {
+            last.remove_from_parent();
+            node.insert_after(&last);
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Подписи строк таблицы — `<th>` в строке рядом с `<td>`.
@@ -1570,6 +2045,15 @@ fn row_headers(doc: &Document) -> bool {
                     }
                     [only] => out.push_str(&format!("<div>{}</div>", only.inner_html())),
                     [label, values @ ..] => {
+                        // Подпись в абзаце (Parsoid): блок внутри `<strong>`
+                        // рвёт выделение, и звёздочки вставали в текст.
+                        loop {
+                            let blocks = dom_query::Selection::from(*label).select("div, p");
+                            let Some(block) = blocks.nodes().first() else {
+                                break;
+                            };
+                            block.replace_with_html(block.inner_html());
+                        }
                         let label = label.inner_html();
                         let colon = if label.trim_end().ends_with(':') {
                             ""
@@ -1691,7 +2175,8 @@ fn span_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResu
 fn anchor_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerResult> {
     let content = handlers.walk_children(element.node).content;
     if content.trim().is_empty() {
-        return None;
+        // Пробел внутри пустой ссылки разделял слова: «narcotráfico<a> </a>es».
+        return (!content.is_empty()).then(|| " ".into());
     }
     let href = element
         .attrs
@@ -1716,10 +2201,29 @@ fn anchor_handler(handlers: &dyn Handlers, element: Element) -> Option<HandlerRe
             return Some(format!("[{joined}]({})", crate::feed::destination(&href)).into());
         }
     }
-    if content.trim().contains('\n') {
-        return Some(card_link(content.trim(), &href).into());
+    if is_heading(text) {
+        // Ссылка на себя вокруг заголовка — значок раздела (fasterthanli.me
+        // верстает так каждый заголовок): читателю нужен сам заголовок.
+        if href.trim_start().starts_with('#') {
+            return Some(format!("\n\n{text}\n\n").into());
+        }
+        return Some(card_link(text, href.trim()).into());
+    }
+    if text.contains('\n') {
+        return Some(card_link(text, href.trim()).into());
+    }
+    // Пробел в адресе браузер терпит, а markdown на нём ссылку обрывает.
+    if href.trim().contains(' ') {
+        let address = crate::feed::destination(href.trim());
+        return Some(format!("[{text}]({address})").into());
     }
     handlers.fallback(element)
+}
+
+/// Строка — заголовок: решётки и пробел.
+fn is_heading(line: &str) -> bool {
+    let hashes = line.chars().take_while(|sign| *sign == '#').count();
+    (1..=6).contains(&hashes) && line[hashes..].starts_with(' ')
 }
 
 /// Ссылка, обнявшая целую карточку, — заголовок-ссылка плюс обычные блоки.
@@ -2062,6 +2566,334 @@ mod shallow_tests {
 
 #[cfg(test)]
 mod tests {
+
+    fn converted(html: &str) -> String {
+        from_html(html).expect("конвертация").trim().to_owned()
+    }
+
+    /// fasterthanli.me верстает так каждый заголовок: `[## The basics](#…)`
+    /// оставалось в тексте разметкой, и полка не видела разделов.
+    #[test]
+    fn a_heading_inside_a_link_to_itself_is_just_a_heading() {
+        let html = "<p>Words.</p><a id=\"b\" href=\"#b\"><h2>The basics</h2></a><p>More.</p>";
+        assert_eq!(converted(html), "Words.\n\n## The basics\n\nMore.");
+    }
+
+    #[test]
+    fn a_heading_inside_a_link_keeps_the_address() {
+        let html = "<a href=\"https://e.com/a\"><h3>Title</h3></a>";
+        assert_eq!(converted(html), "### [Title](https://e.com/a)");
+    }
+
+    /// stripe.com: браузер срезает переводы строк вокруг адреса, а markdown
+    /// на них картинку не собирал, и читателю оставался текст `![…](<`.
+    #[test]
+    fn a_picture_address_is_cut_out_of_its_whitespace() {
+        let html = "<p><img alt=\"Graph\" src=\"\n\n   https://e.com/a.png?w=1\n  \"></p>";
+        assert_eq!(converted(html), "![Graph](https://e.com/a.png?w=1)");
+    }
+
+    #[test]
+    fn a_srcset_written_into_src_gives_its_largest_address() {
+        let html = "<p><img alt=\"Graph\" src=\"https://e.com/a.png?w=320 320w,\n\
+                    https://e.com/a.png?w=960 960w\"></p>";
+        assert_eq!(converted(html), "![Graph](https://e.com/a.png?w=960)");
+    }
+
+    /// Slate: рядом с настоящей картинкой Readability собирает близнеца
+    /// из `data-srcset`, со списком вместо адреса.
+    #[test]
+    fn the_twin_built_from_a_srcset_goes() {
+        let html = "<figure><img alt=\"Reader\" data-src=\"https://e.com/a.png\" \
+                    src=\"https://e.com/a.png\"><img alt=\"Reader\" data-src=\"https://e.com/a.png\" \
+                    src=\"https://e.com/a.png?w=320 320w, https://e.com/a.png?w=480 480w\"></figure>";
+        assert_eq!(converted(html), "![Reader](https://e.com/a.png)");
+    }
+
+    #[test]
+    fn a_space_in_a_picture_address_is_not_a_list() {
+        assert_eq!(one_address(" my picture.png "), "my picture.png");
+        assert_eq!(one_address("a.png 2x"), "a.png");
+    }
+
+    /// Sphinx: `>>>` становилось тройной цитатой, `# …` — заголовком.
+    #[test]
+    fn a_bare_pre_is_a_code_block() {
+        let html =
+            "<p>Run:</p><pre><span></span><span>&gt;&gt;&gt; </span>import os\n# done\n</pre>";
+        assert_eq!(converted(html), "Run:\n\n```\n>>> import os\n# done\n```");
+    }
+
+    /// Бэктики делают из ссылки буквы: `[while](https://…)` у Википедии.
+    #[test]
+    fn a_link_inside_code_goes_around_it() {
+        let html = "<p><code><a href=\"https://e.com/while\">while</a></code> repeats.</p>";
+        assert_eq!(converted(html), "[`while`](https://e.com/while) repeats.");
+    }
+
+    #[test]
+    fn a_link_among_code_leaves_its_words() {
+        let html = "<p>Add <code>{{<a href=\"https://e.com/t\">cite</a>}}</code> here.</p>";
+        assert_eq!(converted(html), "Add `{{cite}}` here.");
+    }
+
+    /// Всё это CommonMark оставлял звёздочками на экране.
+    #[test]
+    fn emphasis_of_signs_alone_goes() {
+        assert_eq!(
+            converted("<p><strong>“</strong>La casa”.</p>"),
+            "“La casa”."
+        );
+        assert_eq!(converted("<p>In flux<strong>.</strong></p>"), "In flux.");
+    }
+
+    #[test]
+    fn signs_step_out_of_emphasis_next_to_a_letter() {
+        assert_eq!(
+            converted("<p><strong>Did you know…</strong>that it works</p>"),
+            "**Did you know**…that it works"
+        );
+        assert_eq!(
+            converted("<p>El fiscal agregó<strong>: “Hizo todo</strong> lo posible</p>"),
+            "El fiscal agregó: **“Hizo todo** lo posible"
+        );
+    }
+
+    /// Обычная подпись «**Note:** text» остаётся как есть: снаружи не буква.
+    #[test]
+    fn signs_stay_in_emphasis_beside_a_space() {
+        assert_eq!(
+            converted("<p><strong>Note:</strong> text</p>"),
+            "**Note:** text"
+        );
+    }
+
+    #[test]
+    fn a_span_is_no_wall_for_emphasis() {
+        assert_eq!(
+            converted("<p><span>voluntad</span><span><b>[6]</b></span><span>. Como</span></p>"),
+            "voluntad\\[**6\\]**. Como"
+        );
+    }
+
+    #[test]
+    fn neighbouring_emphasis_becomes_one() {
+        assert_eq!(
+            converted(
+                "<p><em>Like it? </em><em><a href=\"https://e.com\">Sign up</a></em><em>!</em></p>"
+            ),
+            "*Like it? [Sign up](https://e.com)!*"
+        );
+    }
+
+    #[test]
+    fn a_link_at_the_edge_of_emphasis_steps_out_next_to_a_letter() {
+        let html = "<p><b>tied to the <a href=\"https://e.com\">trade</a></b>rs</p>";
+        assert_eq!(converted(html), "**tied to the** [trade](https://e.com)rs");
+    }
+
+    /// Пробел внутри пустой ссылки разделял слова.
+    #[test]
+    fn a_link_of_a_space_leaves_the_space() {
+        let html = "<p>the trade<a href=\"https://e.com\"> </a>is</p>";
+        assert_eq!(converted(html), "the trade is");
+    }
+
+    /// Адрес с пробелом браузер терпит, а markdown ссылку на нём обрывает.
+    #[test]
+    fn a_space_in_a_link_address_keeps_the_link() {
+        let html = "<p><a href=\"https://e.com/author/Ann Lee\">Ann</a></p>";
+        assert_eq!(converted(html), "[Ann](<https://e.com/author/Ann Lee>)");
+    }
+
+    /// Parsoid завёртывает подпись строки в блоки, и выделение рвалось.
+    #[test]
+    fn a_row_label_in_blocks_stays_one_line() {
+        let html = "<table><tr><th><div><p><a href=\"https://e.com\">Chair</a></p></div></th>\
+                    <td>Shane</td></tr></table>";
+        assert_eq!(converted(html), "**[Chair](https://e.com):** Shane");
+    }
+
+    #[test]
+    fn an_empty_heading_leaves_no_air() {
+        assert_eq!(
+            converted("<p>a</p><h2><span></span></h2><p>b</p>"),
+            "a\n\nb"
+        );
+        assert!(is_empty_heading("######") && is_empty_heading("  ## "));
+        assert!(!is_empty_heading("## a") && !is_empty_heading("#######"));
+    }
+
+    /// Заглушка подписи под каждым снимком newsweek.com.
+    #[test]
+    fn a_caption_of_dots_goes() {
+        let mut lines = vec!["![Trump](https://e.com/a.png)", "", "...", "", "Words."];
+        drop_repeated_captions(&mut lines);
+        assert_eq!(lines, ["![Trump](https://e.com/a.png)", "", "", "Words."]);
+    }
+
+    #[test]
+    fn the_same_picture_twice_in_a_row_stands_once() {
+        let picture = "![Trump](https://e.com/a.png)";
+        let mut lines = vec![picture, "", picture, "", "Words."];
+        drop_repeated_captions(&mut lines);
+        assert_eq!(lines, [picture, "", "", "Words."]);
+    }
+
+    /// Новостные сайты дают снимку `alt` с заголовком статьи, а статья
+    /// без заголовка остаться не должна.
+    #[test]
+    fn a_heading_is_no_caption_of_the_picture_below() {
+        let html = "<h1>The bloody trace</h1><p><img alt=\"The bloody trace\" src=\"https://e.com/a.png\"></p>";
+        assert_eq!(
+            converted(html),
+            "# The bloody trace\n\n![The bloody trace](https://e.com/a.png)"
+        );
+    }
+
+    /// Обтекание старого WordPress: без CSS снимок раздвигал первую строку.
+    #[test]
+    fn a_floated_picture_leaves_the_line_it_opened() {
+        let md = converted(
+            r#"<p><a href="big.jpg"><img src="s.jpg" alt="spiders" width="219" height="230"></a>That's why.</p>"#,
+        );
+        assert_eq!(md, "[![spiders](s.jpg)](big.jpg)\n\nThat's why.");
+    }
+
+    #[test]
+    fn a_picture_of_unknown_size_is_a_picture_only_at_the_start() {
+        let opening = converted(r#"<p><img src="s.jpg" alt="a"> A caption</p>"#);
+        assert_eq!(opening, "![a](s.jpg)\n\nA caption");
+        let among = r#"<p>Before <img src="f.png" alt="f"> after</p>"#;
+        assert_eq!(converted(among), "Before ![f](f.png) after");
+    }
+
+    #[test]
+    fn an_icon_stays_in_its_line() {
+        let opening = r#"<p><img src="i.svg" alt="i" width="24" height="24"> Open it</p>"#;
+        assert_eq!(converted(opening), "![i](i.svg) Open it");
+        let among = r#"<p>The <img src="i.png" alt="i" width="185" height="18"> logo</p>"#;
+        assert_eq!(converted(among), "The ![i](i.png) logo");
+    }
+
+    #[test]
+    fn a_formula_stays_in_its_line_whatever_its_size() {
+        let tex = r#"<p><img src="m.svg" alt="{\displaystyle x}"> is the root</p>"#;
+        assert!(
+            converted(tex).ends_with("is the root"),
+            "{}",
+            converted(tex)
+        );
+        assert!(!converted(tex).contains("\n\n"), "{}", converted(tex));
+        let drawn = r#"<p><img src="data:image/svg+xml;base64,AA" alt="x" height="90"> is</p>"#;
+        assert!(!converted(drawn).contains("\n\n"), "{}", converted(drawn));
+    }
+
+    #[test]
+    fn known_pictures_among_words_follow_their_paragraph_in_order() {
+        let md = converted(
+            r#"<p>One <img src="1.jpg" alt="a" width="300" height="200"> two
+               <img src="2.jpg" alt="b" width="300" height="200"> three</p><p>Next</p>"#,
+        );
+        let at = |what: &str| md.find(what).unwrap_or_else(|| panic!("{what}: {md}"));
+        assert!(
+            at("three") < at("1.jpg") && at("1.jpg") < at("2.jpg"),
+            "{md}"
+        );
+        assert!(at("2.jpg") < at("Next"), "{md}");
+    }
+
+    /// Текст на `<br>` — один блок на всю статью: вынести значило бы увезти
+    /// снимок в её конец.
+    #[test]
+    fn a_picture_among_lines_of_breaks_stays_where_it_was_put() {
+        let md = converted(
+            r#"<p>One<br><br>Two <img src="1.jpg" alt="a" width="300" height="200"><br><br>Three</p>"#,
+        );
+        let at = |what: &str| md.find(what).unwrap_or_else(|| panic!("{what}: {md}"));
+        assert!(at("Two") < at("1.jpg") && at("1.jpg") < at("Three"), "{md}");
+    }
+
+    #[test]
+    fn a_caption_after_a_break_starts_its_own_paragraph() {
+        let md = converted(r#"<p><img src="s.jpg" alt="a"><br><em>A caption</em></p>"#);
+        assert_eq!(md, "![a](s.jpg)\n\n*A caption*");
+    }
+
+    #[test]
+    fn a_card_link_keeps_its_words_and_gives_up_the_picture() {
+        let md = converted(r#"<p><a href="/p"><img src="s.jpg" alt="a"> A headline</a></p>"#);
+        assert_eq!(md, "![a](s.jpg)\n\n[A headline](/p)");
+    }
+
+    #[test]
+    fn a_list_item_keeps_its_picture_inside() {
+        let md = converted(r#"<ul><li><img src="s.jpg" alt="a"> One</li><li>Two</li></ul>"#);
+        assert!(md.starts_with("- ![a](s.jpg)"), "{md}");
+        assert!(md.contains("- Two"), "{md}");
+        assert_eq!(md.matches("- ").count(), 2, "{md}");
+    }
+
+    #[test]
+    fn a_table_cell_keeps_its_picture_in_line() {
+        let md = converted(
+            r#"<table><tr><td><img src="s.jpg" alt="a" width="300" height="200"> One</td></tr></table>"#,
+        );
+        assert!(md.contains("![a](s.jpg) One"), "{md}");
+    }
+
+    #[test]
+    fn a_quote_keeps_its_picture_and_its_words_inside() {
+        let md = converted(r#"<blockquote><p><img src="s.jpg" alt="a"> Words</p></blockquote>"#);
+        assert_eq!(md, "> ![a](s.jpg)\n>\n> Words");
+    }
+
+    /// Счётчик рядом со значком — обвязка, и `strip_chrome` узнаёт его по строке
+    /// «картинка и текст»: разрезанное раньше него оставалось на странице.
+    #[test]
+    fn a_counter_beside_an_icon_is_still_chrome() {
+        let article = Article {
+            title: "T".to_owned(),
+            byline: None,
+            published: None,
+            content_html:
+                r#"<p>Words of the article go here.</p><p><img src="i.svg" alt="Likes"> 12 min read</p>"#
+                    .to_owned(),
+            thumbs: HashMap::new(),
+            listing_html: None,
+            notes: extract::Notes::default(),
+            site: Vec::new(),
+            feeds: Vec::new(),
+            lang: None,
+            next: None,
+            claims_article: true,
+        };
+        let md = from_article(&article).expect("статья").markdown;
+        assert!(!md.contains("i.svg"), "{md}");
+        assert!(!md.contains("min read"), "{md}");
+    }
+
+    #[test]
+    fn a_caption_repeating_the_alt_in_other_quotes_is_a_repeat() {
+        let html = r#"<p><img src="s.jpg" alt="&quot;Two words&quot; and more of the caption"> «Two words» and more of the caption</p>"#;
+        assert_eq!(
+            from_html(html)
+                .expect("конвертация")
+                .matches("Two words")
+                .count(),
+            1
+        );
+    }
+
+    /// Картинка меж абзацев и так одна: её не трогаем, и текст вокруг цел.
+    #[test]
+    fn a_picture_between_paragraphs_is_not_moved() {
+        let md = converted(
+            r#"<div><p>One</p><img src="s.jpg" alt="a" width="300" height="200"><p>Two</p></div>"#,
+        );
+        let at = |what: &str| md.find(what).unwrap_or_else(|| panic!("{what}: {md}"));
+        assert!(at("One") < at("s.jpg") && at("s.jpg") < at("Two"), "{md}");
+    }
 
     /// `<br>` на краю блока и в ячейке таблицы — не строка (#21).
     #[test]

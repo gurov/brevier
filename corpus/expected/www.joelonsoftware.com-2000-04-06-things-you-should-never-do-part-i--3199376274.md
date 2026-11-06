@@ -1,14 +1,14 @@
 # Things You Should Never Do, Part I
 
-by
-
 Netscape 6.0 is finally going into its first public beta. There never was a version 5.0. The last major release, version 4.0, was released almost three years ago. Three years is an *awfully* long time in the Internet world. During this time, Netscape sat by, helplessly, as their market share plummeted.
 
 It’s a bit smarmy of me to criticize them for waiting so long between releases. They didn’t do it *on purpose*, now, did they?
 
 Well, yes. They did. They did it by making the **single worst strategic mistake** that any software company can make:
 
-![](https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Upper_West_Side_Brownstones_2.jpg?w=730&ssl=1)They decided to rewrite the code from scratch.
+![](https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Upper_West_Side_Brownstones_2.jpg?w=730&ssl=1)
+
+They decided to rewrite the code from scratch.
 
 Netscape wasn’t the first company to make this mistake. Borland made the same mistake when they bought Arago and tried to make it into dBase for Windows, a doomed project that took so long that Microsoft Access ate their lunch, then they made it again in rewriting Quattro Pro from scratch and astonishing people with how few features it had. Microsoft almost made the same mistake, trying to rewrite Word for Windows from scratch in a doomed project called Pyramid which was shut down, thrown away, and swept under the rug. Lucky for Microsoft, they had never stopped working on the old code base, so they had something to ship, making it merely a financial disaster, not a strategic one.
 
@@ -20,7 +20,9 @@ It’s harder to read code than to write it.
 
 This is why code reuse is so hard. This is why everybody on your team has a different function they like to use for splitting strings into arrays of strings. They write their own function because it’s easier and more fun than figuring out how the old function works.
 
-![](https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Columbus_Ave_Barber_Shop.jpg?w=730&ssl=1)As a corollary of this axiom, you can ask almost any programmer today about the code they are working on. “It’s a big hairy mess,” they will tell you. “I’d like nothing better than to throw it out and start over.”
+![](https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2000/04/Columbus_Ave_Barber_Shop.jpg?w=730&ssl=1)
+
+As a corollary of this axiom, you can ask almost any programmer today about the code they are working on. “It’s a big hairy mess,” they will tell you. “I’d like nothing better than to throw it out and start over.”
 
 Why is it a mess?
 
@@ -56,4 +58,6 @@ Third, the code may be doggone ugly. One project I worked on actually had a data
 
 It’s important to remember that when you start from scratch there is **absolutely no reason** to believe that you are going to do a better job than you did the first time. First of all, you probably don’t even have the same programming team that worked on version one, so you don’t actually have “more experience”. You’re just going to make most of the old mistakes again, and introduce some new problems that weren’t in the original version.
 
-![](https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2008/01/Lincoln_Center_Trees.jpg?w=730&ssl=1)The old mantra *build one to throw away* is dangerous when applied to large scale commercial applications. If you are writing code experimentally, you may want to rip up the function you wrote last week when you think of a better algorithm. That’s fine. You may want to refactor a class to make it easier to use. That’s fine, too. But throwing away the whole program is a dangerous folly, and if Netscape actually had some adult supervision with software industry experience, they might not have shot themselves in the foot so badly.
+![](https://i0.wp.com/www.joelonsoftware.com/wp-content/uploads/2008/01/Lincoln_Center_Trees.jpg?w=730&ssl=1)
+
+The old mantra *build one to throw away* is dangerous when applied to large scale commercial applications. If you are writing code experimentally, you may want to rip up the function you wrote last week when you think of a better algorithm. That’s fine. You may want to refactor a class to make it easier to use. That’s fine, too. But throwing away the whole program is a dangerous folly, and if Netscape actually had some adult supervision with software industry experience, they might not have shot themselves in the foot so badly.

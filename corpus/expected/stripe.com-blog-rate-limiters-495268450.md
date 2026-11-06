@@ -41,11 +41,7 @@ Our API provides the same rate limiting behavior in both test and live modes. Th
 
 After analyzing our traffic patterns, we added the ability to briefly burst above the cap for sudden spikes in usage during real-time events (e.g. a flash sale.)
 
- ![Blog > Rate Limiters > Graph 1](<
-
-          https://images.stripeassets.com/fzn2n1nzq965/70aRVdIQ9Hhbr1wV9NPPDn/c9873fea1fb540a1b5ed9d9eb594549e/image.png?w=1620&q=80
-
-      >)
+ ![Blog > Rate Limiters > Graph 1](https://images.stripeassets.com/fzn2n1nzq965/70aRVdIQ9Hhbr1wV9NPPDn/c9873fea1fb540a1b5ed9d9eb594549e/image.png?w=1620&q=80)
 
 Request rate limiters restrict users to a maximum number of requests per second.
 
@@ -57,11 +53,7 @@ Our concurrent request limiter is triggered much less often (12,000 requests thi
 
 It is completely reasonable to tune this limiter up so it rejects more often than the Request Rate Limiter. It asks your users to use a different programming model of “Fork off X jobs and have them process the queue” compared to “Hammer the API and back off when I get a HTTP 429”. Some APIs fit better into one of those two patterns so feel free to use which one is most suitable for the users of your API.
 
- ![Blog > Rate limiters > Graph 2](<
-
-          https://images.stripeassets.com/fzn2n1nzq965/6n0cFumdlNxMYdkfdz0JRu/24c589e3516573fb72068d8d35a7f3ef/image.png?w=1620&q=80
-
-      >)
+ ![Blog > Rate limiters > Graph 2](https://images.stripeassets.com/fzn2n1nzq965/6n0cFumdlNxMYdkfdz0JRu/24c589e3516573fb72068d8d35a7f3ef/image.png?w=1620&q=80)
 
 Concurrent request limiters manage resource contention for CPU-intensive API endpoints.
 
@@ -75,11 +67,7 @@ We always reserve a fraction of our infrastructure for critical requests. If our
 
 We triggered this load shedder for a very small fraction of requests this month. By itself, this isn’t a big deal&mdash;we definitely had the ability to handle those extra requests. But we’ve had other months where this has prevented outages.
 
- ![Blog > Rate limiters > Graph 3](<
-
-          https://images.stripeassets.com/fzn2n1nzq965/70nvphdGeNMKHRsoJIsFFq/889af231f8ec95f95b640baaa629b455/image.png?w=1620&q=80
-
-      >)
+ ![Blog > Rate limiters > Graph 3](https://images.stripeassets.com/fzn2n1nzq965/70nvphdGeNMKHRsoJIsFFq/889af231f8ec95f95b640baaa629b455/image.png?w=1620&q=80)
 
 Fleet usage load shedders reserves fleet resources for critical requests.
 
@@ -102,11 +90,7 @@ It’s very important that shedding and bringing load happen slowly, or you can 
 
 Only 100 requests were rejected this month from this rate limiter, but in the past it’s done a lot to help us recover more quickly when we have had load problems. This load shedder limits the impact of incidents that are already happening and provides damage control, while the first three are more preventative.
 
- ![Blog > Rate limiters > Graph 4](<
-
-          https://images.stripeassets.com/fzn2n1nzq965/5dU2JWBEVCh1kXHlKWakqw/3413cd572b53d2af0ae432dcc90e9585/image.png?w=1620&q=80
-
-      >)
+ ![Blog > Rate limiters > Graph 4](https://images.stripeassets.com/fzn2n1nzq965/5dU2JWBEVCh1kXHlKWakqw/3413cd572b53d2af0ae432dcc90e9585/image.png?w=1620&q=80)
 
 Worker utilization load shedders reserve workers for critical requests.
 

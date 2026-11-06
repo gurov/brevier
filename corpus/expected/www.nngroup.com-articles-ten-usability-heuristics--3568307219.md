@@ -163,7 +163,7 @@ In 2020, we updated this article, adding more explanation, examples, and related
 
 #### **Examples**
 
-- **[10 Usability Heuristics Applied to C](https://www.nngroup.com/articles/usability-heuristics-complex-applications/)**[**omplex Applications**](https://www.nngroup.com/articles/usability-heuristics-complex-applications/) — Examples of the heuristics applied to complex and domain-specific software applications.
+- [10 Usability Heuristics Applied to C](https://www.nngroup.com/articles/usability-heuristics-complex-applications/)[**omplex Applications**](https://www.nngroup.com/articles/usability-heuristics-complex-applications/) — Examples of the heuristics applied to complex and domain-specific software applications.
 - **[10 Usability Heuristics Applied to Virtual Reality](https://www.nngroup.com/articles/usability-heuristics-virtual-reality/)** — See the heuristics applied to 3D virtual environments.
 - [**10 Usability Heuristics Applied to Video Games**](https://www.nngroup.com/articles/usability-heuristics-applied-video-games/) — Great examples of the 10 heuristics in highly interactive and highly visual user interfaces that have an entertainment purpose.
 - **[10 Usability Heuristics Applied to Everyday Life](http://www.zenhaiku.com/archives/usability_applied_to_life.html)** (Just for fun)

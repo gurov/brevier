@@ -1,7 +1,5 @@
 # Что знает Оливия?
 
-Contributors to Wikimedia projects
-
 **Оливия Киттеридж**
 
 [англ.](https://ru.wikipedia.org/wiki/Английский_язык "Английский язык") Olive Kitteridge

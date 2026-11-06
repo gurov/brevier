@@ -429,6 +429,17 @@ pub fn without_wiki_edits(doc: &Document) {
     }
 }
 
+/// Снимки Deutsche Welle: в `data-url` шаблон с `${formatId}`, номер размера
+/// подставляет скрипт, и без него картинка не загружалась. `_6` — ширина статьи.
+pub fn with_dw_pictures(doc: &Document) {
+    for image in doc.select("img[data-url*=\"${formatId}\"]").nodes() {
+        if let Some(template) = image.attr("data-url") {
+            image.set_attr("src", &template.replace("${formatId}", "6"));
+            image.remove_attr("data-url");
+        }
+    }
+}
+
 /// Исходник формулы MediaWiki: Parsoid кладёт его в `data-mw` у `<math>`,
 /// а в самом MathML, если картинки нет, его может и не быть (#16).
 pub fn wiki_formula(math: &NodeRef) -> Option<String> {
@@ -978,6 +989,19 @@ mod tests {
         assert_eq!(
             wayback_snapshot("https://example.org/web/20130701/https://a.org/"),
             None
+        );
+    }
+
+    /// Номер размера подставляет скрипт, а без него картинки нет.
+    #[test]
+    fn a_dw_picture_gets_its_size() {
+        let doc = Document::from(
+            "<img data-url=\"https://static.dw.com/image/7_${formatId}.jpg\" alt=\"a\">",
+        );
+        with_dw_pictures(&doc);
+        assert_eq!(
+            doc.select("img").attr("src").as_deref(),
+            Some("https://static.dw.com/image/7_6.jpg")
         );
     }
 }

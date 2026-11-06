@@ -16,7 +16,7 @@ Plus, as we know, [the main thread isn’t ours alone](https://www.smashingmagaz
 
 And that is what a “recommended” architecture looks like.
 
-But I dare say that \*sometimes\**,* moving the data to a worker is slower than just letting the main thread do the work.
+But I dare say that \*sometimes\*, moving the data to a worker is slower than just letting the main thread do the work.
 
 I found this out a few months ago while building a Chrome extension with screenshotting features called Fastary. I kept finding a latency of about 2 to 3 seconds in all my testing, even after using an [Offscreen Document](https://developer.chrome.com/docs/extensions/reference/api/offscreen#main-content) (a background process in Chrome extensions) to handle the canvas operations. A screenshot task should feel instant without lag, after all.
 
@@ -185,4 +185,6 @@ Looking at this, if the **“background processing time”** is the most dominan
 
 And if you can’t figure out if the task is CPU-heavy or data-heavy, it certainly doesn’t hurt to measure it, for example, using [`performance.mark()`](https://developer.mozilla.org/en-US/docs/Web/API/Performance/mark) and [`performance.measure()`](https://developer.mozilla.org/en-US/docs/Web/API/PerformanceMeasure) around `postMessage` calls to profile the transfer cost.
 
-![Smashing Editorial](https://www.smashingmagazine.com/images/logo/logo--red.png) (gg, yk)
+![Smashing Editorial](https://www.smashingmagazine.com/images/logo/logo--red.png)
+
+(gg, yk)

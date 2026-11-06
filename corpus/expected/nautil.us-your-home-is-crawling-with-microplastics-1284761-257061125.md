@@ -22,6 +22,6 @@ But at the end of the day, minimizing your risk is all you can do. Microplastics
 
 And that’s exactly what the team is doing. They’ve already collected blood and urine samples from all the homes they surveyed, so stay tuned. In the meantime, here are some more [steps you can take](https://one5c.com/how-to-avoid-microplastics-136931472) to limit these pernicious particles in your home. ![](https://lede-admin.nautil.us/wp-content/uploads/sites/70/sites/3/nautilus/nautilus-favicon-14.png?fm=png)
 
-*Enjoying* [Nautilus](https://nautil.us/)*? Subscribe to our free* [*newsletter*](https://nautil.us/newsletter/?_sp=c43011db-6fcf-42f2-a38c-e033b87a4a1d.1759265717430).
+*Enjoying* [Nautilus](https://nautil.us/)? *Subscribe to our free* [*newsletter*](https://nautil.us/newsletter/?_sp=c43011db-6fcf-42f2-a38c-e033b87a4a1d.1759265717430).
 
 *Lead Image: Chayanuphol / Shutterstock*

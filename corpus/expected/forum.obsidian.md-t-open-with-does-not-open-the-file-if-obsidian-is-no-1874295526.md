@@ -65,8 +65,6 @@ SYSTEM INFO:\
 
 Note that if Obsidian **is** running when a file is opened from the Finder, the file opens, but replaces the file that was open in the focused tab - this has already been reported in a separate issue.
 
-###
-
 ## 5 replies
 
 **WhiteNoise** · [5 October 2026](https://forum.obsidian.md/t/open-with-does-not-open-the-file-if-obsidian-is-not-running/119080/2)

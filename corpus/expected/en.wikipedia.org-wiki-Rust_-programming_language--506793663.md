@@ -1,7 +1,5 @@
 # Rust (programming language)
 
-Contributors to Wikimedia projects
-
 **Rust Programming Language**
 
 [![Rust logo: a capital letter R attached inside a sprocket with teeth on the outside, both black on a white background](https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d5/Rust_programming_language_black_logo.svg/250px-Rust_programming_language_black_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail)](https://en.wikipedia.org/wiki/File:Rust_programming_language_black_logo.svg)
@@ -152,21 +150,26 @@ Rust's [syntax](https://en.wikipedia.org/wiki/Syntax_\(programming_languages\) "
 
 Below is a ["Hello, World!" program](https://en.wikipedia.org/wiki/"Hello,_World!"_program "\"Hello, World!\" program") in Rust. The `fn` keyword denotes a [function](https://en.wikipedia.org/wiki/Function_\(computer_programming\) "Function (computer programming)"), and the `println!` [macro](https://en.wikipedia.org/wiki/Macro_\(computer_science\) "Macro (computer science)") (see [§ Macros](#Macros)) prints the message to [standard output](https://en.wikipedia.org/wiki/Standard_output "Standard output").[^45] [Statements](https://en.wikipedia.org/wiki/Statement_\(computer_science\) "Statement (computer science)") in Rust are separated by [semicolons](https://en.wikipedia.org/wiki/Semicolon#Programming "Semicolon").
 
+```rust
 fn main() {
     println!("Hello, World!");
 }
+```
 
 ### Variables
 
 [Variables](https://en.wikipedia.org/wiki/Variable_\(computer_science\) "Variable (computer science)") in Rust are defined through the `let` keyword.[^46] The example below assigns a value to the variable with name `foo` of type `i32` and outputs its value; the type annotation `: i32` can be omitted.
 
+```rust
 fn main() {
     let foo: i32 = 10;
     println!("The value of foo is {foo}");
 }
+```
 
 Variables are [immutable](https://en.wikipedia.org/wiki/Immutable "Immutable") by default, unless the `mut` keyword is added.[^47] The following example uses `//`, which denotes the start of a [comment](https://en.wikipedia.org/wiki/Comment_\(computer_programming\) "Comment (computer programming)").[^48]
 
+```rust
 fn main() {
     // This code would not compile without adding "mut".
     let mut foo = 10;
@@ -174,9 +177,11 @@ fn main() {
     foo = 20;
     println!("The value of foo is {foo}");
 }
+```
 
 Multiple `let` expressions can define multiple variables with the same name, known as [variable shadowing](https://en.wikipedia.org/wiki/Variable_shadowing "Variable shadowing"). Variable shadowing allows transforming variables without having to name the variables differently.[^49] The example below declares a new variable with the same name that is double the original value:
 
+```rust
 fn main() {
     let foo = 10;
     // This will output "The value of foo is 10"
@@ -185,18 +190,22 @@ fn main() {
     // This will output "The value of foo is 20"
     println!("The value of foo is {foo}");
 }
+```
 
 Variable shadowing is also possible for values of different types. For example, going from a string to its length:
 
+```rust
 fn main() {
     let letters = "abc";
     let letters = letters.len();
 }
+```
 
 ### Block expressions and control flow
 
 A *block expression* is delimited by [curly brackets](https://en.wikipedia.org/wiki/Bracket#Curly_brackets "Bracket"). When the last expression inside a block does not end with a semicolon, the block evaluates to the value of that trailing expression:[^50]
 
+```rust
 fn main() {
     let x = {
         println!("this is inside the block");
@@ -204,17 +213,21 @@ fn main() {
     };
     println!("1 + 2 = {x}");
 }
+```
 
 Trailing expressions of function bodies are used as the return value:[^51]
 
+```rust
 fn add_two(x: i32) -> i32 {
     x + 2
 }
+```
 
 #### `if` expressions
 
 An `if` [conditional expression](https://en.wikipedia.org/wiki/Conditional_expression "Conditional expression") executes code based on whether the given value is `true`. `else` can be used for when the value evaluates to `false`, and `else if` can be used for combining multiple expressions.[^52]
 
+```rust
 fn main() {
     let x = 10;
     if x > 5 {
@@ -229,19 +242,23 @@ fn main() {
         println!("value is not divisible by 7 or 5");
     }
 }
+```
 
 `if` and `else` blocks can evaluate to a value, which can then be assigned to a variable:[^52]
 
+```rust
 fn main() {
     let x = 10;
     let new_x = if x % 2 == 0 { x / 2 } else { 3 * x + 1 };
     println!("{new_x}");
 }
+```
 
 #### `while` loops
 
-`[while](https://en.wikipedia.org/wiki/While_loop "While loop")` repeats a block of code while a condition is met.[^53]
+[`while`](https://en.wikipedia.org/wiki/While_loop "While loop") repeats a block of code while a condition is met.[^53]
 
+```rust
 fn main() {
     // Iterate over all integers from 4 to 10
     let mut value = 4;
@@ -250,11 +267,13 @@ fn main() {
          value += 1;
     }
 }
+```
 
 #### `for` loops and iterators
 
 [For loops](https://en.wikipedia.org/wiki/For_loop "For loop") in Rust loop over elements of a collection.[^54] `for` expressions work over any [iterator](https://en.wikipedia.org/wiki/Iterator "Iterator") type.
 
+```rust
 fn main() {
     // Using `for` with range syntax for the same functionality as above
     // The syntax 4..=10 means the range from 4 to 10, up to and including 10.
@@ -262,17 +281,21 @@ fn main() {
         println!("value = {value}");
     }
 }
+```
 
 In the above code, `4..=10` is a value of type `Range` that implements the `Iterator` trait. The code within the curly braces is applied to each element returned by the iterator.
 
 Iterators can combine with functions over iterators like `map`, `filter`, and `sum`. For example, the following adds up all numbers between 1 and 100 that are multiples of 3:
 
+```
 (1..=100).filter(|x| x % 3 == 0).sum()
+```
 
 #### `loop` and `break` statements
 
 More generally, the `loop` keyword allows repeating a portion of code until a `break` occurs. `break` may optionally exit the loop with a value. In the case of nested loops, labels denoted by `'label_name` can be used to break an outer loop rather than the innermost loop.[^55]
 
+```rust
 fn main() {
     let value = 456;
     let mut x = 1;
@@ -303,26 +326,32 @@ fn main() {
         up *= 2;
     }
 }
+```
 
 ### Pattern matching
 
 The `match` and `if let` expressions provide [pattern matching](https://en.wikipedia.org/wiki/Pattern_matching "Pattern matching"). For example, `match` can double an optional integer value if present, and return zero otherwise:[^56]
 
+```rust
 fn double(x: Option<u64>) -> u64 {
     match x {
         Some(value) => value * 2,
         None => 0,
     }
 }
+```
 
 Equivalently, this can be written with `if let` and `else`:
 
+```rust
 fn double(x: Option<u64>) -> u64 {
     if let Some(value) = x {
         value * 2
     } else {
+        0
     }
 }
+```
 
 ### Types
 
@@ -344,19 +373,24 @@ The [Boolean type](https://en.wikipedia.org/wiki/Boolean_type "Boolean type") is
 
 Compound types can contain multiple values. Tuples are fixed-size lists that contain values whose types can be different. Arrays are fixed-size lists whose values are of the same type. Expressions of the tuple and array types are written through listing the values, and can be accessed with `.index` (with tuples) or `[index]` (with arrays):[^66]
 
+```rust
 let tuple: (u32, bool) = (3, true);
 let array: [i8; 5] = [1, 2, 3, 4, 5];
 let value = tuple.1; // true
 let value = array[2]; // 3
+```
 
 Arrays can also be constructed through copying a single value a number of times:[^67]
 
+```
 let array2: [char; 10] = [' '; 10];
+```
 
 ### Ownership and references
 
 Rust's ownership system consists of rules that ensure memory safety without using a garbage collector. At compile time, each value must be attached to a variable called the *owner* of that value, and every value must have exactly one owner.[^68] Values are moved between different owners through assignment or passing a value as a function parameter. Values can also be *borrowed,*—temporarily passed to a different function before being returned to the owner.[^69] With these rules, Rust prevents creation and use of [dangling pointers](https://en.wikipedia.org/wiki/Dangling_pointers "Dangling pointers"):[^69][^70]
 
+```rust
 fn print_string(s: String) {
     println!("{}", s);
 }
@@ -367,9 +401,11 @@ fn main() {
     // s has been moved, so cannot be used any more
     // another print_string(s); would result in a compile error
 }
+```
 
 The function `print_string` takes ownership over the `String` value passed in; Alternatively, `&` can be used to indicate a [reference](https://en.wikipedia.org/wiki/Reference_\(computer_science\) "Reference (computer science)") type (in `&String`) and to create a reference (in `&s`):[^71]
 
+```rust
 fn print_string(s: &String) {
     println!("{}", s);
 }
@@ -379,6 +415,7 @@ fn main() {
     print_string(&s); // s borrowed by print_string
     print_string(&s); // s has not been consumed; we can call the function many times
 }
+```
 
 Because of these ownership rules, Rust types are known as *[affine types](https://en.wikipedia.org/wiki/Affine_type "Affine type")*, meaning each value may be used at most once. This enforces a form of [software fault isolation](https://en.wikipedia.org/wiki/Software_fault_isolation "Software fault isolation") as the owner of a value is solely responsible for its correctness and deallocation.[^72]
 
@@ -390,6 +427,7 @@ When a value goes out of scope, it is *dropped* by running its [destructor](http
 
 A value's lifetime in Rust is inferred from the set of locations in the source code (i.e., function, line, and column numbers) for which a variable is valid.[^76] For example, a reference to a local variable has a lifetime from the expression it is declared in up until the last use of it.[^76]
 
+```rust
 fn main() {
     let mut x = 5;            // ------------------+- Lifetime 'a
                               //                   |
@@ -400,9 +438,11 @@ fn main() {
     // its lifetime ends                           |
     let r2 = &mut x;          // -+-- Lifetime 'c  |
 }                             // ------------------+
+```
 
 The borrow checker in the Rust compiler then enforces that references are only used in the locations of the source code where the associated lifetime is valid.[^77][^78] In the example above, storing a reference to variable `x` in `r` is valid, as variable `x` has a longer lifetime (`'a`) than variable `r` (`'b`). However, when `x` has a shorter lifetime, the borrow checker would reject the program:
 
+```rust
 fn main() {
     let r;                    // ------------------+- Lifetime 'a
                               //                   |
@@ -413,17 +453,20 @@ fn main() {
                 // enough                          |
     println!("r: {}", r);     //                   |
 }                             // ------------------+
+```
 
 Since the lifetime of the referenced variable (`'b`) is shorter than the lifetime of the variable holding the reference (`'a`), the borrow checker errors, preventing `x` from being used from outside its scope.[^79]
 
 Lifetimes can be indicated using explicit *lifetime parameters* on function arguments. For example, the following code specifies that the reference returned by the function has the same lifetime as `original` (and *not* necessarily the same lifetime as `prefix`):[^80]
 
+```rust
 fn remove_prefix<'a>(mut original: &'a str, prefix: &str) -> &'a str {
     if original.starts_with(prefix) {
         original = original[prefix.len()..];
     }
     original
 }
+```
 
 In the compiler, ownership and lifetimes work together to prevent memory safety issues such as dangling pointers.[^81][^82]
 
@@ -443,6 +486,7 @@ The Rust [standard library](https://en.wikipedia.org/wiki/Standard_library "Stan
 
 Rust uses the [option type](https://en.wikipedia.org/wiki/Option_type "Option type") `Option<T>` to define optional values, which can be matched using `if let` or `match` to access the inner value:[^89]
 
+```rust
 fn main() {
     let name1: Option<&str> = None;
     // In this case, nothing will be printed out
@@ -456,6 +500,7 @@ fn main() {
         println!("{name}");
     }
 }
+```
 
 Similarly, Rust's [result type](https://en.wikipedia.org/wiki/Result_type "Result type") `Result<T, E>` holds either a successfully computed value (the `Ok` variant) or an error (the `Err` variant).[^90] Like `Option`, the use of `Result` means that the inner value cannot be used directly; programmers must use a `match` expression, syntactic sugar such as `?` (the "try" operator), or an explicit `unwrap` assertion to access it. Both `Option` and `Result` are used throughout the standard library and are a fundamental part of Rust's explicit approach to handling errors and missing data.
 
@@ -467,8 +512,10 @@ The `&` and `&mut` reference types are guaranteed to not be null and point to va
 
 Rust provides no implicit type conversion (coercion) between most primitive types. But, explicit type conversion (casting) can be performed using the `as` keyword.[^94]
 
+```rust
 let x: i32 = 1000;
 println!("1000 as a u16 is: {}", x as u16);
+```
 
 A presentation on Rust by Emily Dunham from [Mozilla](https://en.wikipedia.org/wiki/Mozilla "Mozilla")'s Rust team ([linux.conf.au](https://en.wikipedia.org/wiki/Linux.conf.au "Linux.conf.au") conference, Hobart, 2017)
 
@@ -480,6 +527,7 @@ Rust supports [polymorphism](https://en.wikipedia.org/wiki/Polymorphism_\(comput
 
 Common behavior between types is declared using traits and `impl` blocks:[^96]
 
+```rust
 trait Zero: Sized {
     fn zero() -> Self;
     fn is_zero(&self) -> bool
@@ -497,6 +545,7 @@ impl Zero for u32 {
 impl Zero for f32 {
     fn zero() -> Self { 0.0 }
 }
+```
 
 The example above includes a method `is_zero` that provides a default implementation that may be overridden when implementing the trait.[^96]
 
@@ -504,6 +553,7 @@ The example above includes a method `is_zero` that provides a default implementa
 
 A function can be made generic by adding type parameters inside angle brackets (`<Num>`), which only allow types that implement the trait:
 
+```rust
 // zero is a generic function with one type parameter, Num
 fn zero<Num: Zero>() -> Num {
     Num::zero()
@@ -514,6 +564,7 @@ fn main() {
     let b: f32 = zero();
     assert!(a.is_zero() && b.is_zero());
 }
+```
 
 In the examples above, `Num: Zero` as well as `where Self: PartialEq` are trait bounds that constrain the type to only allow types that implement `Zero` or `PartialEq`.[^96] Within a trait or impl, `Self` refers to the type that the code is implementing.[^97]
 
@@ -527,6 +578,7 @@ When the exact type is not known at compile time, Rust provides [trait objects](
 
 This approach is similar to [duck typing](https://en.wikipedia.org/wiki/Duck_typing "Duck typing"), where all data types that implement a given trait can be treated as functionally interchangeable.[^102] The following example creates a list of objects where each object implements the `Display` trait:
 
+```rust
 use std::fmt::Display;
 
 let v: Vec<Box<dyn Display>> = vec![
@@ -538,6 +590,7 @@ let v: Vec<Box<dyn Display>> = vec![
 for x in v {
     println!("{x}");
 }
+```
 
 If an element in the list does not implement the `Display` trait, it will cause a compile-time error.[^103]
 
@@ -563,6 +616,7 @@ Macros allow the generation and transformation of Rust code to reduce repetition
 
 A declarative macro (also called a "macro by example") is a macro, defined using the `macro_rules!` keyword, that uses pattern matching to determine its expansion.[^120][^121] Below is an example that sums over all its arguments:
 
+```rust
 macro_rules! sum {
     ( $initial:expr $(, $expr:expr )* $(,)? ) => {
         $initial $(+ $expr)*
@@ -573,6 +627,7 @@ fn main() {
     let x = sum!(1, 2, 3);
     println!("{x}"); // prints 6
 }
+```
 
 In this example, the macro named `sum` is defined using the form `macro_rules! sum {` `(...) => { ... } }`. The first part inside the parentheses of the definition, the macro pattern `( $initial:expr $(, $expr:expr )* $(,)? )` specifies the structure of input it can take. Here, `$initial:expr` represents the first expression, while `$(, $expr:expr )*` means there can be zero or more additional comma-separated expressions after it. The trailing `$(,)?` allows the caller to optionally include a final comma without causing an error. The second part, after the arrow `=>`, describes what code will be generated when the macro is invoked. In this case, `$initial $(+ $expr)*` means that the generated code will start with the first expression, followed by a `+` and each of the additional expressions in sequence. The `*` again means "repeat this pattern zero or more times". This means, when the macro is later called in line 8, as `sum!(1, 2, 3)`, the macro will resolve to `1 + 2 + 3` representing the addition of all of the passed expressions.
 
@@ -590,11 +645,13 @@ Procedural macros come in three flavors:
 
 Rust supports the creation of [foreign function interfaces](https://en.wikipedia.org/wiki/Foreign_function_interface "Foreign function interface") (FFI) through the `extern` keyword. A function that uses the C [calling convention](https://en.wikipedia.org/wiki/Calling_convention "Calling convention") can be written using `extern "C" fn`. Symbols can be exported from Rust to other languages through the `#[unsafe(no_mangle)]` attribute, and symbols can be imported into Rust through `extern` blocks:<sup>[\[note 6\]](#cite_note-136)</sup>[^124]
 
+```rust
 #[unsafe(no_mangle)]
 pub extern "C" fn exported_from_rust(x: i32) -> i32 { x + 1 }
 unsafe extern "C" {
     fn imported_into_rust(x: i32) -> i32;
 }
+```
 
 The `#[repr(C)]` attribute enables deterministic memory layouts for `struct`s and `enum`s for use across FFI boundaries.[^124] External libraries such as `bindgen` and `cxx` can generate Rust bindings for C/C++.[^124][^125]
 
@@ -720,13 +777,9 @@ According to the *[MIT Technology Review](https://en.wikipedia.org/wiki/MIT_Tech
 
 **Location:** [United States](https://en.wikipedia.org/wiki/United_States "United States")
 
-**[Chairperson](https://en.wikipedia.org/wiki/Chairperson "Chairperson")
+**[Chairperson](https://en.wikipedia.org/wiki/Chairperson "Chairperson"):** Shane Miller
 
-:** Shane Miller
-
-**[Executive Director](https://en.wikipedia.org/wiki/Executive_Director "Executive Director")
-
-:** Rebecca Rumbul
+**[Executive Director](https://en.wikipedia.org/wiki/Executive_Director "Executive Director"):** Rebecca Rumbul
 
 **Website:** [foundation.rust-lang.org](http://foundation.rust-lang.org)
 
@@ -1163,15 +1216,15 @@ The Rust project is maintained by 8 top-level *teams* as of November 2025: the l
 
 [^192]: Ho, Son; Protzenko, Jonathan (2022-08-31). ["Aeneas: Rust verification by functional translation"](https://dl.acm.org/doi/10.1145/3547647). *Proceedings of the ACM on Programming Languages*. **6** (ICFP). New York, NY, USA: Association for Computing Machinery: 116:711–116:741. [arXiv](https://en.wikipedia.org/wiki/ArXiv_\(identifier\) "ArXiv (identifier)"):[2206.07185](https://arxiv.org/abs/2206.07185). [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1145/3547647](https://doi.org/10.1145%2F3547647).
 
-[^193]: Denis, Xavier; Jourdan, Jacques-Henri; Marché, Claude (2022). Riesco, Adrian; Zhang, Min (eds.). ["Creusot: A Foundry for the Deductive Verification of Rust Programs"](https://link.springer.com/chapter/10.1007/978-3-031-17244-1_6). *Formal Methods and Software Engineering*. Cham: Springer International Publishing: 90–105\. [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1007/978-3-031-17244-1\_6](https://doi.org/10.1007%2F978-3-031-17244-1_6). [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-3-031-17244-1](https://en.wikipedia.org/wiki/Special:BookSources/978-3-031-17244-1 "Special:BookSources/978-3-031-17244-1").`{{[cite journal](https://en.wikipedia.org/wiki/Template:Cite_journal "Template:Cite journal")}}`: CS1 maint: periodical has ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_periodical_has_ISBN "Category:CS1 maint: periodical has ISBN"))
+[^193]: Denis, Xavier; Jourdan, Jacques-Henri; Marché, Claude (2022). Riesco, Adrian; Zhang, Min (eds.). ["Creusot: A Foundry for the Deductive Verification of Rust Programs"](https://link.springer.com/chapter/10.1007/978-3-031-17244-1_6). *Formal Methods and Software Engineering*. Cham: Springer International Publishing: 90–105\. [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1007/978-3-031-17244-1\_6](https://doi.org/10.1007%2F978-3-031-17244-1_6). [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-3-031-17244-1](https://en.wikipedia.org/wiki/Special:BookSources/978-3-031-17244-1 "Special:BookSources/978-3-031-17244-1").`{{cite journal}}`: CS1 maint: periodical has ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_periodical_has_ISBN "Category:CS1 maint: periodical has ISBN"))
 
 [^194]: Lehmann, Nico; Geller, Adam T.; Vazou, Niki; Jhala, Ranjit (2023-06-06). ["Flux: Liquid Types for Rust"](https://dl.acm.org/doi/10.1145/3591283). *Proceedings of the ACM on Programming Languages*. **7** (PLDI). New York, NY, USA: Association for Computing Machinery: 169:1533–169:1557. [arXiv](https://en.wikipedia.org/wiki/ArXiv_\(identifier\) "ArXiv (identifier)"):[2207.04034](https://arxiv.org/abs/2207.04034). [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1145/3591283](https://doi.org/10.1145%2F3591283).
 
-[^195]: VanHattum, Alexa; Schwartz-Narbonne, Daniel; Chong, Nathan; Sampson, Adrian (2022-05-21). ["Verifying dynamic trait objects in rust"](https://dl.acm.org/doi/10.1145/3510457.3513031). *Proceedings of the 44th International Conference on Software Engineering: Software Engineering in Practice*. ACM: 321–330\. [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1145/3510457.3513031](https://doi.org/10.1145%2F3510457.3513031). [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-1-4503-9226-6](https://en.wikipedia.org/wiki/Special:BookSources/978-1-4503-9226-6 "Special:BookSources/978-1-4503-9226-6").`{{[cite journal](https://en.wikipedia.org/wiki/Template:Cite_journal "Template:Cite journal")}}`: CS1 maint: periodical has ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_periodical_has_ISBN "Category:CS1 maint: periodical has ISBN"))
+[^195]: VanHattum, Alexa; Schwartz-Narbonne, Daniel; Chong, Nathan; Sampson, Adrian (2022-05-21). ["Verifying dynamic trait objects in rust"](https://dl.acm.org/doi/10.1145/3510457.3513031). *Proceedings of the 44th International Conference on Software Engineering: Software Engineering in Practice*. ACM: 321–330\. [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1145/3510457.3513031](https://doi.org/10.1145%2F3510457.3513031). [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-1-4503-9226-6](https://en.wikipedia.org/wiki/Special:BookSources/978-1-4503-9226-6 "Special:BookSources/978-1-4503-9226-6").`{{cite journal}}`: CS1 maint: periodical has ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_periodical_has_ISBN "Category:CS1 maint: periodical has ISBN"))
 
-[^196]: Astrauskas, Vytautas; Bílá, Aurea; Fiala, Jonáš; Grannan, Zachary; Matheja, Christoph; Müller, Peter; Poli, Federico; Summers, Alexander J. (2022). Deshmukh, Jyotirmoy V.; Havelund, Klaus; Perez, Ivan (eds.). ["The Prusti Project: Formal Verification for Rust"](https://link.springer.com/chapter/10.1007/978-3-031-06773-0_5). *NASA Formal Methods Symposium*. Cham: Springer International Publishing: 88–108\. [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1007/978-3-031-06773-0\_5](https://doi.org/10.1007%2F978-3-031-06773-0_5). [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-3-031-06773-0](https://en.wikipedia.org/wiki/Special:BookSources/978-3-031-06773-0 "Special:BookSources/978-3-031-06773-0").`{{[cite journal](https://en.wikipedia.org/wiki/Template:Cite_journal "Template:Cite journal")}}`: CS1 maint: periodical has ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_periodical_has_ISBN "Category:CS1 maint: periodical has ISBN"))
+[^196]: Astrauskas, Vytautas; Bílá, Aurea; Fiala, Jonáš; Grannan, Zachary; Matheja, Christoph; Müller, Peter; Poli, Federico; Summers, Alexander J. (2022). Deshmukh, Jyotirmoy V.; Havelund, Klaus; Perez, Ivan (eds.). ["The Prusti Project: Formal Verification for Rust"](https://link.springer.com/chapter/10.1007/978-3-031-06773-0_5). *NASA Formal Methods Symposium*. Cham: Springer International Publishing: 88–108\. [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1007/978-3-031-06773-0\_5](https://doi.org/10.1007%2F978-3-031-06773-0_5). [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-3-031-06773-0](https://en.wikipedia.org/wiki/Special:BookSources/978-3-031-06773-0 "Special:BookSources/978-3-031-06773-0").`{{cite journal}}`: CS1 maint: periodical has ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_periodical_has_ISBN "Category:CS1 maint: periodical has ISBN"))
 
-[^197]: Matsushita, Yusuke; Denis, Xavier; Jourdan, Jacques-Henri; Dreyer, Derek (2022-06-09), ["RustHornBelt: a semantic foundation for functional verification of Rust programs with unsafe code"](https://dl.acm.org/doi/abs/10.1145/3519939.3523704), *Proceedings of the 43rd ACM SIGPLAN International Conference on Programming Language Design and Implementation*, ACM Conferences, pp. 841–856, [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1145/3519939.3523704](https://doi.org/10.1145%2F3519939.3523704), [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-1-4503-9265-5](https://en.wikipedia.org/wiki/Special:BookSources/978-1-4503-9265-5 "Special:BookSources/978-1-4503-9265-5"), retrieved 2026-09-18`{{[citation](https://en.wikipedia.org/wiki/Template:Citation "Template:Citation")}}`: CS1 maint: work parameter with ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_work_parameter_with_ISBN "Category:CS1 maint: work parameter with ISBN"))
+[^197]: Matsushita, Yusuke; Denis, Xavier; Jourdan, Jacques-Henri; Dreyer, Derek (2022-06-09), ["RustHornBelt: a semantic foundation for functional verification of Rust programs with unsafe code"](https://dl.acm.org/doi/abs/10.1145/3519939.3523704), *Proceedings of the 43rd ACM SIGPLAN International Conference on Programming Language Design and Implementation*, ACM Conferences, pp. 841–856, [doi](https://en.wikipedia.org/wiki/Doi_\(identifier\) "Doi (identifier)"):[10.1145/3519939.3523704](https://doi.org/10.1145%2F3519939.3523704), [ISBN](https://en.wikipedia.org/wiki/ISBN_\(identifier\) "ISBN (identifier)") [978-1-4503-9265-5](https://en.wikipedia.org/wiki/Special:BookSources/978-1-4503-9265-5 "Special:BookSources/978-1-4503-9265-5"), retrieved 2026-09-18`{{citation}}`: CS1 maint: work parameter with ISBN ([link](https://en.wikipedia.org/wiki/Category:CS1_maint:_work_parameter_with_ISBN "Category:CS1 maint: work parameter with ISBN"))
 
 [^198]: Parno, Bryan (2026-08-31). ["Developing provably correct Rust code with Verus"](https://www.amazon.science/blog/developing-provably-correct-rust-code-with-verus). *Amazon Science*. Retrieved 2026-09-17.
 

@@ -121,7 +121,7 @@ if ("noModule" in scriptEl) {
 document.body.appendChild(scriptEl);
 ```
 
-This script infers that if a browser supports [the `nomodule` attribute](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script#attr-nomodule) in the `script` element, it understands `type="module"`. This ensures that legacy browsers only get legacy scripts and modern browsers only get modern ones. Be warned, though, that dynamically injected scripts load asynchronously by default, so set the `[async](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script#attr-async)` attribute to `false` if dependency order is crucial.
+This script infers that if a browser supports [the `nomodule` attribute](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script#attr-nomodule) in the `script` element, it understands `type="module"`. This ensures that legacy browsers only get legacy scripts and modern browsers only get modern ones. Be warned, though, that dynamically injected scripts load asynchronously by default, so set the [`async`](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script#attr-async) attribute to `false` if dependency order is crucial.
 
 ## Transpile less
 
@@ -199,4 +199,4 @@ As you massage your temples wondering when this horrid JavaScript hangover is go
 
 As you take these suggestions and apply them to your codebase, know that progress doesn’t spontaneously happen overnight. Web development is a job. The truly impactful work is done when we’re thoughtful and dedicated to the craft for the long haul. Focus on steady improvements. Measure, test, repeat, and your site’s user experience will improve, and you’ll get faster bit by bit over time.
 
-*Special thanks to* [*Jason Miller*](https://twitter.com/_developit) *for tech editing this piece. Jason is the creator and one of the many maintainers of* [*Preact*](https://preactjs.com/)*, a vastly smaller alternative to React with the same API. If you use Preact,* [*please consider supporting Preact through Open Collective*](https://opencollective.com/preact)*.*
+*Special thanks to* [*Jason Miller*](https://twitter.com/_developit) *for tech editing this piece. Jason is the creator and one of the many maintainers of* [*Preact*](https://preactjs.com/), *a vastly smaller alternative to React with the same API. If you use Preact,* [*please consider supporting Preact through Open Collective*](https://opencollective.com/preact).

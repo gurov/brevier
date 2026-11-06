@@ -224,12 +224,21 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     unstream(&doc);
     deicon(&doc);
     formulas(&doc);
+    // mdBook прячет служебные строки примера, сайт показывает их по кнопке.
+    doc.select("pre .boring").remove();
+    // Запасной текст Video.js: «To view this video please enable JavaScript…».
+    doc.select(".vjs-no-js").remove();
+    icon_words(&doc);
+    spaced_credits(&doc);
+    crate::markdown::code_in_pre(&doc);
     keep_lang(&doc);
     keep_verse_class(&doc);
     unglue(&doc);
     unprint(&doc);
     unbutton(&doc);
     unpermalink(&doc);
+    drop_caps(&doc);
+    skipped_blocks(&doc);
     crate::hosts::without_wiki_edits(&doc);
     drop_broken_ld(&doc);
     // Снять до извлечения: `Readability` документ перебирает и чистит,
@@ -267,6 +276,10 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
             claims_article: false,
         });
     }
+    // До копии: заглушка с настоящим адресом, и `restore` вернул бы её как сироту.
+    noscript_twins(&doc);
+    readable_sources(&doc);
+    crate::hosts::with_dw_pictures(&doc);
     // Копия — под сверку с извлечённым: `Readability` документ забирает себе
     // и чистит на месте, а сироты ищутся в исходном дереве (см. `restore`).
     let source = doc.clone();
@@ -364,7 +377,7 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let title = heading_title(&source, &article.title).unwrap_or_else(|| article.title.to_string());
     Ok(Article {
         title,
-        byline: article.byline.filter(|b| !b.trim().is_empty()),
+        byline: article.byline.filter(|b| names_someone(b)),
         published: article.published_time.filter(|p| !p.trim().is_empty()),
         content_html,
         thumbs,
@@ -1348,6 +1361,21 @@ fn restore(
         .filter_map(|(node, _)| block_kind(node))
         .collect();
     let mut lede = false;
+    // Ниже последнего взятого абзаца обычно подвал, но статью бывает режет
+    // реклама: у Ars Technica текст лежит в нескольких `div.post-content`,
+    // каждый в своей колонке, и читатель получал половину статьи, не зная об этом.
+    // Продолжение узнаём по виду: тот же блок с классом, в том же `<article>`.
+    // Здесь только прибавляем: сведённые до Readability части сдвигали её выбор.
+    let home = enclosing_article(&page[last].0);
+    let goes_on = |node: &NodeRef| {
+        block_kind(node).is_some_and(|kind| !kind.2.is_empty() && body_blocks.contains(&kind))
+            && home.is_some()
+            && enclosing_article(node) == home
+    };
+    let end = page[last + 1..]
+        .iter()
+        .rposition(|(node, piece)| matches!(piece, Piece::Para(..)) && goes_on(node))
+        .map_or(last, |at| last + 1 + at);
 
     let mut anchor: Option<NodeRef> = None;
     let mut pending: Vec<String> = Vec::new();
@@ -1357,12 +1385,24 @@ fn restore(
     let mut heads: HashSet<String> = HashSet::new();
     let mut used: HashSet<dom_query::NodeId> = HashSet::new();
 
-    for (at, (node, piece)) in page.iter().enumerate().take(last + 1).skip(start) {
+    // Там же снимок берём, только если он в самом блоке текста: баннер рассылки
+    // у BBC лежит рядом, и из-за него `with_cover` терял заглавный снимок.
+    let in_body = |node: &NodeRef| {
+        node.ancestors_it(Some(BODY_LEVELS)).any(|up| {
+            up.attr("class")
+                .is_some_and(|class| body_blocks.iter().any(|kind| *kind.2 == *class))
+        })
+    };
+    // Заголовок ниже статьи, за которым не оказалось абзаца: «Most Popular» (Vox).
+    let mut loose: Option<usize> = None;
+
+    for (at, (node, piece)) in page.iter().enumerate().take(end + 1).skip(start) {
         let above = at < first;
         let (key, words) = match piece {
             Piece::Para(key, words) => (key, *words),
             Piece::Head(_) | Piece::Shot(_) if above && !lede => continue,
             Piece::Shot(_) if above => continue,
+            Piece::Shot(_) if at > last && !in_body(node) => continue,
             // Заголовок, которого в статье нет, встаёт перед ближайшим
             // следующим её абзацем — то есть туда же, куда его накопленным
             // куском поставит якорь. Отдельного места ему не нужно.
@@ -1371,6 +1411,9 @@ fn restore(
                     && worth_heading(node, text, title)
                     && heads.insert(text.clone())
                 {
+                    if at > last {
+                        loose.get_or_insert(pending.len());
+                    }
                     pending.push(fragment(&node.html(), base));
                     restored += 1;
                 }
@@ -1419,6 +1462,9 @@ fn restore(
         if !worth_restoring(node, words) || inside.contains(key.as_str()) {
             continue;
         }
+        if at > last && !goes_on(node) {
+            continue;
+        }
         if above {
             // Абзац, который целиком ссылка, — анонс или реклама подписки
             // (LBC), а не начало статьи.
@@ -1436,6 +1482,10 @@ fn restore(
         inside.push(' ');
         inside.push_str(&squeeze(&block.text()));
         restored += 1;
+        loose = None;
+    }
+    if let Some(at) = loose {
+        pending.truncate(at);
     }
     if let Some(previous) = anchor
         && !pending.is_empty()
@@ -1454,6 +1504,16 @@ fn restore(
         Some(node) => node.html().to_string(),
         None => article.select("body").inner_html().to_string(),
     })
+}
+
+/// На сколько уровней вверх снимок ещё считается лежащим в блоке текста:
+/// `<img>`, `<picture>`, `<figure>` и сам блок.
+const BODY_LEVELS: usize = 4;
+
+fn enclosing_article(node: &NodeRef) -> Option<dom_query::NodeId> {
+    node.ancestors_it(None)
+        .find(|up| up.has_name("article"))
+        .map(|article| article.id)
 }
 
 /// Что именно вернуть: сам абзац или обёртку, в которой он потерялся.
@@ -1605,6 +1665,15 @@ fn formulas(doc: &Document) {
     }
 }
 
+/// Есть ли в подписи имя: у Спольски от «by <a></a>» остаётся одно слово,
+/// у Википедии автором статьи записано «Contributors to Wikimedia projects».
+fn names_someone(byline: &str) -> bool {
+    let byline = byline.trim();
+    !byline.is_empty()
+        && !byline.eq_ignore_ascii_case("by")
+        && !byline.eq_ignore_ascii_case("Contributors to Wikimedia projects")
+}
+
 fn is_hidden(node: &NodeRef) -> bool {
     node.attr("style").is_some_and(|style| {
         style
@@ -1630,6 +1699,83 @@ fn formula_source(math: &NodeRef) -> Option<String> {
 
 /// Где ленивая картинка держит адрес, пока скрипт не переставит его в `src`.
 const LAZY_ADDRESS: [&str; 3] = ["data-src", "data-lazy-src", "data-original"];
+
+/// Настоящий адрес из `<noscript>` рядом с заглушкой.
+///
+/// taz кладёт в `<img>` снимок шириной в 14 точек и подменяет его скриптом,
+/// а для тех, у кого скриптов нет, рядом лежит `<noscript>` с настоящей
+/// картинкой — это мы. Readability ищет такого близнеца только перед
+/// `<noscript>`, а здесь он за ним. `<source>` брать нельзя: на wired и france24
+/// он мельче, чем `src`.
+fn noscript_twins(doc: &Document) {
+    for noscript in doc.select("noscript").nodes() {
+        let beside = [
+            noscript.next_element_sibling(),
+            noscript.prev_element_sibling(),
+        ];
+        let Some(image) = beside
+            .into_iter()
+            .flatten()
+            .find(|node| node.has_name("img"))
+        else {
+            continue;
+        };
+        let twin = dom_query::Selection::from(*noscript)
+            .select("img")
+            .attr("src");
+        if let Some(address) = twin.filter(|address| !address.trim().is_empty()) {
+            image.set_attr("src", address.trim());
+            noscript.remove_from_parent();
+        }
+    }
+}
+
+/// Что читает `media::decode`, кроме SVG: остальные форматы нам не показать.
+const READABLE_TYPES: [&str; 4] = ["image/webp", "image/png", "image/jpeg", "image/gif"];
+const UNREADABLE_ENDINGS: [&str; 2] = [".avif", ".jxl"];
+
+/// Адрес из `<source>`, если `src` в формате, которого мы не читаем.
+///
+/// fasterthanli.me пишет в `<img>` JPEG XL, а WebP кладёт рядом в `<picture>`:
+/// браузер выбирает сам, а у нас вместо снимка стояла рамка. В остальных
+/// случаях `src` лучше `<source>` (см. `noscript_twins`), поэтому только здесь.
+/// Источник с `media` — для другого экрана: берём его, только если другого нет.
+fn readable_sources(doc: &Document) {
+    for image in doc.select("picture img[src]").nodes() {
+        let unreadable = image.attr("src").is_some_and(|src| {
+            let path = src.split(['?', '#']).next().unwrap_or_default();
+            let path = path.trim_end().to_ascii_lowercase();
+            UNREADABLE_ENDINGS.iter().any(|end| path.ends_with(end))
+        });
+        if !unreadable {
+            continue;
+        }
+        let readable: Vec<NodeRef> = image
+            .parent()
+            .map(|picture| picture.element_children())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|source| {
+                source.has_name("source")
+                    && source
+                        .attr("type")
+                        .is_some_and(|kind| READABLE_TYPES.contains(&kind.trim()))
+            })
+            .collect();
+        let chosen = readable
+            .iter()
+            .find(|source| !source.has_attr("media"))
+            .or(readable.first());
+        let srcset = chosen.and_then(|source| source.attr("srcset"));
+        let address = srcset.as_deref().and_then(|srcset| {
+            let first = srcset.split(',').next()?;
+            first.split_whitespace().next()
+        });
+        if let Some(address) = address {
+            image.set_attr("src", address);
+        }
+    }
+}
 
 /// Тело SVG-заглушки короче этого, в знаках записи. Пустой `<svg>` занимает
 /// около ста: на 1120 сохранённых страницах самая длинная заглушка — 106.
@@ -1658,6 +1804,95 @@ fn unlazy(doc: &Document) {
             .find(|address| !address.trim().is_empty());
         if let (true, Some(address)) = (placeholder, address) {
             image.set_attr("src", address.trim());
+        }
+    }
+}
+
+/// Значки шрифта Material: в тексте это слова, `chevron_left`, из которых
+/// шрифт рисует стрелку. Подпись из нескольких слов значком не бывает.
+fn icon_words(doc: &Document) {
+    let icons = "[class*=\"material-icons\"], [class*=\"material-symbols\"]";
+    for icon in doc.select(icons).nodes() {
+        if !icon.text().trim().contains(' ') {
+            icon.remove_from_parent();
+        }
+    }
+}
+
+/// Источник снимка в `<small>` CSS ставит с новой строки, а без него он
+/// прилипал к подписи: «this weekImage: Valentyn» (dw.com).
+fn spaced_credits(doc: &Document) {
+    for credit in doc.select("figcaption small").nodes() {
+        let glued = credit
+            .prev_sibling()
+            .and_then(|before| before.text().chars().last())
+            .is_some_and(|sign| !sign.is_whitespace());
+        if glued {
+            credit.insert_before(&doc.tree.new_text(" "));
+        }
+    }
+}
+
+/// Буквица, отделённая от своего слова пробелом вёрстки.
+///
+/// На странице буква висит отдельно, и пробела за ней не видно, а без CSS
+/// выходит «D er Krieg» (taz). Узнаём по классу, и только если буква одна
+/// и слово за ней продолжается строчной.
+fn drop_caps(doc: &Document) {
+    const CAPS: &str = "[class*=\"initial-letter\" i], [class*=\"dropcap\" i], \
+                        [class*=\"drop-cap\" i], [class*=\"first-letter\" i]";
+    for letter in doc.select(CAPS).nodes() {
+        let shown = letter.text();
+        let mut signs = shown.trim().chars();
+        if !signs.next().is_some_and(char::is_alphabetic) || signs.next().is_some() {
+            continue;
+        }
+        let Some(gap) = letter.next_sibling().filter(NodeRef::is_text) else {
+            continue;
+        };
+        let written = gap.text();
+        let rest = written.trim_start();
+        if rest.len() == written.len() {
+            continue;
+        }
+        let word = if rest.is_empty() {
+            gap.next_sibling().map(|next| next.text().to_string())
+        } else {
+            Some(rest.to_owned())
+        };
+        if word.is_some_and(|word| word.chars().next().is_some_and(char::is_lowercase)) {
+            gap.replace_with(&doc.tree.new_text(rest));
+        }
+    }
+}
+
+/// Больше этого блок не врезка, а часть страницы: SZ зовёт так шапку всего сайта.
+const SKIPPED_BLOCK_CHARS: usize = 3000;
+
+/// Врезка, которую страница сама предлагает перепрыгнуть.
+///
+/// BBC ставит посреди статьи «Самое популярное» для скринридера: ссылка
+/// «Skip … and continue reading» на `#end-of-recommendations`, список и метка
+/// «End of …». Обе метки лежат внутри врезки — по ним она и видна: ближайший
+/// предок ссылки, в котором есть цель, и есть вся врезка.
+fn skipped_blocks(doc: &Document) {
+    const LEVELS: usize = 3;
+    for link in doc.select("a[href^=\"#end-of\"]").nodes() {
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
+        let target = href.trim_start_matches('#');
+        let block = link.ancestors_it(Some(LEVELS)).find(|up| {
+            up.descendants_it()
+                .any(|node| node.id_attr().as_deref() == Some(target))
+        });
+        if let Some(block) = block.filter(|block| {
+            matches!(
+                block.node_name().as_deref(),
+                Some("section" | "aside" | "div")
+            ) && block.text().chars().count() <= SKIPPED_BLOCK_CHARS
+        }) {
+            block.remove_from_parent();
         }
     }
 }
@@ -1977,7 +2212,8 @@ fn keep_lang(doc: &Document) {
         if !in_pre && !code.text().contains('\n') {
             continue;
         }
-        let Some(language) = nearest_language(code) else {
+        let plain = code.has_attr("data-plain").then(|| "text".to_owned());
+        let Some(language) = nearest_language(code).or(plain) else {
             continue;
         };
         code.set_attr("data-lang", &language);
@@ -2019,7 +2255,13 @@ fn nearest_language(code: &NodeRef) -> Option<String> {
 pub(crate) const LANG_ATTRS: [&str; 3] = ["data-lang", "data-language", "data-code-language"];
 
 /// Чем размечают язык в классе.
-pub(crate) const LANG_PREFIXES: [&str; 3] = ["language-", "lang-", "highlight-source-"];
+pub(crate) const LANG_PREFIXES: [&str; 5] = [
+    "language-",
+    "lang-",
+    "highlight-source-",
+    "mw-highlight-lang-",
+    "highlight-",
+];
 
 /// Что на узле объявлено языком.
 ///
@@ -2056,7 +2298,8 @@ pub(crate) fn language_token(raw: &str) -> Option<String> {
 
     let token = raw.split_whitespace().next()?.to_ascii_lowercase();
     let ok = |ch: char| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '#' | '-' | '_' | '.');
-    if token.is_empty() || token.len() > LIMIT || !token.chars().all(ok) {
+    // `default` — так Sphinx зовёт язык проекта, имени в нём нет.
+    if token.is_empty() || token.len() > LIMIT || !token.chars().all(ok) || token == "default" {
         return None;
     }
     Some(token)
@@ -2299,7 +2542,8 @@ fn words(html: &str) -> usize {
     Document::from(html).text().split_whitespace().count()
 }
 
-/// Корень сайта или его языковой версии: `/`, `/ru/`, `/en-us/`, `/index.html`.
+/// Корень сайта или его языковой версии: `/`, `/ru/`, `/en-us/`, `/index.html`,
+/// а ещё `/home/index.html`: туда перенаправляет корень dailymail.com.
 fn is_front(url: &str) -> bool {
     let Ok(url) = Url::parse(url) else {
         return false;
@@ -2307,7 +2551,8 @@ fn is_front(url: &str) -> bool {
     let segments: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
     match segments.as_slice() {
         [] => true,
-        [one] => is_locale(one) || one.starts_with("index."),
+        [one] => is_locale(one) || one.starts_with("index.") || *one == "home",
+        ["home", index] => index.starts_with("index."),
         _ => false,
     }
 }
@@ -3242,6 +3487,31 @@ mod tests {
         ));
     }
 
+    /// taz: заглушка в 14 точек, настоящий адрес — в `<noscript>` перед ней.
+    #[test]
+    fn a_placeholder_takes_the_address_of_its_noscript_twin() {
+        let text = TEXT;
+        let page = format!(
+            "<html><body><article><h1>T</h1><p>{text}</p><figure><picture>\
+             <source srcset=\"https://e.com/665/a.webp\">\
+             <noscript><img src=\" https://e.com/665/a.webp\" alt=\"a\"></noscript>\
+             <img src=\"https://e.com/14/a.webp\" alt=\"a\"></picture></figure>\
+             <p>{text}</p><p>{text}</p></article></body></html>"
+        );
+        let html = extract(&page, "https://e.com/x").unwrap().content_html;
+        assert!(html.contains("665/a.webp"), "{html}");
+        assert!(!html.contains("14/a.webp"), "{html}");
+    }
+
+    #[test]
+    fn a_byline_with_no_name_in_it_is_no_byline() {
+        assert!(!names_someone(" by "));
+        assert!(!names_someone("By"));
+        assert!(!names_someone("Contributors to Wikimedia projects"));
+        assert!(names_someone("by Joel Spolsky"));
+        assert!(names_someone("dpa"));
+    }
+
     #[test]
     fn a_byline_keeps_the_name_apart_from_the_date() {
         let text = TEXT;
@@ -3933,6 +4203,7 @@ mod tests {
             "https://habr.com/ru/",
             "https://example.org/en-us",
             "https://example.org/index.html",
+            "https://example.org/home/index.html",
             "https://example.org/?page=1",
         ] {
             assert!(is_front(front), "{front}");
@@ -4624,6 +4895,183 @@ mod tests {
                 false
             )
             .is_none()
+        );
+    }
+
+    /// На странице буква висит отдельно, а без CSS выходило «D er Krieg».
+    #[test]
+    fn a_drop_cap_joins_its_word() {
+        let doc = Document::from(
+            "<p><span class=\"initial-letter-outer\"><span class=\"initial-letter\">D</span></span> \
+             <span>er Krieg</span></p>",
+        );
+        drop_caps(&doc);
+        assert_eq!(doc.select("p").text().as_ref(), "Der Krieg");
+    }
+
+    #[test]
+    fn a_letter_before_a_capital_is_a_word() {
+        let html = "<p><span class=\"dropcap\">A</span> Word</p>";
+        let doc = Document::from(html);
+        drop_caps(&doc);
+        assert_eq!(doc.select("p").text().as_ref(), "A Word");
+    }
+
+    /// BBC: «Самое популярное» посреди статьи, для скринридера с «перепрыгнуть».
+    #[test]
+    fn a_block_the_page_offers_to_skip_goes() {
+        let doc = Document::from(
+            "<article><p>Before.</p><section><div><a href=\"#end-of-recommendations\">Skip</a>\
+             <ul><li>Teaser</li></ul><p id=\"end-of-recommendations\">End of it</p></div></section>\
+             <p>After.</p></article>",
+        );
+        skipped_blocks(&doc);
+        assert_eq!(doc.select("article").text().as_ref(), "Before.After.");
+    }
+
+    /// SZ так зовёт шапку всего сайта: цель лежит вне ближних предков.
+    #[test]
+    fn a_skip_link_to_elsewhere_removes_nothing() {
+        let doc = Document::from(
+            "<header><div><a href=\"#end-of-header\">Zum Inhalt</a></div></header>\
+             <main><p id=\"end-of-header\">Text</p></main>",
+        );
+        skipped_blocks(&doc);
+        assert!(doc.select("a").exists());
+    }
+
+    /// fasterthanli.me: JPEG XL в `src`, WebP рядом, а показать мы можем только его.
+    #[test]
+    fn a_picture_we_cannot_read_takes_its_readable_source() {
+        let doc = Document::from(
+            "<picture><source type=\"image/webp\" media=\"(max-width: 400px)\" srcset=\"s.webp 1x\">\
+             <source type=\"image/webp\" srcset=\"https://e.com/a.webp 1x, https://e.com/a.webp 2x\">\
+             <img src=\"https://e.com/a.jxl\"></picture>",
+        );
+        readable_sources(&doc);
+        assert_eq!(
+            doc.select("img").attr("src").as_deref(),
+            Some("https://e.com/a.webp")
+        );
+    }
+
+    /// На wired и france24 `<source>` мельче, чем `src`: читаемый `src` не трогаем.
+    #[test]
+    fn a_readable_picture_keeps_its_address() {
+        let doc = Document::from(
+            "<picture><source type=\"image/webp\" srcset=\"https://e.com/s.webp\">\
+             <img src=\"https://e.com/a.jpg\"></picture>",
+        );
+        readable_sources(&doc);
+        assert_eq!(
+            doc.select("img").attr("src").as_deref(),
+            Some("https://e.com/a.jpg")
+        );
+    }
+
+    /// Sphinx и Википедия: язык — на обёртке, а `<code>` внутри `<pre>` нет.
+    #[test]
+    fn a_language_on_the_wrapper_of_a_bare_pre_reaches_the_code() {
+        for (class, language) in [
+            ("highlight-python3 notranslate", "python3"),
+            ("mw-highlight mw-highlight-lang-rust mw-content-ltr", "rust"),
+        ] {
+            let doc = Document::from(format!("<div class=\"{class}\"><pre>x = 1\n</pre></div>"));
+            crate::markdown::code_in_pre(&doc);
+            keep_lang(&doc);
+            assert_eq!(
+                doc.select("code").attr("data-lang").as_deref(),
+                Some(language)
+            );
+        }
+    }
+
+    #[test]
+    fn sphinx_default_names_no_language() {
+        let doc =
+            Document::from("<div class=\"highlight-default\"><pre><span>x</span>\n</pre></div>");
+        crate::markdown::code_in_pre(&doc);
+        keep_lang(&doc);
+        assert!(doc.select("code").attr("data-lang").is_none());
+    }
+
+    /// Рассылка LWN в `<pre>`: без языка и без подсветки это текст.
+    #[test]
+    fn a_bare_pre_without_paint_is_text() {
+        let doc = Document::from("<pre>An update for perl\n</pre>");
+        crate::markdown::code_in_pre(&doc);
+        keep_lang(&doc);
+        assert_eq!(
+            doc.select("code").attr("data-lang").as_deref(),
+            Some("text")
+        );
+    }
+
+    #[test]
+    fn a_language_outranks_the_plain_mark() {
+        let doc = Document::from("<pre class=\"language-c\">int x;\n</pre>");
+        crate::markdown::code_in_pre(&doc);
+        keep_lang(&doc);
+        assert_eq!(doc.select("code").attr("data-lang").as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn an_icon_word_goes_and_a_label_stays() {
+        let doc = Document::from(
+            "<p><span class=\"material-icons\">chevron_left</span>Home\
+             <span class=\"material-symbols-outlined\">Read more now</span></p>",
+        );
+        icon_words(&doc);
+        assert_eq!(doc.select("p").text().as_ref(), "HomeRead more now");
+    }
+
+    #[test]
+    fn a_credit_gets_its_space() {
+        let doc = Document::from("<figcaption>Kyiv this week<small>Image: AP</small></figcaption>");
+        spaced_credits(&doc);
+        assert_eq!(
+            doc.select("figcaption").text().as_ref(),
+            "Kyiv this week Image: AP"
+        );
+    }
+
+    /// Ars Technica: реклама режет статью на части в разных колонках, а ниже
+    /// последнего взятого абзаца `restore` раньше ничего не возвращал.
+    #[test]
+    fn an_article_cut_by_an_advert_goes_on_after_it() {
+        let words =
+            "Plain words of an article that goes on for a while, with commas, and more of them. ";
+        let part = |name: &str| {
+            format!(
+                "<div class=\"grid\"><div class=\"post-content\"><p>{name} one. {w}</p>\
+                 <p>{name} two. {w}</p><p>{name} three. {w}</p></div></div>",
+                w = words.repeat(5)
+            )
+        };
+        let html = format!(
+            "<html><head><title>Cut</title></head><body><article><h1>Cut</h1>{}\
+             <div class=\"ad\">Advert</div>{}\
+             <div class=\"comment\"><p>A comment. {w}</p></div></article>\
+             <footer><p>Footer. {w}</p></footer></body></html>",
+            part("First"),
+            part("Second"),
+            w = words.repeat(3)
+        );
+        let article = extract(&html, "https://e.com/a/some-long-article-address").unwrap();
+        assert!(
+            article.content_html.contains("Second three."),
+            "{}",
+            article.content_html
+        );
+        assert!(
+            !article.content_html.contains("A comment."),
+            "{}",
+            article.content_html
+        );
+        assert!(
+            !article.content_html.contains("Footer."),
+            "{}",
+            article.content_html
         );
     }
 }

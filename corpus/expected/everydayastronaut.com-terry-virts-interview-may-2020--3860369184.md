@@ -98,9 +98,9 @@ Using a motion picture film camera in space might not be as easy as one might as
 
 It is definitely (laughs) easier except there is no big tripod. We have these camera brackets, which are great. So for small cameras it’s fine that there is no gravity. But to really stabilize the big Hollywood camera you really need two of those brackets and it’s still not that great.  In *A Beautiful Planet,* there are still some wobbly scenes that I still cringe at.
 
-*–* *Terry Virts*
+– *Terry Virts*
 
-These big IMAX film cameras can sometimes be difficult to handle because of their heavy mass*.* Even though there is some air resistance inside the station, there is nothing else to stop the camera beside a wall or a human, so after the operator gets it moving, it would take the same amount of force to stop it.
+These big IMAX film cameras can sometimes be difficult to handle because of their heavy mass. Even though there is some air resistance inside the station, there is nothing else to stop the camera beside a wall or a human, so after the operator gets it moving, it would take the same amount of force to stop it.
 
 [![Left hand of Terry Virts spead appart in Vulcan salute with the New England coastline visible as an Earthly backdrop](https://everydayastronaut.com/wp-content/uploads/2020/05/Vulcan-Salute-1024x685.jpg)](https://everydayastronaut.com/wp-content/uploads/2020/05/Vulcan-Salute.jpg)
 

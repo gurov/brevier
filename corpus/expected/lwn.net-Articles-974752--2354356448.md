@@ -1,5 +1,6 @@
 # Red Hat alert RHSA-2024:3128-01 (perl:5.32) \[LWN.net\]
 
+```text
 An update for the perl:5.32 module is now available for Red Hat Enterprise
 Linux 8.
 
@@ -31,3 +32,4 @@ distribute this content, or a modified version of it, you must provide
 attribution to Red Hat Inc. and provide a link to the original.
 
 Original: https://access.redhat.com/security/data/csaf/v2/advisories/2024/rhsa-2024_3128.json
+```
