@@ -1235,9 +1235,14 @@ const PROSE_WORDS: usize = 25;
 /// Абзац прозы: не заголовок, не картинка, не пункт и не цитата, длинный
 /// и не из одних ссылок. Подводки анонсов короче: «The meeting comes as
 /// Trump threatens to ban U.S. diesel exports.»
+///
+/// Пункт — это `* ` с пробелом; абзац, начатый выделением, — проза:
+/// у berliner-zeitung каждый абзац открывается «**Südring:**», и статья
+/// без прозы после врезки «читайте также» обрывалась на ней.
 fn is_prose(line: &str) -> bool {
     let line = line.trim();
-    if line.is_empty() || line.starts_with(['#', '!', '-', '*', '>', '|', '`', '[']) {
+    let item = line.starts_with("* ");
+    if line.is_empty() || item || line.starts_with(['#', '!', '-', '>', '|', '`', '[']) {
         return false;
     }
     let mut plain = String::with_capacity(line.len());
@@ -2239,12 +2244,24 @@ fn is_heading(line: &str) -> bool {
 fn card_link(content: &str, href: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
 
-    // Адрес кладём на подпись, а не на миниатюру: нажимают по названию,
+    // Адрес кладём на заголовок, а не на то, что стоит над ним: у ленты
+    // mk.ru карточка — «время, заголовок», и ссылкой становилось время.
+    // Над заголовком оно читалось хвостом предыдущей новости, и читатель
+    // по нему попадал не туда. Над заголовком бывает одна строка — время
+    // или рубрика; заголовок ниже абзаца — уже не заголовок карточки:
+    // у ovd.info в ссылку вокруг цифры попал вопрос из FAQ под ней.
+    // Заголовка нет — на подпись, а не на миниатюру: нажимают по названию,
     // а с выключенными картинками от строки-картинки остаётся рамка.
-    // Если подписи нет вовсе — на первое, что есть.
-    let target = lines
+    // Нет и подписи — на первое, что есть.
+    let words: Vec<usize> = (0..lines.len())
+        .filter(|&i| !lines[i].trim().is_empty() && !is_lone_image(lines[i]))
+        .collect();
+    let target = words
         .iter()
-        .position(|line| !line.trim().is_empty() && !is_lone_image(line))
+        .take(2)
+        .copied()
+        .find(|&i| is_heading(lines[i].trim()))
+        .or_else(|| words.first().copied())
         .or_else(|| lines.iter().position(|line| !line.trim().is_empty()));
 
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
@@ -3300,6 +3317,38 @@ mod tests {
         assert!(md.contains("[Подводка записи.](https://e.com/one)"), "{md}");
     }
 
+    /// Над заголовком карточки — время (лента mk.ru): адрес достаётся
+    /// заголовку, время остаётся текстом.
+    #[test]
+    fn a_card_links_its_heading_and_not_the_time_above_it() {
+        let html = "<ul><li><a href=\"https://e.com/one\"><span>09:59</span>\
+                    <h3>Первая новость</h3></a></li>\
+                    <li><a href=\"https://e.com/two\"><span>09:58</span>\
+                    <h3>Вторая новость</h3></a></li></ul>";
+        let md = from_html(html).unwrap();
+        assert!(
+            md.contains("### [Первая новость](https://e.com/one)"),
+            "{md}"
+        );
+        assert!(
+            md.contains("### [Вторая новость](https://e.com/two)"),
+            "{md}"
+        );
+        assert!(!md.contains("[09:59]"), "{md}");
+    }
+
+    /// Заголовок ниже абзаца — не заголовок карточки: у ovd.info в ссылку
+    /// вокруг цифры попал вопрос из FAQ, и адрес остаётся на цифре.
+    #[test]
+    fn a_heading_below_the_card_text_does_not_take_the_link() {
+        let html = "<a href=\"https://e.com/data\"><div>2 342</div>\
+                    <p>из них находятся в местах лишения свободы</p>\
+                    <h5>Что делать?</h5></a>";
+        let md = from_html(html).unwrap();
+        assert!(md.contains("[2 342](https://e.com/data)"), "{md}");
+        assert!(md.contains("##### Что делать?"), "{md}");
+    }
+
     /// А если в карточке нет ничего, кроме миниатюры, адрес достаётся ей:
     /// иначе нажать было бы не на что.
     #[test]
@@ -3414,6 +3463,26 @@ mod tests {
         assert!(kept.contains("Конец статьи"), "{kept}");
         assert!(!kept.contains("Читайте ещё"), "{kept}");
         assert!(!kept.contains("И ещё"), "{kept}");
+    }
+
+    /// Абзац, открытый выделением, — проза, а не пункт списка:
+    /// у berliner-zeitung так начинается каждый, и статья обрывалась
+    /// на врезке «читайте также» в последней трети.
+    #[test]
+    fn a_paragraph_opened_in_bold_is_prose() {
+        let prose = "**Südring:** Auf dem südlichen Ring setzt die Bahn die Arbeiten am \
+            neuen Elektronischen Stellwerk fort, und zwischen dem 14. und 21. Mai müssen \
+            die Fahrgäste zwischen Hermannstraße und Schöneberg auf Busse umsteigen.";
+        let md = format!(
+            "# Статья\n\n{prose}\n\n{prose}\n\n{prose}\n\nSchienenverkehr\n\n\
+             ### [Für TikTok in den Führerstand](https://e.com/1)\n\n{prose} Ende.\n"
+        );
+        let Teasers::Article(kept) = strip_teasers(&md, true) else {
+            panic!("статью приняли за ленту");
+        };
+        assert!(kept.contains("Ende."), "{kept}");
+        assert!(is_prose(prose));
+        assert!(!is_prose(&format!("* {prose}")));
     }
 
     #[test]
