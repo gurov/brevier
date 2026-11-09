@@ -1,0 +1,4 @@
+• A long section is split on the shelf while you read it: paragraph starts a screen apart, with their place in the text.
+• Short pages and short news no longer turn into their footer.
+• Poems keep their lines and stanzas on Poetry Foundation, rupoem.ru and Wikisource.
+• Project Gutenberg: chapter titles whole, letters and shaped poems no longer shown as code.
