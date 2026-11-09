@@ -298,10 +298,28 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     if article.content.trim().is_empty() {
         return Err(empty(html));
     }
+    // Взяла обвязку при статье в `<main>` (#64) — заново, из одного `<main>`.
+    // Заголовок, автор и дата остаются от первого прохода: JSON-LD и подпись
+    // бывают и вне `<main>`. Главную с заголовками не трогаем: обвязку там
+    // заменит их список (`front_page`), а лента карточек из `<main>` грязнее
+    // его — склеенные рубрики, «Читать», заглушки картинок (forbes.ru).
+    let content_html = headlines
+        .is_empty()
+        .then(|| chrome_instead_of_main(&source, &article.content))
+        .flatten()
+        .and_then(|main| {
+            unlazy(&main);
+            Readability::with_document(main, Some(url), Some(Config::default()))
+                .ok()?
+                .parse()
+                .ok()
+        })
+        .map(|main| main.content.to_string())
+        .filter(|content| !content.trim().is_empty())
+        .unwrap_or_else(|| article.content.to_string());
 
     let claim = claims_article(&source, url, &article.title);
     let claims_article = claim.is_some();
-    let content_html = article.content.to_string();
     // Страница, которая объявила себя этой статьёй, не лента, даже если
     // статья лежит среди карточек: у aawsat и openDemocracy под ней уже
     // подгружены следующие статьи, и найденная Readability выглядела одной
@@ -375,9 +393,13 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
     let (content_html, notes) = lift_notes(content_html);
 
     let title = heading_title(&source, &article.title).unwrap_or_else(|| article.title.to_string());
+    // Автор с именем самой страницы — повтор строкой ниже: так подписывают
+    // личные сайты («OpenKacper» в `<title>` и в `rel=author` подвала, #64).
+    let same = |byline: &str| squeeze(byline).to_lowercase() == squeeze(&title).to_lowercase();
+    let byline = article.byline.filter(|b| names_someone(b) && !same(b));
     Ok(Article {
         title,
-        byline: article.byline.filter(|b| names_someone(b)),
+        byline,
         published: article.published_time.filter(|p| !p.trim().is_empty()),
         content_html,
         thumbs,
@@ -389,6 +411,75 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
         lang,
         claims_article,
     })
+}
+
+/// Главное место страницы, как его назвал автор.
+const MAIN: &str = "main, [role=main]";
+
+/// Обвязка страницы: шапка, меню, подвал, колонка сбоку — и их роли ARIA.
+const CHROME: &str = "footer, header, nav, aside, [role=contentinfo], [role=banner], \
+                      [role=navigation], [role=complementary]";
+
+/// Readability взяла обвязку, а статья лежит в `<main>` (#64). Ответ —
+/// страница, у которой в `<body>` остался один `<main>`: из неё извлекать заново.
+///
+/// Readability судит по длине и запятым абзацев, а не по разметке, и у короткой
+/// статьи абзац подвала бывает длиннее всех её собственных. Тогда читатель
+/// получал подвал: на личном сайте — «Created at… Made by… CC BY-SA» вместо
+/// «Introduction / Welcome there!», у Коммерсанта — строки «© АО „Коммерсантъ“…
+/// Роскомнадзор…» вместо заметки в три абзаца, у almanar — подписку на
+/// рассылку из меню в шапке. А где у страницы главное, автор сказал сам.
+///
+/// Узко с двух сторон. Взятое лежит целиком в обвязке — `<footer>`, `<header>`,
+/// `<nav>`, `<aside>` вне `<main>` и `<article>` (шапка и подвал внутри
+/// `<article>` — её собственные). Сверяем словами, а не узлами: Readability
+/// перестраивает дерево и уносит из него подпись автора. И `<main>` на странице
+/// один, не внутри обвязки и несёт слова, которых в обвязке нет. Вернуть
+/// `<main>` как есть нельзя — рядом со статьёй там бывают лента, кнопки
+/// и формы, а чистить их — работа той же Readability.
+fn chrome_instead_of_main(source: &Document, content: &str) -> Option<Document> {
+    fn tokens(text: &str) -> HashSet<String> {
+        text.split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    }
+    let within = |node: &NodeRef, sel: &str| node.ancestors_it(None).any(|up| up.is(sel));
+
+    let mains: Vec<NodeRef> = source
+        .select(MAIN)
+        .nodes()
+        .iter()
+        .filter(|node| !within(node, MAIN))
+        .copied()
+        .collect();
+    let [main] = mains.as_slice() else {
+        return None;
+    };
+    if within(main, CHROME) {
+        return None;
+    }
+
+    let mut chrome = HashSet::new();
+    for node in source.select(CHROME).nodes() {
+        if !within(node, "main, [role=main], article") {
+            chrome.extend(tokens(&node.text()));
+        }
+    }
+    let taken = tokens(&Document::from(content).text());
+    if taken.is_empty() || !taken.is_subset(&chrome) {
+        return None;
+    }
+
+    let page = source.clone();
+    let body = page.select("body");
+    body.set_html(main.html());
+    let own = page.clone();
+    own.select("script, style, noscript, template").remove();
+    if tokens(&own.select("body").text()).is_subset(&chrome) {
+        return None;
+    }
+    Some(page)
 }
 
 /// Заголовок из `<h1>`, когда `<title>` — тот же заголовок с хвостом сайта
@@ -3396,6 +3487,50 @@ mod tests {
             "{}",
             article.content_html
         );
+    }
+
+    /// Короткая страница в `<main>` и подвал с абзацем длиннее её (#64).
+    fn short_main(main: &str) -> String {
+        format!(
+            r#"<html><head><title>OpenKacper</title></head><body>
+            <header><h1>OpenKacper</h1></header><nav><a href="/">homepage</a></nav>
+            {main}
+            <footer>Created at <time>2026-11-09</time><p>Made by <a rel="author" href="mailto:a@b.c">OpenKacper</a>
+            © 2026 <a href="/LICENSE">CC BY-SA 4.0</a>, all of it, with thanks to everyone.</p></footer>
+            </body></html>"#
+        )
+    }
+
+    #[test]
+    fn a_footer_does_not_stand_in_for_a_short_main() {
+        let page = short_main("<main><h2>Introduction</h2><p>Welcome there!</p></main>");
+        let article = extract(&page, "https://openkacper.codeberg.page/").unwrap();
+        let html = &article.content_html;
+        assert!(html.contains("Welcome there!"), "{html}");
+        assert!(html.contains("Introduction"), "{html}");
+        assert!(!html.contains("Made by"), "{html}");
+        // Автор с именем самой страницы второй строкой не повторяется.
+        assert_eq!(article.byline, None);
+    }
+
+    #[test]
+    fn a_main_with_nothing_of_its_own_leaves_the_choice_alone() {
+        // `<main>` пуст (его наполняет скрипт) — подвал хотя бы не хуже пустоты.
+        let page = short_main("<main><script>render()</script></main>");
+        let html = extract(&page, "https://e.com/").unwrap().content_html;
+        assert!(html.contains("Made by"), "{html}");
+    }
+
+    #[test]
+    fn an_article_s_own_footer_is_not_chrome() {
+        // Readability взяла `<article>` с его подвалом — это статья, не обвязка.
+        let text = TEXT;
+        let page = format!(
+            r#"<html><body><main><p>Короткое вступление.</p></main>
+            <article><h1>Статья</h1><p>{text}</p><footer><p>{text}</p></footer></article></body></html>"#
+        );
+        let html = extract(&page, "https://e.com/a").unwrap().content_html;
+        assert!(html.contains("Кеннет Эрроу"), "{html}");
     }
 
     #[test]
