@@ -60,6 +60,41 @@ ManifestDPIAware true
     !insertmacro ${how} "NotoSansMono-Regular.ttf" "Noto Sans Mono"
 !macroend
 
+; Открытый Brevier держит свои файлы: установщик стёр бы половину `bin`
+; и споткнулся на занятых, а `winget upgrade` ставит поверх молча. Запущенный
+; exe на запись не открыть — так и смотрим, пока ничего не стёрто. gdbus.exe
+; уходит сам через секунды после окна, поэтому сначала подождём. Без окна
+; (`/S`) вопрос отвечает себе «отмена»: выходим, ничего не тронув, с кодом
+; STILL_OPEN — манифест winget называет его packageInUse.
+!define STILL_OPEN 10
+!macro Taken file
+    IfFileExists "$INSTDIR\bin\${file}" 0 +3
+    FileOpen $0 "$INSTDIR\bin\${file}" a
+    FileClose $0
+!macroend
+!macro UntilClosed un
+    Function ${un}UntilClosed
+        StrCpy $1 0
+        look:
+        ClearErrors
+        !insertmacro Taken "brevier-ui.exe"
+        !insertmacro Taken "brevier.exe"
+        !insertmacro Taken "gdbus.exe"
+        IfErrors 0 closed
+        IntOp $1 $1 + 1
+        Sleep 1000
+        IntCmp $1 5 0 look
+        StrCpy $1 0
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
+            "Brevier is open. Close it, then press Retry." /SD IDCANCEL IDRETRY look
+        SetErrorLevel ${STILL_OPEN}
+        Quit
+        closed:
+    FunctionEnd
+!macroend
+!insertmacro UntilClosed ""
+!insertmacro UntilClosed "un."
+
 Name "Brevier"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\Brevier"
@@ -86,6 +121,8 @@ VIAddVersionKey "LegalCopyright" "MIT OR Apache-2.0"
 !insertmacro MUI_LANGUAGE "English"
 
 Section
+    Call UntilClosed
+
     ; Новая версия ложится на чистое место: библиотека от прошлой, которой
     ; в новой нет, не должна подхватиться окном.
     RMDir /r "$INSTDIR\bin"
@@ -111,6 +148,7 @@ Section
     ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
     WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Brevier"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "Pavel Gurov"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "${EXE},0"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
@@ -151,6 +189,8 @@ Section
 SectionEnd
 
 Section "Uninstall"
+    Call un.UntilClosed
+
     Delete "$SMPROGRAMS\Brevier.lnk"
     !insertmacro Fonts UnFont
     RMDir "$INSTDIR\fonts"

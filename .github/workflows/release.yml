@@ -270,7 +270,19 @@ jobs:
           [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
           New-Item -ItemType Directory -Force screenshot | Out-Null
           $shot.Save("$PWD\screenshot\windows.png")
+          # Обновление поверх: при открытом окне установщик уходит с кодом 10,
+          # ничего не тронув (`STILL_OPEN` в brevier.nsi, манифест winget), при
+          # закрытом — ставит. Издателя в записи об установке сверяет winget.
+          $publisher = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Brevier').Publisher
+          if ($publisher -ne 'Pavel Gurov') { Write-Error "publisher: $publisher"; exit 1 }
+          $open = Start-Process -Wait -PassThru -FilePath $setup -ArgumentList '/S'
+          if ($open.ExitCode -ne 10) { Write-Error "over an open window: exit $($open.ExitCode)"; exit 1 }
+          if ($ui.HasExited) { Write-Error 'the installer closed the window'; exit 1 }
           Stop-Process -Id $ui.Id
+          $closed = Start-Process -Wait -PassThru -FilePath $setup -ArgumentList '/S'
+          if ($closed.ExitCode) { Write-Error "over a closed window: exit $($closed.ExitCode)"; exit 1 }
+          & "$bin\brevier.exe" --version
+          if ($LASTEXITCODE) { exit 1 }
           Start-Process -Wait -FilePath "$env:LOCALAPPDATA\Programs\Brevier\uninstall.exe" -ArgumentList '/S'
           Start-Sleep -Seconds 5
           if (Test-Path "$bin\brevier-ui.exe") { Write-Error 'the uninstaller left the program'; exit 1 }
