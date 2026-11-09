@@ -276,6 +276,12 @@ pub fn extract(html: &str, url: &str) -> Result<Article, Error> {
             claims_article: false,
         });
     }
+    // `<link>` и `<style>` посреди абзаца ничего не показывают, но Readability,
+    // собирая абзац после двойного `<br>`, на них останавливается: у Wikisource
+    // строфа рвалась на строке с номером (TemplateStyles кладёт их туда, #21).
+    // Только в `<p>`: те, что между блоками, сдвигали ей выбор на главных
+    // (у eluniversal пропадали заголовки колонок).
+    doc.select("p link, p style").remove();
     // До копии: заглушка с настоящим адресом, и `restore` вернул бы её как сироту.
     noscript_twins(&doc);
     readable_sources(&doc);
@@ -2319,14 +2325,87 @@ fn keep_lang(doc: &Document) {
 /// Атрибуты она не трогает — кладём признак в `data-verse`, а собирает
 /// строки [`verse`] уже после извлечения. Тег не меняем: у `div` и `p`
 /// в счёте Readability свои правила, и переименование сдвинуло бы выбор.
+///
+/// Класс — без оглядки на регистр (`div.Poem` у rupoem.ru): селектор `.poem`
+/// его не находит, поэтому перебираем классы сами.
+///
+/// Здесь же строки с висячим отступом: так стих верстают без всякого класса
+/// (Poetry Foundation — `<div style="text-indent: -1em; padding-left: 1em">`
+/// на строку, пустой такой же между строфами). Readability снимает `style`,
+/// превращает строки в абзацы и выбрасывает пустые, и стих приезжал абзацем
+/// на строку, без строф. Ряд таких соседей — стих, если в нём хотя бы четыре
+/// строки и три четверти из них короткие, как у стиха ([`VERSE_LINE`]):
+/// висячим отступом набирают и список литературы, но его строки длинные.
+/// Строка после пустой помечается началом строфы ([`STANZA_ATTR`]).
 fn keep_verse_class(doc: &Document) {
-    for class in VERSE_CLASSES {
-        for node in doc.select(&format!(".{class}")).nodes() {
-            if has_word_class(node, class) {
-                node.set_attr(VERSE_ATTR, class);
+    for node in doc.select("[class]").nodes() {
+        if let Some(class) = VERSE_CLASSES
+            .into_iter()
+            .find(|class| has_word_class(node, class))
+        {
+            node.set_attr(VERSE_ATTR, class);
+        }
+    }
+
+    let mut runs: Vec<Vec<NodeRef>> = Vec::new();
+    for node in doc.select("[style*=\"text-indent\" i]").nodes() {
+        if !hangs(node) {
+            continue;
+        }
+        let follows = runs.last().and_then(|run| run.last()).is_some_and(|last| {
+            last.next_element_sibling()
+                .is_some_and(|next| next.id == node.id)
+        });
+        match runs.last_mut() {
+            Some(run) if follows => run.push(*node),
+            _ => runs.push(vec![*node]),
+        }
+    }
+    for run in runs {
+        let lengths: Vec<usize> = run
+            .iter()
+            .map(|line| squeeze(&line.text()).chars().count())
+            .filter(|&chars| chars > 0)
+            .collect();
+        let short = lengths.iter().filter(|&&chars| chars <= VERSE_LINE).count();
+        if lengths.len() < 4 || short * 4 < lengths.len() * 3 {
+            continue;
+        }
+        let mut gap = false;
+        for line in run {
+            if squeeze(&line.text()).is_empty() {
+                gap = true;
+                continue;
+            }
+            // `<div>` из одного текста Readability сама делает `<p>`, но новым
+            // узлом, без атрибутов, — и метка пропадала. Делаем это раньше неё:
+            // счёт тот же, метка остаётся.
+            if line.is("div") && !line.children().iter().any(|child| child.is(BLOCKS)) {
+                line.rename("p");
+            }
+            line.set_attr(VERSE_ATTR, "verse");
+            if std::mem::take(&mut gap) {
+                line.set_attr(STANZA_ATTR, "");
             }
         }
     }
+}
+
+/// Узлы, которые сами делят текст на строки или абзацы: внутри строки стиха
+/// их не бывает.
+const BLOCKS: &str = "p, div, li, ul, ol, table, blockquote, pre, h1, h2, h3, h4, h5, h6, \
+                      figure, section, article, poem, stanza, v";
+
+/// Висячий отступ в собственном `style`: `text-indent` меньше нуля.
+fn hangs(node: &NodeRef) -> bool {
+    node.attr("style").is_some_and(|style| {
+        style
+            .split(';')
+            .filter_map(|rule| rule.split_once(':'))
+            .any(|(name, value)| {
+                name.trim().eq_ignore_ascii_case("text-indent") && value.trim().starts_with('-')
+            })
+    })
 }
 
 /// Классы стиха: строка, строфа, стихотворение.
@@ -2334,6 +2413,14 @@ const VERSE_CLASSES: [&str; 3] = ["verse", "stanza", "poem"];
 
 /// Куда [`keep_verse_class`] кладёт класс стиха.
 const VERSE_ATTR: &str = "data-verse";
+
+/// Строка, с которой начинается строфа, — когда строфы не обёрнуты,
+/// а разделены пустой строкой (см. [`keep_verse_class`]).
+const STANZA_ATTR: &str = "data-stanza";
+
+/// Самая длинная строка, которую ещё считаем строкой стиха, — та же,
+/// что у `page::VERSE_LINE`.
+const VERSE_LINE: usize = 60;
 
 /// Язык у самого блока или у ближайшей обёртки.
 fn nearest_language(code: &NodeRef) -> Option<String> {
@@ -3163,6 +3250,10 @@ fn absolute(base: Option<&Url>, link: &str) -> Option<String> {
 ///
 /// Работает над уже извлечённой статьёй, см. [`verse_html`].
 fn verse(doc: &Document) {
+    // Первым, пока обёртка стиха на месте: она и говорит, что переводы
+    // строк внутри — строки, а не вёрстка исходника.
+    newline_stanzas(doc);
+
     // Стихотворение — обёртка без своего смысла: развернуть на месте, чтобы
     // строфы и голые строки внутри достались следующим шагам соседями.
     for group in doc.select(&verse_selector("poem", "poem")).nodes() {
@@ -3191,6 +3282,93 @@ fn verse(doc: &Document) {
     for run in verse_runs(doc) {
         join_run(&run);
     }
+}
+
+/// Стих, у которого строки — переводы строк в самом тексте, а показывает
+/// их CSS (`white-space: pre-line` у rupoem.ru): без CSS он сливался в один
+/// абзац. Верим переводам строк только внутри стиха, названного тегом или
+/// классом ([`keep_verse_class`]), и только в блоке без своих блоков
+/// и `<br>`: в обычной разметке перевод строки — просто пробел исходника.
+/// Пустая строка делит строфы.
+fn newline_stanzas(doc: &Document) {
+    let groups = format!(
+        "{}, {}, {}",
+        verse_selector("poem", "poem"),
+        verse_selector("stanza", "stanza"),
+        verse_selector("v", "verse")
+    );
+    let mut blocks: Vec<NodeRef> = Vec::new();
+    for group in doc.select(&groups).nodes() {
+        for node in std::iter::once(*group).chain(group.descendants()) {
+            if node.is("p, div, poem, stanza")
+                && !blocks.iter().any(|seen| seen.id == node.id)
+                && lines_by_newline(&node)
+            {
+                blocks.push(node);
+            }
+        }
+    }
+    for block in blocks {
+        let mut stanzas: Vec<Vec<String>> = vec![Vec::new()];
+        let mut line = String::new();
+        let end_line = |line: &mut String, stanzas: &mut Vec<Vec<String>>| {
+            let text = std::mem::take(line);
+            match (text.trim(), stanzas.last_mut()) {
+                ("", Some(stanza)) if !stanza.is_empty() => stanzas.push(Vec::new()),
+                ("", _) => {}
+                (text, Some(stanza)) => stanza.push(text.to_owned()),
+                (_, None) => {}
+            }
+        };
+        for child in block.children() {
+            let html = child.html().to_string();
+            if !child.is_text() {
+                line.push_str(&html);
+                continue;
+            }
+            let mut parts = html.split('\n');
+            if let Some(first) = parts.next() {
+                line.push_str(first);
+            }
+            for part in parts {
+                end_line(&mut line, &mut stanzas);
+                line.push_str(part);
+            }
+        }
+        end_line(&mut line, &mut stanzas);
+        let html: String = stanzas
+            .iter()
+            .filter(|stanza| !stanza.is_empty())
+            .map(|stanza| format!("<p>{}</p>", stanza.join("<br>")))
+            .collect();
+        if block.is("p") {
+            block.replace_with_html(html);
+        } else {
+            block.set_html(html);
+        }
+    }
+}
+
+/// В блоке не меньше двух строк, разделённых переводом строки в тексте,
+/// и ничего, что делит строки само: блоков и `<br>`.
+fn lines_by_newline(node: &NodeRef) -> bool {
+    if node
+        .children()
+        .iter()
+        .any(|child| child.is("br") || child.is(BLOCKS))
+    {
+        return false;
+    }
+    let mut text = String::new();
+    for child in node.children() {
+        if child.is_text() {
+            text.push_str(&child.text());
+        } else {
+            // Внутри строки перевод — не конец строки.
+            text.push_str(&squeeze(&child.text()));
+        }
+    }
+    text.lines().filter(|line| !line.trim().is_empty()).count() >= 2
 }
 
 /// [`verse`] над уже извлечённым HTML статьи.
@@ -3275,7 +3453,7 @@ fn join_verse(container: &NodeRef) {
     let mut lines: Vec<String> = Vec::new();
     for child in container.children() {
         if is_verse_line(&child) {
-            lines.push(child.inner_html().to_string());
+            lines.push(line_html(&child));
         } else if !is_insignificant(&child) {
             lines.push(child.html().to_string());
         }
@@ -3296,9 +3474,10 @@ fn verse_runs(doc: &Document) -> Vec<Vec<NodeRef<'_>>> {
     {
         match runs.last_mut() {
             Some(run)
-                if run
-                    .last()
-                    .is_some_and(|previous| directly_follows(previous, &line)) =>
+                if !line.has_attr(STANZA_ATTR)
+                    && run
+                        .last()
+                        .is_some_and(|previous| directly_follows(previous, &line)) =>
             {
                 run.push(line)
             }
@@ -3306,6 +3485,24 @@ fn verse_runs(doc: &Document) -> Vec<Vec<NodeRef<'_>>> {
         }
     }
     runs
+}
+
+/// Строка стиха без `<br>` в конце: перенос между строками ставит сборка,
+/// а свой у строки (Poetry Foundation: `строка<br>` в каждом `<div>`) дал бы
+/// пустую строку посреди строфы.
+fn line_html(line: &NodeRef) -> String {
+    let mut html = line.inner_html().to_string();
+    loop {
+        let trimmed = html.trim_end();
+        let Some(rest) = ["<br>", "<br/>", "<br />"]
+            .iter()
+            .find_map(|br| trimmed.strip_suffix(br))
+        else {
+            break;
+        };
+        html = rest.to_owned();
+    }
+    html.trim().to_owned()
 }
 
 /// `next` идёт сразу за `prev` у того же родителя, и между ними только
@@ -3334,10 +3531,7 @@ fn join_run(run: &[NodeRef]) {
         return;
     };
     let last = rest.last().copied().unwrap_or(*first);
-    let lines: Vec<String> = run
-        .iter()
-        .map(|line| line.inner_html().to_string())
-        .collect();
+    let lines: Vec<String> = run.iter().map(line_html).collect();
 
     let mut after = first.next_sibling();
     if first.id != last.id {
@@ -3366,6 +3560,7 @@ fn join_run(run: &[NodeRef]) {
         .is_some_and(|name| name.as_ref() == "p");
     first.set_html(lines.join("<br>"));
     first.remove_attr(VERSE_ATTR);
+    first.remove_attr(STANZA_ATTR);
     first.rename(if inside_p { "span" } else { "p" });
 }
 
@@ -3779,6 +3974,114 @@ mod tests {
             "{}",
             article.content_html
         );
+    }
+
+    /// Строка на `<div>` с висячим отступом, пустой такой же между строфами
+    /// (Poetry Foundation).
+    #[test]
+    fn verse_set_with_a_hanging_indent_keeps_its_lines_and_stanzas() {
+        let line = |text: &str| {
+            format!("<div style=\"text-indent: -1em; padding-left: 1em;\">\n {text}<br></div>")
+        };
+        let poem: String = [
+            "Two roads diverged in a yellow wood,",
+            "And sorry I could not travel both",
+            "",
+            "Then took the other, as just as fair,",
+            "And having perhaps the better claim,",
+        ]
+        .iter()
+        .map(|text| line(text))
+        .collect();
+        let page = format!(
+            "<html><body><article><h1>The Road</h1><p>{TEXT}</p><div class=\"rich\">{poem}</div>\
+             </article></body></html>"
+        );
+        let html = extract(&page, "https://example.org/poem")
+            .unwrap()
+            .content_html;
+        assert!(
+            html.contains(
+                "Two roads diverged in a yellow wood,<br>And sorry I could not travel both</p>"
+            ),
+            "{html}"
+        );
+        assert!(
+            html.contains("<p>Then took the other, as just as fair,<br>And having"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn a_hanging_indent_on_long_lines_is_a_bibliography_not_verse() {
+        let entry = |n: usize| {
+            format!(
+                "<div style=\"text-indent:-2em;padding-left:2em\">Author {n}. A rather long title \
+                 of a book that runs well past a line of verse. Publisher, 2001.</div>"
+            )
+        };
+        let list: String = (0..5).map(entry).collect();
+        let page = format!(
+            "<html><body><article><h1>Sources</h1><p>{TEXT}</p><div>{list}</div></article></body></html>"
+        );
+        let html = extract(&page, "https://example.org/refs")
+            .unwrap()
+            .content_html;
+        assert!(!html.contains("2001.<br>"), "{html}");
+    }
+
+    /// Строки — переводы строк в тексте, показывает их CSS (rupoem.ru).
+    #[test]
+    fn verse_broken_by_newlines_inside_a_poem_class_keeps_its_lines() {
+        let page = format!(
+            "<html><body><article><h1>Стихи</h1><p>{TEXT}</p>\
+             <div class=\"Poem\"><div class=\"poem-text\">Я помню чудное мгновенье:\n\
+             Передо мной явилась ты,\n\nКак мимолетное виденье,\n\
+             Как гений <i>чистой</i> красоты.</div></div></article></body></html>"
+        );
+        let html = extract(&page, "https://example.org/a")
+            .unwrap()
+            .content_html;
+        assert!(
+            html.contains("<p>Я помню чудное мгновенье:<br>Передо мной явилась ты,</p>"),
+            "{html}"
+        );
+        assert!(
+            html.contains("<p>Как мимолетное виденье,<br>Как гений <i>чистой</i> красоты.</p>"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn newlines_outside_verse_are_only_spaces() {
+        let page = format!(
+            "<html><body><article><h1>Проза</h1><p>{TEXT}</p>\
+             <div class=\"text\">Первая строка\nвторая строка\nтретья</div></article></body></html>"
+        );
+        let html = extract(&page, "https://example.org/a")
+            .unwrap()
+            .content_html;
+        assert!(!html.contains("строка<br>"), "{html}");
+    }
+
+    /// Номер строки Wikisource и `<link>` TemplateStyles посреди строфы.
+    #[test]
+    fn a_wikisource_stanza_keeps_its_lines_without_line_numbers() {
+        let page = format!(
+            "<html><head><meta name=\"generator\" content=\"MediaWiki 1.45\"></head><body>\
+             <article><h1>Парус</h1><p>{TEXT}</p><div class=\"poem\">\
+             <p>Увы! он счастия не ищет,<br />\nИ не от счастия бежит!<br />\n<br />\n\
+             Под ним струя светлей лазури,<br />\n\
+             <link rel=\"mw-deduplicated-inline-style\" href=\"mw-data:x\" />\
+             <span class=\"linenumright\" id=\"10\">10</span> Над ним луч солнца золотой...<br />\n\
+             А он, мятежный, просит бури,</p></div></article></body></html>"
+        );
+        let html = extract(&page, "https://ru.wikisource.org/wiki/x")
+            .unwrap()
+            .content_html;
+        assert!(!html.contains(">10<"), "{html}");
+        assert!(!html.contains("лазури,</p>"), "{html}");
+        assert!(html.contains("Над ним луч солнца золотой...<br>"), "{html}");
     }
 
     /// Регрессия: строфа, ставшая полноценным абзацем, не должна перетягивать

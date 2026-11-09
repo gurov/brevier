@@ -202,3 +202,15 @@ https://kotaku.com/marvels-wolverine-review-insomniac-logan-jean-spider-man-2000
 https://behavioralscientist.org/amid-uncertainty-about-francesca-gino-led-research-the-many-co-authors-project-could-provide-clarity/
 https://www.theverge.com/tech/989853/slackforce-surfaces-launch
 https://restofworld.org/2026/china-expert-ai-trainers/
+
+# Стихи (#21), добавлены 9 ноября 2026: по странице на каждый вид разметки строк,
+# чтобы правило стиха мерилось, а не угадывалось. Имена FictionBook (`<v>`, ilibrary),
+# класс `poem` и `<br>` (Wikisource, с номерами строк), классы `poem`/`stanza`
+# (Project Gutenberg), строка на `<div>` с висячим отступом (Poetry Foundation),
+# переводы строк под CSS `pre-line` (rupoem), `<br>` (stihi.ru).
+https://ilibrary.ru/text/451/p.1/index.html
+https://ru.wikisource.org/wiki/%D0%9F%D0%B0%D1%80%D1%83%D1%81_(%D0%9B%D0%B5%D1%80%D0%BC%D0%BE%D0%BD%D1%82%D0%BE%D0%B2)
+https://www.gutenberg.org/cache/epub/1065/pg1065-images.html
+https://www.poetryfoundation.org/poems/44272/the-road-not-taken
+https://rupoem.ru/poets/pushkin/ya-pomnyu-chudnoe
+https://stihi.ru/2009/02/15/2380

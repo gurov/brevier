@@ -426,6 +426,15 @@ pub fn without_wiki_edits(doc: &Document) {
         .is_some_and(|content| content.trim_start().starts_with("MediaWiki"));
     if wiki {
         doc.select(".mw-editsection").remove();
+        // Номер строки стиха у Wikisource (`linenumright` и родня) стоит
+        // справа на полях, а без CSS прилипал к началу строки: «5 Играют
+        // волны» (#21).
+        for number in doc.select(".poem [class*=\"linenum\" i]").nodes() {
+            let text = number.text();
+            if !text.trim().is_empty() && text.trim().chars().all(|c| c.is_ascii_digit()) {
+                number.remove_from_parent();
+            }
+        }
     }
 }
 
