@@ -264,7 +264,7 @@ GTK nor OpenSSL. Published on tags, not on pushes.
 
 ### 12. Reading progress (#19)
 
-Done in the window and on Android, but for two things at the end. A long page is read
+Done in the window and on Android. A long page is read
 over several sittings, and it should not start from the top each time. Back, forward
 and the session already returned to the place; now a page opened afresh — from a link,
 the history, a bookmark, another tab — does too.
@@ -285,6 +285,8 @@ the history, a bookmark, another tab — does too.
   are rows like the others, with their place in the text at the right, "40%", the way
   a book's contents gives page numbers (#24): where the row is, while the bar says how
   much of it is read. Headings carry no number; their name says where they are.
+  A section several screens long is split by waypoints of its own, one level down,
+  shown for the current section only: they come and go as the reader moves on.
 - **A file you own:** `reading.tsv`, one line per page — address, a fingerprint of the
   text, the place, the stretches read. A thousand pages at most, the oldest leaving
   first; "forget everything" empties it. The core does the counting, so the window and
@@ -293,11 +295,6 @@ the history, a bookmark, another tab — does too.
 Known cost: offsets hold only while the text is the same, and pages change. When the
 fingerprint differs, the place moves with the nearest heading's anchor, and what was
 read starts over.
-
-Still open:
-
-- A section several screens long is to be split by waypoints of its own, shown for the
-  current section only. The core computes them; neither front-end shows them yet.
 
 ### 13. F-Droid (#31)
 

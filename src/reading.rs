@@ -335,6 +335,37 @@ pub fn inner_waypoints(
     out
 }
 
+/// Вехи того раздела, где читатель сейчас (`at`), — то, что полка показывает
+/// под его строкой (#19). Ответ — номер строки раздела в `contents` и его
+/// вехи; `None`, если раздел короткий или читатель выше первой строки.
+///
+/// Раздел — от своей строки до следующей, какого бы уровня она ни была,
+/// у последней — до конца текста: так же его меряет полоска прочитанного.
+/// Экран — сколько знаков видно разом; его знает только интерфейс.
+pub fn inner_of(
+    contents: &[Mark],
+    leads: &[Mark],
+    total: usize,
+    at: usize,
+    screen: usize,
+) -> Option<(usize, Vec<Mark>)> {
+    let index = contents
+        .iter()
+        .take_while(|mark| mark.offset <= at)
+        .count()
+        .checked_sub(1)?;
+    let section = &contents[index];
+    let to = contents.get(index + 1).map_or(total, |next| next.offset);
+    if screen == 0 || to.saturating_sub(section.offset) < screen * LONG_SECTION_SCREENS {
+        return None;
+    }
+    // Не чаще экрана и не больше, чем вех у самого оглавления: глава романа
+    // в сорок экранов иначе вставила бы в полку сорок строк.
+    let every = screen.max((to - section.offset) / crate::outline::MAX_WAYPOINTS);
+    let inner = inner_waypoints(leads, section.offset, to, every, section.level);
+    (!inner.is_empty()).then_some((index, inner))
+}
+
 /// Место вехи в тексте — «40%» (#24). На полке оно стоит справа, как номер
 /// страницы в оглавлении книги: где это, а не сколько прочитано, — прочитанное
 /// показывает полоска. Только у вех: у заголовка есть имя, число рядом — шум.
@@ -659,6 +690,46 @@ mod tests {
         assert_eq!(inner[0].level, 3);
         // Короткий раздел не делится.
         assert!(inner_waypoints(&leads, 2000, 6000, 2000, 2).is_empty());
+    }
+
+    /// Под строкой полки — вехи только того раздела, где читатель.
+    #[test]
+    fn the_shelf_splits_only_the_section_being_read() {
+        let mark = |offset: usize, heading: bool| Mark {
+            level: 1,
+            title: format!("At {offset}"),
+            offset,
+            heading,
+        };
+        let leads: Vec<Mark> = (0..60).map(|n| mark(n * 500, false)).collect();
+        // Раздел 0..2000 короткий, 2000..20000 длинный, 20000..30000 — последний.
+        let contents = vec![mark(0, true), mark(2000, true), mark(20000, true)];
+        assert_eq!(inner_of(&contents, &leads, 30000, 1000, 2000), None);
+        let (index, inner) = inner_of(&contents, &leads, 30000, 7000, 2000).unwrap();
+        assert_eq!(index, 1);
+        assert_eq!(inner.first().map(|mark| mark.offset), Some(4000));
+        assert!(
+            inner
+                .iter()
+                .all(|mark| mark.offset < 20000 && mark.level == 2)
+        );
+        // Последний раздел — до конца текста.
+        let (index, inner) = inner_of(&contents, &leads, 30000, 25000, 2000).unwrap();
+        assert_eq!(index, 2);
+        assert_eq!(inner.last().map(|mark| mark.offset), Some(28000));
+        // Раздел в сотню экранов — не больше вех, чем у оглавления.
+        let leads: Vec<Mark> = (0..400).map(|n| mark(n * 500, false)).collect();
+        let (_, inner) = inner_of(&[mark(0, true)], &leads, 200_000, 50, 2000).unwrap();
+        assert!(
+            inner.len() <= crate::outline::MAX_WAYPOINTS,
+            "{}",
+            inner.len()
+        );
+        // Выше первой строки оглавления делить нечего.
+        assert_eq!(
+            inner_of(&[mark(5000, true)], &leads, 30000, 100, 2000),
+            None
+        );
     }
 
     #[test]

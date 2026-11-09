@@ -285,8 +285,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
 **Finding your way**
 
 - **The shelf on the right** lists the repository's documentation, your notes on the page,
-  its contents (the section you are reading is marked), the site's feeds and the site's own
-  menu. Drag the divider to resize it.
+  its contents (the section you are reading is marked, and a long one is split into the
+  paragraphs a screen apart, each with its place in the text), the site's feeds and the
+  site's own menu. Drag the divider to resize it.
 - **Back and forward return to the same spot**, instantly, without loading the page again.
 - **Pick up where you stopped.** A page you read for more than ten minutes remembers where
   you were and what you have read. Open it again and the status line offers **Continue

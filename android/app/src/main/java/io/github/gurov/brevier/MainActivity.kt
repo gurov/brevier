@@ -1140,6 +1140,8 @@ class MainActivity : Activity(), ArticleHost {
             showBar()
             shelf.show()
             scrolled()
+            // Вехи раздела (#19) вставлены только что — строка, где читатель, сдвинулась.
+            shelf.reveal()
             hideKeyboard()
         }
     }
@@ -1618,7 +1620,27 @@ class MainActivity : Activity(), ArticleHost {
         // Мерим не по верхней кромке, а по той строке, куда ставит заголовок
         // прыжок по оглавлению, плюс полстроки запаса.
         val probe = view.visibleTop() + (view.visibleHeight() * ANCHOR_ALIGN).toInt() + (metrics().text * reader.leading / 2).toInt()
-        shelf.follow(view.offsetAt(probe))
+        val at = view.offsetAt(probe)
+        splitSection(at)
+        shelf.follow(at)
+    }
+
+    /**
+     * Вехи раздела, где читатель (#19): длинный ли он и где делить — решает
+     * ядро по тому, сколько текста видно разом; полка ставит их под его строкой.
+     */
+    private fun splitSection(at: Int?) {
+        val tab = currentTab() ?: return
+        val shown = readable(tab)
+        val view = tab.view
+        if (shown == null || view == null || at == null) {
+            shelf.split(-1, emptyList())
+            return
+        }
+        val from = view.offsetAt(view.visibleTop()) ?: return
+        val to = view.offsetAt(view.visibleBottom()) ?: shown.page.text.length
+        val (section, marks) = Core.readingInner(shown.address, at, from, to)
+        shelf.split(section, marks)
     }
 
     override fun zoom(step: Int) {

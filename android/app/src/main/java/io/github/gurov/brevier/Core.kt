@@ -114,6 +114,26 @@ object Core {
         return FloatArray(shares.length()) { shares.optDouble(it).toFloat() }
     }
 
+    /**
+     * Вехи раздела, где читатель (#19): место `at` и видимое `[from, to)` — в UTF-16.
+     * Ответ — номер раздела среди строк оглавления (`-1` — делить нечего) и вехи.
+     */
+    fun readingInner(address: String, at: Int, from: Int, to: Int): Pair<Int, List<ShelfRow.Jump>> {
+        val json = obj("reading.inner", address, at, from, to)
+        val marks = json.optJSONArray("marks") ?: return -1 to emptyList()
+        return json.optInt("section", -1) to (0 until marks.length()).map { index ->
+            val mark = marks.getJSONObject(index)
+            ShelfRow.Jump(
+                mark.text("title") ?: "",
+                mark.optInt("level"),
+                mark.optInt("at"),
+                heading = false,
+                place = mark.text("place"),
+                inner = true,
+            )
+        }
+    }
+
     /** Уход со страницы (#19): запомненная записывается с местом у верха экрана. */
     fun readingLeave(address: String, top: Int) {
         ask("reading.leave", listOf(address, top.toString(), utcOffset().toString()).joinToString(FIELD.toString()))

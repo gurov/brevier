@@ -87,6 +87,9 @@ struct Reading {
     progress: Progress,
     text: String,
     starts: Vec<usize>,
+    /// Оглавление и начала всех абзацев — делить раздел, где читатель (#19).
+    contents: Vec<page::Mark>,
+    leads: Vec<page::Mark>,
 }
 
 /// Сколько страниц держать с прогрессом — по числу документов в памяти.
@@ -371,6 +374,12 @@ fn call(method: &str, arg: &str) -> String {
             "{}".to_owned()
         }
         "reading.tick" => reading_tick(
+            field(0),
+            field(1).parse().unwrap_or(0),
+            field(2).parse().unwrap_or(0),
+            field(3).parse().unwrap_or(0),
+        ),
+        "reading.inner" => reading_inner(
             field(0),
             field(1).parse().unwrap_or(0),
             field(2).parse().unwrap_or(0),
@@ -737,6 +746,8 @@ fn open(offset: i32, typed: &str, fresh: bool) -> String {
                 progress,
                 text: page.text.clone(),
                 starts: page.contents.iter().map(|mark| mark.offset).collect(),
+                contents: page.contents.clone(),
+                leads: page.leads.clone(),
             });
             while core.progress.len() > READINGS {
                 core.progress.pop_front();
@@ -967,6 +978,50 @@ fn reading_tick(address: &str, from: usize, to: usize, offset: i32) -> String {
     }
     let shares: Vec<String> = shares.iter().map(|share| format!("{share:.3}")).collect();
     format!("{{\"shares\":[{}]}}", shares.join(","))
+}
+
+/// Вехи раздела, где читатель (#19): место `at` и видимое `[from, to)` —
+/// в UTF-16. Ответ — номер раздела среди строк оглавления (`-1` — делить
+/// нечего) и его вехи со смещениями в UTF-16 и местом «40%».
+fn reading_inner(address: &str, at: usize, from: usize, to: usize) -> String {
+    let core = core();
+    let key = address.split('#').next().unwrap_or(address);
+    let Some(reading) = core
+        .progress
+        .iter()
+        .find(|known| known.progress.address == key)
+    else {
+        return "{\"section\":-1}".to_owned();
+    };
+    let chars = |unit: usize| page::chars_of_utf16(&reading.text, unit);
+    let screen = chars(to).saturating_sub(chars(from));
+    let total = reading.progress.total();
+    let Some((section, marks)) =
+        reading::inner_of(&reading.contents, &reading.leads, total, chars(at), screen)
+    else {
+        return "{\"section\":-1}".to_owned();
+    };
+    let spans: Vec<(usize, usize)> = marks
+        .iter()
+        .map(|mark| (mark.offset, mark.offset))
+        .collect();
+    let units = page::utf16_offsets(&reading.text, &spans);
+    let mut out = format!("{{\"section\":{section},\"marks\":[");
+    for (index, (mark, (unit, _))) in marks.iter().zip(units).enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"title\":");
+        json_string(&mut out, &mark.title);
+        out.push_str(&format!(
+            ",\"at\":{unit},\"level\":{},\"place\":",
+            mark.level
+        ));
+        json_string(&mut out, &reading::place(mark.offset, total));
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
 }
 
 /// Уход со страницы (#19): место — то, что у верха экрана; запомненная

@@ -398,6 +398,8 @@ struct Tab {
     focus: Option<usize>,
     /// Куда прыгать по оглавлению — смещения в буфере, а не доли высоты.
     marks: Vec<page::Mark>,
+    /// Начала всех абзацев: ими полка делит длинный раздел, где читатель (#19).
+    leads: Vec<page::Mark>,
     /// Якоря заголовков: по ним находится место для ссылки вида `#anchor`.
     anchors: Vec<(String, usize)>,
     /// Места картинок в тексте.
@@ -587,6 +589,8 @@ struct State {
     /// Полоски долей прочитанного у строк оглавления: где начинается раздел,
     /// его доля и сама полоска.
     bars: Vec<(usize, Rc<Cell<f32>>, gtk::DrawingArea)>,
+    /// Вехи раздела, где читатель, вставленные в полку (#19).
+    inner: Option<Inner>,
     /// Предложение продолжить, которое сейчас висит у строки состояния:
     /// чья вкладка и куда.
     offered: Option<(u64, usize)>,
@@ -731,6 +735,9 @@ struct Entry {
 #[derive(Clone)]
 enum Row {
     Jump(i32),
+    /// Веха внутри раздела, где читатель (#19): прыжок, как у `Jump`, но строка
+    /// временная — уходит, когда читатель уходит из раздела.
+    Inner(i32),
     Open(Address),
     /// Заметка (#39): её номер и место; без места — прыгать некуда.
     Note(u64, Option<i32>),
@@ -984,6 +991,7 @@ fn build(app: &Application, start: Vec<String>) {
         show_notes: settings.notes,
         last_input: Instant::now(),
         bars: Vec::new(),
+        inner: None,
         offered: None,
         // Сессию поднимает и пишет первое окно процесса. Второе окно —
         // это «открой мне ещё одну ссылку», а не «вот мои вкладки».
@@ -1269,7 +1277,7 @@ fn build(app: &Application, start: Vec<String>) {
                 .get(row.index().max(0) as usize)
                 .cloned();
             match act {
-                Some(Row::Jump(offset)) => {
+                Some(Row::Jump(offset) | Row::Inner(offset)) => {
                     if let Some(view) = current(&ui, &state) {
                         // Доводим прокрутку до конца, а не прыгаем один раз:
                         // пока картинки и таблицы добирают высоту, одиночный
@@ -1530,6 +1538,7 @@ fn open_settings_tab(ui: &Ui, state: &Rc<RefCell<State>>) {
             links: Vec::new(),
             focus: None,
             marks: Vec::new(),
+            leads: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
             tables: Vec::new(),
@@ -2678,6 +2687,7 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             links: Vec::new(),
             focus: None,
             marks: Vec::new(),
+            leads: Vec::new(),
             anchors: Vec::new(),
             shots: Vec::new(),
             tables: Vec::new(),
@@ -4046,6 +4056,7 @@ fn show_document(
         tab.links = page.links;
         tab.focus = None;
         tab.marks = page.marks;
+        tab.leads = page.leads;
         tab.anchors = page.anchors;
         tab.shots = page.shots.clone();
         tab.tables = page.tables;
@@ -4212,6 +4223,8 @@ fn sync(ui: &Ui, state: &Rc<RefCell<State>>, index: Option<usize>) {
         let mut borrowed = state.borrow_mut();
         borrowed.shelf = shelf;
         borrowed.bars = bars;
+        // Полка собрана заново — вставленных вех в ней больше нет.
+        borrowed.inner = None;
     }
     update_bars(ui, state);
     ui.show_contents.set_sensitive(!empty);
@@ -4313,12 +4326,48 @@ fn follow(ui: &Ui, state: &Rc<RefCell<State>>) {
     };
     let offset = place.offset();
 
+    // Вехи раздела, где читатель (#19): ядро решает, длинный ли он, по тому,
+    // сколько текста видно разом. Пока окно не разложено, экран не мерян —
+    // и полку не трогаем: по крохотному «экрану» вех вышли бы сотни.
+    let (from, to) = visible_range(&view);
+    let screen = to.saturating_sub(from);
+    let total = view.buffer().char_count().max(0) as usize;
+    let wanted = (screen >= MIN_SCREEN)
+        .then(|| {
+            reading::inner_of(
+                &tab.marks,
+                &tab.leads,
+                total,
+                offset.max(0) as usize,
+                screen,
+            )
+        })
+        .flatten();
+    let same = match (&borrowed.inner, &wanted) {
+        (None, None) => true,
+        (Some(have), Some((section, _))) => {
+            have.section == *section
+                && have.screen * 5 >= screen * 4
+                && screen * 5 >= have.screen * 4
+        }
+        // Экран не мерян — оставить, что есть.
+        (Some(_), None) => screen < MIN_SCREEN,
+        (None, Some(_)) => false,
+    };
+    drop(borrowed);
+    if !same {
+        split_section(ui, state, wanted, screen, total);
+    }
+    let Ok(borrowed) = state.try_borrow() else {
+        return;
+    };
+
     let mut here = None;
     for (index, row) in borrowed.shelf.iter().enumerate() {
         match row {
-            Row::Jump(at) if *at <= offset => here = Some(index),
+            Row::Jump(at) | Row::Inner(at) if *at <= offset => here = Some(index),
             // Дальше только заголовки ниже пробы: они по порядку.
-            Row::Jump(_) => break,
+            Row::Jump(_) | Row::Inner(_) => break,
             _ => {}
         }
     }
@@ -4333,6 +4382,79 @@ fn follow(ui: &Ui, state: &Rc<RefCell<State>>) {
             reveal(&ui.shelf_view, &row);
         }
     }
+}
+
+/// Вехи раздела, вставленные в полку под его строкой (#19).
+struct Inner {
+    /// Номер раздела среди строк оглавления (`Tab::marks`).
+    section: usize,
+    /// Знаков на экране, по которым вехи считались: окно стало заметно выше
+    /// или ниже, сменился масштаб — считаем заново.
+    screen: usize,
+    rows: Vec<gtk::ListBoxRow>,
+}
+
+/// Меньше знаков на экране не бывает: столько видно, пока окно не разложено.
+const MIN_SCREEN: usize = 200;
+
+/// Поставить под строкой раздела, где читатель, его вехи (#19) и убрать
+/// вехи прежнего раздела. Только у текущего: вехи всех длинных разделов
+/// разом утопили бы оглавление.
+///
+/// Веха — строка как у вехи оглавления: начало абзаца, приглушённо, место
+/// справа. Полоски прочитанного у неё нет: её показывает строка раздела,
+/// а полка — про то, что на странице, не отчёт о чтении.
+fn split_section(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    wanted: Option<(usize, Vec<page::Mark>)>,
+    screen: usize,
+    total: usize,
+) {
+    let Ok(mut borrowed) = state.try_borrow_mut() else {
+        return;
+    };
+    let theme = borrowed.theme();
+    if let Some(old) = borrowed.inner.take() {
+        for row in &old.rows {
+            ui.contents.remove(row);
+        }
+        borrowed.shelf.retain(|row| !matches!(row, Row::Inner(_)));
+    }
+    let Some((section, marks)) = wanted else {
+        return;
+    };
+    // Строка раздела — `section`-я среди строк оглавления.
+    let Some(at) = borrowed
+        .shelf
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::Jump(_)))
+        .nth(section)
+        .map(|(index, _)| index)
+    else {
+        return;
+    };
+    let mut rows = Vec::with_capacity(marks.len());
+    for (n, mark) in marks.iter().enumerate() {
+        let place = reading::place(mark.offset, total);
+        let (row, label, _, _) = shelf_row_with_share(
+            &mark.title,
+            i32::from(mark.level.saturating_sub(1)) * 12,
+            Some(&place),
+            theme,
+        );
+        label.add_css_class("dim-label");
+        let index = at + 1 + n;
+        ui.contents.insert(&row, index as i32);
+        borrowed.shelf.insert(index, Row::Inner(mark.offset as i32));
+        rows.push(row);
+    }
+    borrowed.inner = Some(Inner {
+        section,
+        screen,
+        rows,
+    });
 }
 
 /// Довести отмеченную строку до глаз — и не дальше того. Полка, которая
@@ -4783,6 +4905,7 @@ fn redraw(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
             tab.links = page.links;
             tab.focus = None;
             tab.marks = page.marks;
+            tab.leads = page.leads;
             tab.anchors = page.anchors;
             tab.shots = page.shots.clone();
             tab.tables = page.tables;
@@ -5561,6 +5684,7 @@ fn show_intro(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, view: &gtk::TextView
         tab.links = page.links;
         tab.focus = None;
         tab.marks = page.marks;
+        tab.leads = page.leads;
         tab.anchors = page.anchors;
         tab.tables = page.tables;
         tab.zoom_seen = seen;
@@ -5915,6 +6039,7 @@ struct Drawn {
     text: String,
     links: Vec<page::Link>,
     marks: Vec<page::Mark>,
+    leads: Vec<page::Mark>,
     anchors: Vec<(String, usize)>,
     shots: Vec<Shot>,
     cells: Vec<gtk::Label>,
@@ -6021,6 +6146,7 @@ fn render(view: &gtk::TextView, document: &Document, target: Option<&str>) -> Dr
         text: page.text,
         links: page.links,
         marks: page.contents,
+        leads: page.leads,
         anchors: page.anchors,
         shots,
         cells,

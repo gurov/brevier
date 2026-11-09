@@ -70,7 +70,15 @@ fun Context.label(text: String, fonts: Fonts, color: Int, sp: Float = 15f, mediu
 /** Строка полки: оглавление прокручивает, строка проекта и сайта уводит. */
 sealed class ShelfRow {
     class Header(val title: String) : ShelfRow()
-    class Jump(val title: String, val level: Int, val at: Int, val heading: Boolean, val place: String? = null) : ShelfRow()
+    /** `inner` — веха раздела, где читатель (#19): строка временная, своей доли у неё нет. */
+    class Jump(
+        val title: String,
+        val level: Int,
+        val at: Int,
+        val heading: Boolean,
+        val place: String? = null,
+        val inner: Boolean = false,
+    ) : ShelfRow()
     class Open(val title: String, val address: String, val dim: Boolean) : ShelfRow()
     /** Заметка (#39): начало цитаты и приписанное; нажатие — к месту в тексте. */
     class Note(val note: NoteSpot) : ShelfRow()
@@ -97,6 +105,9 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
     private var shares = FloatArray(0)
     /** Номер строки среди строк оглавления: по нему берётся её доля. */
     private var jumps = IntArray(0)
+    /** Вехи какого раздела вставлены (#19) — номер среди строк оглавления — и их места. */
+    private var split = -1
+    private var splitAt = IntArray(0)
     private lateinit var palette: Palette
 
     init {
@@ -132,9 +143,44 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
     fun fill(rows: List<ShelfRow>) {
         this.rows = rows
         here = -1
-        var jump = 0
-        jumps = IntArray(rows.size) { index -> if (rows[index] is ShelfRow.Jump) jump++ else -1 }
+        split = -1
+        splitAt = IntArray(0)
+        count()
         shares = FloatArray(0)
+        (list.adapter as Adapter).notifyDataSetChanged()
+    }
+
+    /** Номера строк оглавления: вехи раздела в счёт не идут, доли у них нет. */
+    private fun count() {
+        var jump = 0
+        jumps = IntArray(rows.size) { index ->
+            val row = rows[index]
+            if (row is ShelfRow.Jump && !row.inner) jump++ else -1
+        }
+    }
+
+    /**
+     * Вехи раздела, где читатель (#19), — под строкой этого раздела (`section` —
+     * её номер среди строк оглавления); вехи прежнего раздела уходят. Те же
+     * вехи — ничего не трогаем: полка не должна мигать на каждой прокрутке.
+     */
+    fun split(section: Int, marks: List<ShelfRow.Jump>) {
+        val places = marks.map { it.at }.toIntArray()
+        if (section == split && places.contentEquals(splitAt)) return
+        val base = rows.filterNot { it is ShelfRow.Jump && it.inner }
+        var at = -1
+        var seen = 0
+        for ((index, row) in base.withIndex()) {
+            if (row is ShelfRow.Jump) {
+                if (seen == section) { at = index; break }
+                seen++
+            }
+        }
+        rows = if (at < 0 || marks.isEmpty()) base else base.subList(0, at + 1) + marks + base.subList(at + 1, base.size)
+        split = if (at < 0) -1 else section
+        splitAt = if (at < 0) IntArray(0) else places
+        here = -1
+        count()
         (list.adapter as Adapter).notifyDataSetChanged()
     }
 
@@ -150,6 +196,11 @@ class Shelf(context: Context, private val fonts: Fonts, private val pick: (Shelf
 
     fun show() {
         visibility = VISIBLE
+        reveal()
+    }
+
+    /** Довести список до строки, где читатель, — с парой строк над ней. */
+    fun reveal() {
         if (here >= 0) list.setSelection(maxOf(0, here - 2))
     }
 
