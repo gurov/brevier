@@ -1812,13 +1812,32 @@ fn code_links(doc: &Document) -> bool {
 /// склеивались в абзацы, `>>>` становилось тройной цитатой, а комментарии `#` —
 /// заголовками в оглавлении. Так верстают вся документация на Sphinx
 /// (docs.python.org) и примеры кода Википедии.
+///
+/// Кроме `<pre>` с курсивом и без знаков кода: так Project Gutenberg верстает
+/// письма и стихи с лесенкой строк, и кодом они вставали со звёздочками
+/// вокруг курсива. Такой — строками стиха (см. [`prose_in_pre`]).
+///
+/// Здесь же `<br>` в заголовке — пробел: в заголовке markdown переноса нет,
+/// и «CHAPTER I.<br>Down the Rabbit-Hole» становилось заголовком «CHAPTER I.\»
+/// и абзацем под ним — на полке так и стояло.
 pub(crate) fn code_in_pre(doc: &Document) -> bool {
     let mut changed = false;
+    for br in doc
+        .select("h1 br, h2 br, h3 br, h4 br, h5 br, h6 br")
+        .nodes()
+    {
+        br.replace_with_html(" ");
+        changed = true;
+    }
     for pre in doc.select("pre").nodes() {
         let coded = pre
             .element_children()
             .iter()
             .any(|child| child.has_name("code"));
+        if !coded && prose_in_pre(pre) {
+            changed = true;
+            continue;
+        }
         if !coded {
             // Подсветка верстается `<span>`: без них это, может, и не код.
             let painted = pre
@@ -1832,6 +1851,70 @@ pub(crate) fn code_in_pre(doc: &Document) -> bool {
     }
     changed
 }
+
+/// `<pre>` прозы — курсив внутри и почти ни одного знака кода — абзацами:
+/// строка — жёстким переносом, пустая строка — новым абзацем. Лесенка
+/// отступов уходит: строки стиха и так идут каждая своей строкой.
+/// `true` — заменён.
+///
+/// Курсив в `<pre>` бывает и у кода — заглушки в синтаксисе команды
+/// (`git <i>command</i> [<i>args</i>]`), — но там скобки и знаки: доля знаков
+/// кода больше [`CODE_MARKS_SHARE`] оставляет блок кодом.
+fn prose_in_pre(pre: &NodeRef) -> bool {
+    let stressed = dom_query::Selection::from(*pre).select("i, em").exists();
+    let painted = pre
+        .element_children()
+        .iter()
+        .any(|child| child.has_name("span"));
+    if !stressed || painted {
+        return false;
+    }
+    let text = pre.text();
+    let letters = text.chars().filter(|c| !c.is_whitespace()).count();
+    let marks = text
+        .chars()
+        .filter(|c| "{}[];=<>|\\$#_".contains(*c))
+        .count();
+    if letters == 0 || marks as f32 > letters as f32 * CODE_MARKS_SHARE {
+        return false;
+    }
+    let html = pre.inner_html().to_string();
+    let indent = |line: &str| line.chars().take_while(|c| *c == ' ').count();
+    let least = html
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(indent)
+        .min()
+        .unwrap_or(0);
+    let mut stanzas: Vec<Vec<String>> = vec![Vec::new()];
+    for line in html.lines() {
+        let words = line.trim();
+        match stanzas.last_mut() {
+            Some(stanza) if words.is_empty() => {
+                if !stanza.is_empty() {
+                    stanzas.push(Vec::new());
+                }
+            }
+            // Лесенку держат неразрывные пробелы: обычные в начале строки
+            // markdown срезает, а у «Мышиного хвоста» Кэрролла строки и есть стих.
+            Some(stanza) => stanza.push(format!(
+                "{}{words}",
+                "\u{a0}".repeat(indent(line).saturating_sub(least))
+            )),
+            None => {}
+        }
+    }
+    let html: String = stanzas
+        .iter()
+        .filter(|stanza| !stanza.is_empty())
+        .map(|stanza| format!("<p>{}</p>", stanza.join("<br>")))
+        .collect();
+    pre.replace_with_html(html);
+    true
+}
+
+/// Доля знаков кода, выше которой `<pre>` с курсивом — всё-таки код.
+const CODE_MARKS_SHARE: f32 = 0.01;
 
 /// `unwrap_node` у dom_query снимает родителя, как `unwrap` в jQuery,
 /// а не сам узел, — поэтому заменой на его текст.
@@ -2639,6 +2722,38 @@ mod tests {
         let html =
             "<p>Run:</p><pre><span></span><span>&gt;&gt;&gt; </span>import os\n# done\n</pre>";
         assert_eq!(converted(html), "Run:\n\n```\n>>> import os\n# done\n```");
+    }
+
+    /// Project Gutenberg: письмо и стих лесенкой в `<pre>` с курсивом — строки,
+    /// а не код со звёздочками.
+    #[test]
+    fn a_pre_of_prose_with_italics_is_verse_not_code() {
+        let html = "<p>The address:</p><pre>\n     <i>Alice’s Right Foot, Esq.,\n       Hearthrug,</i>\n\n\
+                    (<i>with Alice’s love</i>).\n</pre>";
+        assert_eq!(
+            converted(html),
+            // Отступ первой строки абзаца срезает правило «красной строки».
+            "The address:\n\n*Alice’s Right Foot, Esq.,\\\n\
+             \u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}Hearthrug,*\n\n(*with Alice’s love*)."
+        );
+    }
+
+    /// Курсив в синтаксисе команды — заглушки, и блок остаётся кодом.
+    #[test]
+    fn a_pre_with_italic_placeholders_stays_code() {
+        let html = "<pre>git <i>command</i> [<i>args</i>]</pre>";
+        assert!(converted(html).starts_with("```"), "{}", converted(html));
+    }
+
+    /// В заголовке markdown переноса нет: «CHAPTER I.\» и абзац под ним.
+    #[test]
+    fn a_break_in_a_heading_is_a_space() {
+        let html = "<h2>CHAPTER I.<br>Down the Rabbit-Hole</h2><pre>x = 1</pre>";
+        assert!(
+            converted(html).starts_with("## CHAPTER I. Down the Rabbit-Hole\n"),
+            "{}",
+            converted(html)
+        );
     }
 
     /// Бэктики делают из ссылки буквы: `[while](https://…)` у Википедии.
