@@ -1154,6 +1154,33 @@ fn build(app: &Application, start: Vec<String>) {
             new_tab(&ui, &state, None);
         });
     }
+    // Двойной щелчок по пустому месту полосы вкладок — новая вкладка, как
+    // в браузерах (мейнтейнер, 10 ноября 2026). Пустое место — сама полоса
+    // (узлы `tabs` и `header` блокнота): вкладка, её крестик, стрелки
+    // прокрутки и страница под полосой — другие узлы, и щелчок по ним
+    // остаётся их щелчком. Полосы нет, пока вкладка одна.
+    {
+        let notebook = ui.notebook.clone();
+        let ui = ui.clone();
+        let state = state.clone();
+        let twice = gtk::GestureClick::builder()
+            .button(gtk::gdk::BUTTON_PRIMARY)
+            .build();
+        twice.connect_pressed(move |gesture, presses, x, y| {
+            if presses != 2 {
+                return;
+            }
+            let empty = gesture
+                .widget()
+                .and_then(|notebook| notebook.pick(x, y, gtk::PickFlags::DEFAULT))
+                .is_some_and(|hit| matches!(hit.css_name().as_str(), "tabs" | "header"));
+            if empty {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                new_tab(&ui, &state, None);
+            }
+        });
+        notebook.add_controller(twice);
+    }
     {
         let ui = ui.clone();
         let state = state.clone();

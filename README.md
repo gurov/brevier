@@ -253,7 +253,8 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Ctrl+O` | open the page in your other browser |
 
 With the mouse: `Ctrl`+click or middle-click opens a link in a new tab, middle-click on a
-tab closes it, and the back and forward buttons go back and forward. Hovering a link shows
+tab closes it, a double click on the empty part of the tab bar opens a new tab, and the
+back and forward buttons go back and forward. Hovering a link shows
 where it goes. Settings, history and bookmarks are in the menu at the top right.
 
 ## What you get
