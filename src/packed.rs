@@ -177,9 +177,16 @@ mod tests {
         // Предел — распакованным байтам, не объявленным в архиве.
         let big = read(&picture, 4).unwrap_err();
         assert_eq!(big.kind(), std::io::ErrorKind::FileTooLarge);
-        // Папка архива — не файл, а из архива наверх не выйти.
+        // Папка архива — не файл, а из архива наверх не выйти: `..` в имя
+        // файла zip не идёт. Windows сворачивает `..` в пути сама, до диска:
+        // там это путь к тому же файлу архива.
         assert!(read(&archive.join("images"), 1024).is_err());
-        assert!(read(&archive.join("../Статья.zip/Статья.md"), 1024).is_err());
+        let around = read(&archive.join("../Статья.zip/Статья.md"), 1024);
+        if cfg!(windows) {
+            assert_eq!(around.unwrap(), b"# Title\n\n![](images/01-a.png)\n");
+        } else {
+            assert!(around.is_err());
+        }
     }
 
     #[test]
