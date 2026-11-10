@@ -1,0 +1,5 @@
+• Large print: sizes up to 64 pt, and the margins stay narrow as the text grows, so it keeps the screen.
+• A formula or picture in a line shrinks to fit instead of being cut off.
+• A saved .zip opens with its pictures.
+• The start page names Brevier's version, with a link to what's new.
+• A long section's waypoints on the shelf no longer flicker near the end of a page.

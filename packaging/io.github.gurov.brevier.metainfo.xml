@@ -98,6 +98,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.25.0" date="2026-11-10" type="development">
+      <description>
+        <p>Sizes go up to 64 pt, and on the phone the margins and indents
+          stay narrow as the text grows, so large print keeps the screen; a
+          formula or picture in a line shrinks to fit it instead of being cut
+          off. A saved .zip opens with its pictures, and the Flatpak may read
+          your home folder, so an unpacked page finds them too. The start page
+          names Brevier's version, and in the window a double click on the
+          empty tab bar opens a new tab.</p>
+      </description>
+    </release>
     <release version="0.24.0" date="2026-11-09" type="development">
       <description>
         <p>A long section is split on the shelf while you read it, into
