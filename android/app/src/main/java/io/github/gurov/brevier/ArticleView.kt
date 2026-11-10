@@ -434,6 +434,19 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     /** Где читатель: смещение строки у верхнего края. От масштаба не зависит. */
     fun place(): Int = offsetAt(visibleTop()) ?: 0
 
+    /**
+     * Сколько знаков (UTF-16) на экране — в среднем по уложенной части статьи,
+     * не видимый кусок: тот в конце страницы короче, в коде длиннее, и вехи
+     * раздела на полке, пересчитанные по нему на ходу, мигали (#19). Уложенная
+     * часть — потому что куски досыпаются по кадру (#22). `0` — не разложено.
+     */
+    fun screenUnits(): Int {
+        val tall = column.height
+        if (tall <= 0) return 0
+        val laid = offsetAt(tall - 1) ?: return 0
+        return (laid.toLong() * visibleHeight() / tall).toInt()
+    }
+
     /** Поле сверху под шапку (#45): её полный рост. */
     fun reserve(top: Int) {
         if (paddingTop != top) setPadding(0, top, 0, 0)

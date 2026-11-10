@@ -383,7 +383,6 @@ fn call(method: &str, arg: &str) -> String {
             field(0),
             field(1).parse().unwrap_or(0),
             field(2).parse().unwrap_or(0),
-            field(3).parse().unwrap_or(0),
         ),
         "reading.leave" => {
             reading_leave(
@@ -980,10 +979,11 @@ fn reading_tick(address: &str, from: usize, to: usize, offset: i32) -> String {
     format!("{{\"shares\":[{}]}}", shares.join(","))
 }
 
-/// Вехи раздела, где читатель (#19): место `at` и видимое `[from, to)` —
-/// в UTF-16. Ответ — номер раздела среди строк оглавления (`-1` — делить
-/// нечего) и его вехи со смещениями в UTF-16 и местом «40%».
-fn reading_inner(address: &str, at: usize, from: usize, to: usize) -> String {
+/// Вехи раздела, где читатель (#19): место `at` и экран — сколько знаков
+/// на нём в среднем по статье (`ArticleView.screenUnits`), — в UTF-16.
+/// Ответ — номер раздела среди строк оглавления (`-1` — делить нечего)
+/// и его вехи со смещениями в UTF-16 и местом «40%».
+fn reading_inner(address: &str, at: usize, screen: usize) -> String {
     let core = core();
     let key = address.split('#').next().unwrap_or(address);
     let Some(reading) = core
@@ -994,7 +994,8 @@ fn reading_inner(address: &str, at: usize, from: usize, to: usize) -> String {
         return "{\"section\":-1}".to_owned();
     };
     let chars = |unit: usize| page::chars_of_utf16(&reading.text, unit);
-    let screen = chars(to).saturating_sub(chars(from));
+    // Экран — число, а не место в тексте: знаки вне BMP (эмодзи) в нём
+    // считаны по два, и на долю экрана это не влияет.
     let total = reading.progress.total();
     let Some((section, marks)) =
         reading::inner_of(&reading.contents, &reading.leads, total, chars(at), screen)

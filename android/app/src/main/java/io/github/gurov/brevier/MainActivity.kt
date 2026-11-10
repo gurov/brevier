@@ -1637,9 +1637,7 @@ class MainActivity : Activity(), ArticleHost {
             shelf.split(-1, emptyList())
             return
         }
-        val from = view.offsetAt(view.visibleTop()) ?: return
-        val to = view.offsetAt(view.visibleBottom()) ?: shown.page.text.length
-        val (section, marks) = Core.readingInner(shown.address, at, from, to)
+        val (section, marks) = Core.readingInner(shown.address, at, view.screenUnits())
         shelf.split(section, marks)
     }
 

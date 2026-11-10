@@ -115,11 +115,12 @@ object Core {
     }
 
     /**
-     * Вехи раздела, где читатель (#19): место `at` и видимое `[from, to)` — в UTF-16.
-     * Ответ — номер раздела среди строк оглавления (`-1` — делить нечего) и вехи.
+     * Вехи раздела, где читатель (#19): место `at` и экран `screen` — сколько знаков
+     * на нём в среднем (`ArticleView.screenUnits`), — в UTF-16. Ответ — номер раздела
+     * среди строк оглавления (`-1` — делить нечего) и вехи.
      */
-    fun readingInner(address: String, at: Int, from: Int, to: Int): Pair<Int, List<ShelfRow.Jump>> {
-        val json = obj("reading.inner", address, at, from, to)
+    fun readingInner(address: String, at: Int, screen: Int): Pair<Int, List<ShelfRow.Jump>> {
+        val json = obj("reading.inner", address, at, screen)
         val marks = json.optJSONArray("marks") ?: return -1 to emptyList()
         return json.optInt("section", -1) to (0 until marks.length()).map { index ->
             val mark = marks.getJSONObject(index)
