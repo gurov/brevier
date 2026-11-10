@@ -23,17 +23,31 @@ pub const LANG: &str = "en";
 
 pub const TITLE: &str = "Brevier";
 
-/// Начальная страница целиком: недавнее из журнала, если оно есть, и под
-/// ним рассказ о программе. `touch` — вариант для сенсорного экрана.
-/// Собирается на каждый показ: журнал растёт, пока окно открыто.
+/// Начальная страница целиком: недавнее из журнала, если оно есть, под
+/// ним рассказ о программе и последней строкой — версия. `touch` — вариант
+/// для сенсорного экрана. Собирается на каждый показ: журнал растёт, пока
+/// окно открыто.
 pub fn page(store: &Store, touch: bool) -> String {
     let about = if touch { TOUCH } else { MARKDOWN };
     let recent = store.recent_page();
+    let version = version_line();
     if recent.is_empty() {
-        about.to_owned()
+        format!("{about}\n{version}")
     } else {
-        format!("{recent}\n{about}")
+        format!("{recent}\n{about}\n{version}")
     }
+}
+
+/// Какой Brevier стоит — больше нигде в интерфейсе не видно, а после каждого
+/// выпуска это первый вопрос (мейнтейнер, 10 ноября 2026). Внизу, одной
+/// строкой, чтобы не мешать недавнему и рассказу; ссылка — на страницу
+/// выпуска: что в нём нового. Версия крейта — она же `versionName`
+/// на Android (`build.gradle.kts` берёт её из `Cargo.toml`).
+pub fn version_line() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!(
+        "Brevier\u{a0}{version} · [what's\u{a0}new](https://github.com/gurov/brevier/releases/tag/v{version})\n"
+    )
 }
 
 /// В строке клавиш клавиша и её подпись держатся неразрывным пробелом:
@@ -118,8 +132,33 @@ mod tests {
     fn a_first_run_gets_the_introduction_alone() {
         let dir = Scratch::new("intro-first");
         let store = Store::at(dir.join("history.tsv"));
-        assert_eq!(page(&store, false), MARKDOWN);
-        assert_eq!(page(&store, true), TOUCH);
+        assert_eq!(
+            page(&store, false),
+            format!("{MARKDOWN}\n{}", version_line())
+        );
+        assert_eq!(page(&store, true), format!("{TOUCH}\n{}", version_line()));
+    }
+
+    /// Версия — последней строкой, отдельным абзацем, со ссылкой на выпуск.
+    #[test]
+    fn the_version_ends_the_page() {
+        let dir = Scratch::new("intro-version");
+        let store = Store::at(dir.join("history.tsv"));
+        let version = env!("CARGO_PKG_VERSION");
+        let text = page(&store, false);
+        let last = text.trim_end().lines().last().unwrap();
+        assert!(
+            last.starts_with(&format!("Brevier\u{a0}{version} ")),
+            "{last}"
+        );
+        assert!(
+            last.ends_with(&format!("/releases/tag/v{version})")),
+            "{last}"
+        );
+        assert!(
+            text.contains(&format!("\n\n{last}")),
+            "a paragraph of its own"
+        );
     }
 
     /// Пример поиска — ссылка на ту же выдачу, что даёт адресная строка:
@@ -139,6 +178,6 @@ mod tests {
         let text = page(&store, true);
         assert!(text.starts_with("### Recently read\n\n- [sivers](https://sive.rs/)\n"));
         assert!(text.find("(brevier:history)").unwrap() < text.find("# Brevier").unwrap());
-        assert!(text.ends_with(TOUCH));
+        assert!(text.ends_with(&format!("{TOUCH}\n{}", version_line())));
     }
 }

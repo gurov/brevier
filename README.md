@@ -315,7 +315,8 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   or a `.md` with an `images/` folder beside it.
 - **Next page.** A page that names the one after it — a series, a book chapter, a thread's
   next page — ends with a **Next:** line, and `Space` at the very end goes there.
-- **A new tab shows the five pages you read last.**
+- **A new tab shows the five pages you read last**, and its last line names your
+  Brevier's version, with a link to what's new in it.
 - **Tabs come back** after you close the window; only the visible one loads at start.
 - **A page that brought Brevier down waits.** If Brevier closed while it was opening a page
   or its pictures, the next start does not open that page by itself: the tab asks first,
