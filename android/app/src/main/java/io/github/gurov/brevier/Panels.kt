@@ -907,7 +907,7 @@ class SettingsPage(
             palette,
         ))
         fine.addView(row(
-            "Size", "Everything grows with it: headings, indents, code. Zoom stays on top, for this run only.",
+            "Size", "Headings and code grow with it; the margins stay narrow, so the text keeps the screen. Zoom stays on top, for this run only.",
             numbers(palette, "Size", stored.getJSONArray("sizes"), reader.size) { value -> typeChanged(reader.copy(size = value)) },
             palette,
         ))

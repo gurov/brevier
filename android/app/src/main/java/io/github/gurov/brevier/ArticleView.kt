@@ -393,11 +393,13 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
     /**
      * Колонка в меру: не шире 36 кеглей, по бокам поля. На телефоне мера
-     * обычно шире экрана, и колонка — это весь экран без полей.
+     * обычно шире экрана, и колонка — это весь экран без полей. Поле — кегль,
+     * но не больше нашего (`Metrics.room`, #65): крупный текст забирает экран
+     * себе, а не полям.
      */
     private fun fitColumn(width: Int) {
         if (width <= 0 || !::metrics.isInitialized) return
-        val gutter = metrics.text
+        val gutter = metrics.space(metrics.type.textPx)
         val side = max(gutter, (width - metrics.measure) / 2f).toInt()
         val top = (metrics.extra * 2).toInt()
         if (column.paddingLeft != side || column.paddingRight != side || column.paddingTop != top) {
@@ -978,8 +980,28 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         span.busy = true
         fetch(span.block.source, if (span.drawn) drawnLook() else look(natural = true)) { decoded ->
             span.busy = false
-            decoded.bitmap?.let { span.picture(if (span.drawn) it else inLine(it), decoded.depth, view) }
+            val bitmap = decoded.bitmap ?: return@fetch
+            val grown = if (span.drawn) bitmap else inLine(bitmap)
+            val fitted = fitLine(grown, span, view)
+            span.picture(fitted, decoded.depth * fitted.height / grown.height, view)
         }
+    }
+
+    /**
+     * Картинка в строке — не шире строки (#65): строка — колонка без поля
+     * абзаца (отступ пункта или цитаты, висячий отступ). Шире — уходила за
+     * правый край и обрезалась: формулы Хабра в пунктах списка на 250–300%.
+     * Такую картинку уменьшаем: перенести её на две строки нельзя.
+     */
+    private fun fitLine(bitmap: Bitmap, span: FormulaSpan, view: ProseView): Bitmap {
+        val text = view.text as? Spanned ?: return bitmap
+        val at = text.getSpanStart(span)
+        if (at < 0) return bitmap
+        val margin = text.getSpans(at, at + 1, android.text.style.LeadingMarginSpan::class.java)
+            .sumOf { max(it.getLeadingMargin(true), it.getLeadingMargin(false)) }
+        val line = (if (view.width > 0) view.width - view.totalPaddingLeft - view.totalPaddingRight else columnWidth()) - margin
+        if (line <= 0 || bitmap.width <= line) return bitmap
+        return Bitmap.createScaledBitmap(bitmap, line, max(1, bitmap.height * line / bitmap.width), true)
     }
 
     /**
@@ -993,8 +1015,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         val height = min(bitmap.height * metrics.unit, max(bitmap.height.toFloat(), line))
         if (height <= bitmap.height) return bitmap
         val width = bitmap.width * height / bitmap.height
-        val fits = min(1f, columnWidth() / width)
-        return Bitmap.createScaledBitmap(bitmap, max(1, (width * fits).toInt()), max(1, (height * fits).toInt()), true)
+        return Bitmap.createScaledBitmap(bitmap, max(1, width.toInt()), max(1, height.toInt()), true)
     }
 
     /**

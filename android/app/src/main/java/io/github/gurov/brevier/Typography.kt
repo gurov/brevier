@@ -146,6 +146,16 @@ class Metrics(context: Context, val type: Typography, val zoom: Float, val reade
     )
     /** Сколько наших пикселей в пикселе десктопа. */
     val unit: Float = text / type.textPx
+    /**
+     * То же для полей: поля колонки, отступы цитат и пунктов (#65). Растут
+     * с кеглем и масштабом только до нашего кегля: ширина колонки на телефоне —
+     * экран, а не мера, и поля, растущие с текстом, на 300% съедали его треть.
+     * В окне колонка — мера в кеглях и растёт сама, там поля растут с ней.
+     */
+    val room: Float = minOf(
+        unit,
+        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, type.textSize, context.resources.displayMetrics) / type.textPx,
+    )
     /** Воздух между строками и абзацами — та же величина, что `extra` в окне. */
     val extra: Float = (reader.leading - 1f) * type.textSize * unit
     /**
@@ -163,6 +173,9 @@ class Metrics(context: Context, val type: Typography, val zoom: Float, val reade
     val justify: Boolean get() = reader.justify
 
     fun px(desktop: Float): Float = desktop * unit
+
+    /** Поле или отступ из пикселей десктопа — по [room], не по [unit]. */
+    fun space(desktop: Float): Float = desktop * room
 }
 
 /**

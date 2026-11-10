@@ -68,7 +68,11 @@ private fun look(styles: List<String>, m: Metrics, palette: Palette): Look {
         when (style) {
             "h1", "h2", "h3", "h4", "h5", "h6" -> {
                 val level = style[1] - '1'
-                size = type.headings[level]
+                // Заголовок крупнее текста на столько, на сколько при нашем
+                // кегле, — не больше (#65): колонка телефона — экран, и на
+                // 64 pt заголовок в 1.75 кегля держал пять букв в строке,
+                // а слово, которому нет места, Android рвёт без дефиса.
+                size = 1f + (type.headings[level] - 1f) * m.room / m.unit
                 weight = type.headingWeights[level]
             }
             "em" -> italic = true
@@ -176,12 +180,13 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
             }
             "quote1", "quote2", "quote3" -> {
                 val level = style.last() - '0'
-                margin = m.px(type.indent) * level
+                margin = m.space(type.indent) * level
                 quotes = maxOf(quotes, level)
             }
             "list1", "list2", "list3" -> {
                 val level = base(style).last() - '0'
-                margin = m.px(type.indent) * level
+                // Поле пункта — по `space`, а маркер — по кеглю: в нём знак (#65).
+                margin = m.space(type.indent) * level
                 hang = m.px(type.hang(width(style)))
                 tab = true
                 // Пункты стоят плотнее абзацев: список — одна мысль, разбитая на части.
@@ -189,12 +194,12 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
             }
             // Блок кода внутри цитаты или пункта (#13): только поле — под их
             // текстом (у пункта — правее маркера) — и линейки цитат вокруг.
-            "inset1", "inset2", "inset3" -> margin = m.px(type.indent) * (style.last() - '0')
+            "inset1", "inset2", "inset3" -> margin = m.space(type.indent) * (style.last() - '0')
             "iteminset1", "iteminset2", "iteminset3" ->
-                margin = m.px(type.indent) * (base(style).last() - '0') + m.px(type.hang(width(style)))
+                margin = m.space(type.indent) * (base(style).last() - '0') + m.px(type.hang(width(style)))
             "rule1", "rule2", "rule3" -> quotes = maxOf(quotes, style.last() - '0')
             "note" -> {
-                margin = m.px(type.noteIndent)
+                margin = m.space(type.noteIndent)
                 hang = m.px(type.noteHang)
                 below = m.extra / 2
             }
@@ -537,8 +542,8 @@ fun typeset(
                 panel = if (shape.panel) palette.panel else null,
                 quotes = shape.quotes,
                 rule = palette.quoteRule,
-                ruleX = m.px(m.type.ruleX),
-                ruleStep = m.px(m.type.indent),
+                ruleX = m.space(m.type.ruleX),
+                ruleStep = m.space(m.type.indent),
                 ruleWidth = maxOf(1f, m.px(m.type.ruleWidth)),
                 ruleInset = m.px(m.type.ruleInset),
             ),

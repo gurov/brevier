@@ -265,9 +265,9 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   65 characters per line, airy leading, headings lighter than the text. Settings offer
   four ready-made styles — Brevier, Book (your system's serif, justified, paragraphs
   indented), Large print and Compact — and under **Fine-tune**, the face (the built-in
-  Noto Sans, or your system's serif or sans), the size, the line length, the line spacing
-  and the space between paragraphs, or none and a book's first-line indent instead, once
-  for every site; zoom stays on top, for the run.
+  Noto Sans, or your system's serif or sans), the size (13.5 to 64 pt), the line length,
+  the line spacing and the space between paragraphs, or none and a book's first-line indent
+  instead, once for every site; zoom stays on top, for the run.
 - **Hyphenation by the page's language** (English and Russian are built in); in Russian
   and Czech no line ends on a one-letter word. Copy and find-on-page see the plain text,
   tables included: find goes through their cells, and a copied table pastes as rows of
@@ -411,6 +411,8 @@ text — not in a WebView — with the same typography and colours as the window
 
 - Tabs, the shelf, find on page, zoom (from the menu or with a pinch), saving, history,
   bookmarks, settings, the dark theme, and a session that comes back.
+- **Large print keeps the screen.** As the size or the zoom grows, the text does and the
+  margins and indents don't, and a formula or picture in a line shrinks to fit it.
 - **Tabs close with a swipe** in the tab list, and a closed tab comes back with **Undo**
   for a few seconds. A tab opened by a link from another app closes when Back returns
   there; the page stays in the history.

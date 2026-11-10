@@ -2080,7 +2080,10 @@ fn type_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
             edit(&mut next);
             let step = ZOOM_STEPS[current_zoom(&state.borrow())];
             if !fits_on_screen(&ui, step * next.scale(), &next) {
-                notice(&ui, "That would not fit on this screen");
+                notice(
+                    &ui,
+                    "That would not fit on this screen; a shorter line length makes room",
+                );
                 return false;
             }
             state.borrow_mut().typography = next;
