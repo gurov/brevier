@@ -302,7 +302,12 @@ pub fn grab(source: &Source, ua: UserAgent) -> Result<(Vec<u8>, Option<String>),
             let blob = fetch::binary(url, ua, ACCEPT, MAX_IMAGE)?;
             Ok((blob.bytes, Some(blob.mime)))
         }
-        Source::File(path) => Ok((std::fs::read(path).map_err(Error::Convert)?, None)),
+        // Файла нет — так и сказать: «Could not make sense of the page»
+        // на рамке картинки (так было) читатель понимал как сбой Brevier.
+        // Внутри сохранённого архива картинка достаётся из него (`packed`).
+        Source::File(path) => crate::packed::read(path, MAX_IMAGE)
+            .map(|bytes| (bytes, None))
+            .map_err(|error| Error::Media(format!("cannot read {}: {error}", path.display()))),
         Source::Formula(address) => crate::math::picture(address)
             .map(|bytes| (bytes, Some("image/svg+xml".to_owned())))
             .ok_or_else(|| Error::Media("the formula is damaged".to_owned())),

@@ -697,9 +697,10 @@ fn looks_like_path(text: &str) -> bool {
             && PathBuf::from(text).exists())
 }
 
-/// Что открываем файлом, если его напечатали без пути: markdown и ленты.
+/// Что открываем файлом, если его напечатали без пути: markdown, ленты
+/// и сохранённый архив.
 /// Имя вида `feed.xml` без проверки на диске было бы доменом.
-const FILE_KINDS: &[&str] = &[".md", ".rss", ".atom", ".xml", ".json"];
+const FILE_KINDS: &[&str] = &[".md", ".rss", ".atom", ".xml", ".json", ".zip"];
 
 #[cfg(test)]
 mod tests {

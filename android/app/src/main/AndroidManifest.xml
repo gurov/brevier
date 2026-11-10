@@ -57,9 +57,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="feed" />
             </intent-filter>
-            <!-- Файл: лента или markdown из загрузок и файлового менеджера.
-                 `text/xml` — потому что так приходит скачанная `rss.xml`;
-                 XML, который не лента, ядро отвергнет страницей отказа. -->
+            <!-- Файл: лента, markdown или сохранённый архив из загрузок
+                 и файлового менеджера. `text/xml` — потому что так приходит
+                 скачанная `rss.xml`; XML, который не лента, и архив без
+                 markdown ядро отвергнет страницей отказа. Архив — потому что
+                 Android даёт только сам файл: распакованный md папки
+                 `images/` рядом не видит, а в архиве картинки при нём. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -71,6 +74,8 @@
                 <data android:mimeType="text/xml" />
                 <data android:mimeType="text/markdown" />
                 <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
             </intent-filter>
             <!-- «Поделиться» ссылкой из любого приложения. -->
             <intent-filter>

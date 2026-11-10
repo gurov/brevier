@@ -287,7 +287,9 @@ fn read(source: &Source, ua: UserAgent) -> Option<(Vec<u8>, String)> {
         Source::Web(url) => crate::fetch::binary(url, ua, "image/*", MAX_IMAGE)
             .ok()
             .map(|blob| (blob.bytes, blob.mime)),
-        Source::File(path) => std::fs::read(path).ok().map(|bytes| (bytes, String::new())),
+        Source::File(path) => crate::packed::read(path, MAX_IMAGE)
+            .ok()
+            .map(|bytes| (bytes, String::new())),
         Source::Formula(address) => {
             crate::math::picture(address).map(|bytes| (bytes, "image/svg+xml".to_owned()))
         }

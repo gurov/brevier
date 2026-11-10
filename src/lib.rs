@@ -50,6 +50,9 @@ pub mod nesting;
 #[cfg(all(feature = "images", feature = "typeset"))]
 pub mod notes;
 pub mod outline;
+/// Архив `.zip` со статьёй читается как папка: путь внутри — продолжение
+/// пути к нему. Без `save` (корпус) zip не разбираем.
+pub mod packed;
 /// Страница, разложенная для показа: текст, стили, ссылки, якоря, места
 /// картинок и таблиц. Её рисует интерфейс — любой. Нужны и картинки
 /// (откуда их брать), и типографика (переносы в прозе).
@@ -472,7 +475,11 @@ fn open_repo(repo: &Repo, ua: UserAgent) -> Result<Document, Error> {
 }
 
 fn open_file(path: &Path) -> Result<Document, Error> {
-    let bytes = std::fs::read(path).map_err(Error::Convert)?;
+    let bytes = packed::read(path, fetch::MAX_BODY).map_err(Error::Convert)?;
+    // Сохранённый архив: статья из него, картинки — оттуда же (`packed`).
+    if packed::is_archive(&bytes) {
+        return open_archive(path);
+    }
     // Лента на диске: скачанная, сохранённая, открытая из файлового
     // менеджера. Кодировку она называет сама, в объявлении XML.
     let decoded = feed::decode(&bytes, None);
@@ -516,6 +523,54 @@ fn open_file(path: &Path) -> Result<Document, Error> {
         next: None,
         archived: None,
     })
+}
+
+/// Архив со статьёй (`packed`). Одна страница — она сама, адресом внутри
+/// архива: так её картинки находятся рядом с ней. Несколько (выгрузка
+/// заметок) — список ссылок на них. Без markdown внутри — не страница.
+#[cfg(feature = "save")]
+fn open_archive(path: &Path) -> Result<Document, Error> {
+    let pages = packed::pages(path).map_err(Error::Convert)?;
+    match pages.as_slice() {
+        [] => Err(Error::UnsupportedContentType("application/zip".to_owned())),
+        [one] => open_file(&path.join(one)),
+        many => {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // Ссылка — целым адресом `file://`: относительную окно
+            // и телефон развернули бы от папки архива, а не от него самого.
+            let whole = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+            let mut markdown = format!("# {}\n\n", feed::heading(&name));
+            for page in many {
+                if let Ok(url) = url::Url::from_file_path(whole.join(page)) {
+                    markdown.push_str(&format!(
+                        "- [{}]({})\n",
+                        feed::inline(page),
+                        feed::destination(url.as_str())
+                    ));
+                }
+            }
+            Ok(Document {
+                address: Address::File(path.to_path_buf()),
+                title: name,
+                markdown,
+                kind: Kind::Listing,
+                served: false,
+                site: Vec::new(),
+                feeds: Vec::new(),
+                lang: None,
+                next: None,
+                archived: None,
+            })
+        }
+    }
+}
+
+#[cfg(not(feature = "save"))]
+fn open_archive(_path: &Path) -> Result<Document, Error> {
+    Err(Error::UnsupportedContentType("application/zip".to_owned()))
 }
 
 /// Заголовок документа — первый `# ` в тексте.

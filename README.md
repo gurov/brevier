@@ -64,7 +64,8 @@ from the repository.
 The first install also downloads `org.gnome.Platform//49` from Flathub if you don't have
 it — about 400 MB, shared with other Flatpak apps. In the sandbox your data lives in
 `~/.var/app/io.github.gurov.brevier/`, saving goes through the system's file dialog, and
-local files (a `.md`, a saved feed) can't be opened.
+Brevier may read your home folder, never write to it: a `.md` there opens with the pictures
+beside it.
 
 **Linux, tarball.** For a system that already has GTK 4 (`libgtk-4-1` on Debian and
 Ubuntu) and no wish for a sandbox:
@@ -141,7 +142,7 @@ Every release is built by CI from its tag, and `SHA256SUMS` lists the checksum o
 file. To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building).
 
 **Make it your browser.** Brevier registers for `http`, `https` and `feed://` links and
-for Markdown and feed files, so it shows up in "Open with". It doesn't make itself the
+for Markdown, feed and `.zip` files, so it shows up in "Open with". It doesn't make itself the
 default; if you want that:
 
 ```sh
@@ -190,7 +191,8 @@ brevier "?danluu.com"                   # a leading ? searches for anything
 
 A GitHub or GitLab file URL, a `feed://` link, a local `.md` file or a saved feed work too.
 `--save` writes a `.md`, or a `.zip` with an `images/` folder when the page has pictures;
-`-o` sets the file name. Without `-o` it never overwrites an existing file.
+`-o` sets the file name. A saved `.zip` opens as it is, with its pictures, and needs no
+unpacking. Without `-o` it never overwrites an existing file.
 
 Exit codes, for scripts: 1 bad address, 2 network, 3 HTTP status, 4 content type,
 5 nothing extracted, 6 conversion (or a broken feed).
@@ -411,7 +413,9 @@ text — not in a WebView — with the same typography and colours as the window
   for a few seconds. A tab opened by a link from another app closes when Back returns
   there; the page stays in the history.
 - It can be your default browser, and **Open in your browser** still finds the others.
-- It opens links, shared text, `feed://` links and Markdown or feed files from other apps.
+- It opens links, shared text, `feed://` links and Markdown or feed files from other apps,
+  and a saved `.zip` with its pictures. An unpacked `.md` comes without them: Android hands
+  over the file alone, not the `images/` folder beside it.
 - A long press on a link opens it in a new tab, copies it, or sends it to your browser.
 - **Highlight** and **Note** sit in the selection menu next to Copy; a tap on a marked
   passage edits or removes its note. A note's words and pictures stand right under its

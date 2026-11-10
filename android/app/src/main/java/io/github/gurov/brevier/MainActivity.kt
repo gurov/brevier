@@ -271,11 +271,12 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
-     * Файл снаружи — лента или markdown из загрузок, из файлового менеджера.
-     * Ядро открывает файл путём, а Android отдаёт поток (`content://`), поэтому
-     * кладём копию в кэш приложения и открываем её. Имя оставляем прежним:
-     * по нему видно, что открыто, а ядро узнаёт ленту по содержимому.
-     * Потолок тот же, что у страницы из сети.
+     * Файл снаружи — лента, markdown или сохранённый архив из загрузок,
+     * из файлового менеджера. Ядро открывает файл путём, а Android отдаёт
+     * поток (`content://`), поэтому кладём копию в кэш приложения и открываем
+     * её. Имя оставляем прежним: по нему видно, что открыто, а ядро узнаёт
+     * ленту и архив по содержимому. Потолок тот же, что у страницы из сети;
+     * у архива — выше: в нём и картинки (`packed` в ядре читает их оттуда).
      */
     private fun copyIn(uri: Uri): String? {
         val name = runCatching {
@@ -283,6 +284,9 @@ class MainActivity : Activity(), ArticleHost {
                 ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         }.getOrNull() ?: uri.lastPathSegment ?: "opened"
         val safe = name.replace(Regex("""[/\\:\u0000]"""), "_").take(120)
+        val archive = safe.endsWith(".zip", ignoreCase = true) ||
+            runCatching { contentResolver.getType(uri) }.getOrNull()?.contains("zip") == true
+        val limit = if (archive) MAX_ARCHIVE else MAX_FILE
         val target = File(File(cacheDir, "opened").apply { mkdirs() }, safe)
         return runCatching {
             contentResolver.openInputStream(uri)?.use { input ->
@@ -293,7 +297,7 @@ class MainActivity : Activity(), ArticleHost {
                         val read = input.read(buffer)
                         if (read < 0) break
                         total += read
-                        if (total > MAX_FILE) error("too big")
+                        if (total > limit) error("too big")
                         output.write(buffer, 0, read)
                     }
                 }
@@ -2732,6 +2736,12 @@ class MainActivity : Activity(), ArticleHost {
         const val TRIPPED = "Brevier tripped over this page"
         /** Потолок файла снаружи — тот же, что у тела страницы из сети. */
         const val MAX_FILE = 8L * 1024 * 1024
+        /**
+         * Потолок сохранённого архива: статья с картинками весит больше
+         * страницы (на Хабре с 29 снимками — около 12 МБ). Копируется
+         * на главном потоке, поэтому не сотни мегабайт.
+         */
+        const val MAX_ARCHIVE = 64L * 1024 * 1024
         const val SERVED_MARKDOWN = "Served as Markdown by the site — the author's exact text."
         const val INSECURE = "Not secure: this page came over plain http, so anyone on the way can read and change it."
         /** Сколько читатель «здесь» после последнего касания (#19): три минуты. */

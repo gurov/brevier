@@ -158,9 +158,10 @@ Section
     WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
     WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
 
-    ; Brevier — кандидат в браузеры и в «Открыть с помощью» для markdown
-    ; и лент, как его ярлык на Linux. Выбор по умолчанию остаётся за
-    ; читателем: Windows не даёт программе назначить себя самой.
+    ; Brevier — кандидат в браузеры и в «Открыть с помощью» для markdown,
+    ; лент и сохранённых архивов `.zip`, как его ярлык на Linux. Выбор
+    ; по умолчанию остаётся за читателем: Windows не даёт программе
+    ; назначить себя самой.
     WriteRegStr HKCU "Software\Classes\${URL_CLASS}" "" "Brevier URL"
     WriteRegStr HKCU "Software\Classes\${URL_CLASS}\DefaultIcon" "" "${EXE},0"
     WriteRegStr HKCU "Software\Classes\${URL_CLASS}\shell\open\command" "" '"${EXE}" "%1"'
@@ -183,6 +184,7 @@ Section
     !insertmacro Opens ".markdown"
     !insertmacro Opens ".rss"
     !insertmacro Opens ".atom"
+    !insertmacro Opens ".zip"
     WriteRegStr HKCU "Software\RegisteredApplications" "Brevier" "${CLIENT_KEY}\Capabilities"
 
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
@@ -214,6 +216,7 @@ Section "Uninstall"
     !insertmacro UnOpens ".markdown"
     !insertmacro UnOpens ".rss"
     !insertmacro UnOpens ".atom"
+    !insertmacro UnOpens ".zip"
 
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
