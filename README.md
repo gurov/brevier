@@ -347,6 +347,12 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   it answers. The front page and the other lists of stories are lists of links, with
   points and a link to the comments. A Discourse forum recent enough to serve Markdown is
   read as it serves it.
+- **A Mastodon post reads as a thread.** The page of a post is empty without JavaScript, so
+  Brevier asks the same server for the post and its replies, as the page's own script would:
+  two requests. A long post written as a chain of the author's own replies reads as one
+  text, the other replies sit under it, and a post that answers another shows what it
+  answers. It is known by the form of the page, on any Mastodon server. A server gives a
+  reader who is not signed in 60 replies at most, and the page says so when it gets there.
 - **Habr articles come with their comments.** Habr's page fetches them with a script;
   Brevier makes that same one request and sets them under the article in the same thread
   look. Every comment keeps its anchor, so a link to a comment opens at it. A Habr
@@ -539,7 +545,8 @@ command line keeps no history.
   without JavaScript); Hacker News, Lobsters and Discourse forums are read from their own
   markup, since the general extractor drops the author of every comment, or every comment
   but one; Habr's comments are asked for at the address its own script uses, one more
-  request to habr.com for an article that has any; rustdoc pages are read from their main
+  request to habr.com for an article that has any; a Mastodon post and its replies are asked
+  for from its own server, two requests; rustdoc pages are read from their main
   column; royallib's books open part by part; DuckDuckGo Lite results are unwrapped from its
   click tracker. Your search queries go to DuckDuckGo.
 - **The Wayback Machine is asked only when you press the button.** A page that is gone

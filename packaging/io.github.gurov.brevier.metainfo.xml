@@ -39,7 +39,8 @@
           margin beside the text, back in place when the page is opened again and
           exported as Markdown</li>
       <li>Feeds and search as lists of links; Hacker News, Lobsters and Discourse
-          forums as threads, and Habr articles with their comments</li>
+          forums and Mastodon posts as threads, and Habr articles with their
+          comments</li>
       <li>Tabs that survive closing the window, history, bookmarks, and page search</li>
       <li>Images off by one switch: after JavaScript is gone, the image decoder is the
           one serious attack surface left</li>

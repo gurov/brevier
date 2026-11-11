@@ -164,7 +164,7 @@ Done, on the page that explains the failure rather than in the status line.
 
 ### 8. Threads and documentation hosts (#11)
 
-Done, but for Mastodon. Per-host rules, kept in one small table in `src/hosts.rs`
+Done. Per-host rules, kept in one small table in `src/hosts.rs`
 rather than a plugin system, each row with a page in the corpus.
 
 A thread needed a path of its own, the way the repository mode has one. Measured on a
@@ -193,7 +193,10 @@ link-density rule (7 of 91) — a threshold the corpus has pinned for articles.
   underscores finds its heading. Rust documentation — docs.rs, the standard library,
   any rustdoc build, known by its generator tag — has a rule of its own and comes
   whole, its code highlighted.
-- **Still to come: Mastodon** (#37), put off on 13 October 2026.
+- **Mastodon** (#37), by the server's software rather than by host: the page of a post is
+  empty without JavaScript, so the post and its replies are asked for from the same
+  server, two requests. The author's own chain of replies continues the post; a post that
+  answers another shows what it answers. Akkoma and Pleroma are not covered.
 
 ### 9. Tables in the buffer (#10)
 

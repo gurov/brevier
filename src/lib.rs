@@ -286,6 +286,9 @@ fn open_web(url: &str, ua: UserAgent) -> Result<Document, Error> {
             address,
         }),
         ContentKind::Html => {
+            if let Some(document) = fetched_thread(&page.body, &page.url, ua) {
+                return Ok(document);
+            }
             let mut document = from_html(&page.body, &page.url)?;
             if document.kind == Kind::Article {
                 append_comments(&mut document.markdown, &page.body, &page.url, ua);
@@ -304,6 +307,27 @@ pub fn append_comments(markdown: &mut String, html: &str, url: &str, ua: UserAge
     if let Some(comments) = hosts::habr::comments(url, html, ua) {
         *markdown = format!("{}\n\n{comments}", markdown.trim_end());
     }
+}
+
+/// Тред, которого в странице нет вовсе (#37, Mastodon): страница статуса без
+/// скрипта пуста, а запись и ответы тот же сервер отдаёт своим API. Ходит
+/// в сеть — поэтому, как и комментарии Хабра, зовётся из тракта сети,
+/// а не из `from_html`.
+pub fn fetched_thread(html: &str, url: &str, ua: UserAgent) -> Option<Document> {
+    let (page, lang) = hosts::mastodon::thread(url, html, ua)?;
+    Some(Document {
+        address: Address::Web(url.to_owned()),
+        title: page.title,
+        markdown: page.markdown,
+        kind: Kind::Article,
+        served: false,
+        site: page.site.unwrap_or_default(),
+        feeds: Vec::new(),
+        // Язык записи, а не страницы: у страницы это язык интерфейса сервера.
+        lang,
+        next: None,
+        archived: None,
+    })
 }
 
 /// Лента: список записей со ссылками и датами. Это «список ссылок», тот же

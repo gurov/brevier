@@ -325,13 +325,26 @@ fn run(args: &Args) -> Result<String, Error> {
                     // Простой текст markdown-ом не является — отдаём как есть.
                     ContentKind::Text => page.body,
                     ContentKind::Html => {
-                        let mut text = page_text(&page.body, &page.url, args)?;
-                        // Комментарии, что страница приносит скриптом (#40), —
-                        // как в окне; про сам HTML спрашивают без них.
-                        if !(args.raw || args.html || args.nav) {
-                            brevier::append_comments(&mut text, &page.body, &page.url, args.ua);
+                        // Про сам HTML (`--raw`, `--html`, `--nav`) спрашивают
+                        // без того, что страница приносит скриптом.
+                        let reading = !(args.raw || args.html || args.nav);
+                        // Тред, которого в странице нет (#37), — как в окне.
+                        let thread = reading
+                            .then(|| brevier::fetched_thread(&page.body, &page.url, args.ua))
+                            .flatten();
+                        match thread {
+                            Some(document) => document.markdown,
+                            None => {
+                                let mut text = page_text(&page.body, &page.url, args)?;
+                                // Комментарии под статьёй (#40).
+                                if reading {
+                                    brevier::append_comments(
+                                        &mut text, &page.body, &page.url, args.ua,
+                                    );
+                                }
+                                text
+                            }
                         }
-                        text
                     }
                     // Лента — список ссылок, и `--raw`, `--html`, `--nav`
                     // про неё спросить нечего: отдаём её как читателю.

@@ -9,7 +9,7 @@
 //! (`lobsters`), форумы Discourse (`discourse`), документация rustdoc
 //! (`rustdoc`) и вики на MediaWiki — эти трое по программе, а не по хосту, —
 //! комментарии Хабра
-//! (`habr`), поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
+//! (`habr`), статусы Mastodon (`mastodon`, тоже по программе), поисковик, читалка книг royallib и Wayback Machine. Страницы reddit без JavaScript пусты
 //! (8 КБ заглушки), `old.reddit.com` уводит на вход, `.json` отвечает 403 —
 //! а лента `.rss` у сабреддита и у треда открыта любому клиенту, с автором
 //! и полным текстом каждой реплики. Цена — вложенности ответов в ленте нет,
@@ -39,6 +39,7 @@ pub mod discourse;
 pub mod habr;
 pub mod hacker_news;
 pub mod lobsters;
+pub mod mastodon;
 pub mod rustdoc;
 mod thread;
 
