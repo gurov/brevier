@@ -3099,8 +3099,9 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     // После штатного копирования переписываем буфер обмена очищенным текстом
     // (`copy-clipboard`, обработчик — после умолчания). Ctrl+C и «Копировать»
     // из контекстного меню идут через тот же сигнал. Таблица в выделении
-    // встаёт своим текстом на место своего знака (#10): штатное копирование
-    // знак объекта просто роняет, и таблица пропадала из скопированного.
+    // встаёт своим текстом на место своего знака (#10), нарисованная формула —
+    // исходником (#16): штатное копирование знак объекта просто роняет,
+    // и они пропадали из скопированного.
     {
         let state = state.clone();
         view.connect_closure(
@@ -3112,7 +3113,11 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                     return;
                 };
                 // Обработчик зовётся изнутри GTK — состояние может быть занято.
-                let tables: Vec<(i32, String)> = state
+                // Объект выделения: место, текст и стоит ли он своей строкой.
+                // Нарисованная формула (#16) — исходником `$…$`, как при
+                // сохранении: рисунок в буфер обмена текстом не положить.
+                let within = start.offset()..end.offset();
+                let mut objects: Vec<(i32, String, bool)> = state
                     .try_borrow()
                     .ok()
                     .and_then(|borrowed| {
@@ -3121,30 +3126,42 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
                             .iter()
                             .find(|tab| tab.view == view)
                             .map(|tab| {
-                                tab.tables
+                                let tables = tab
+                                    .tables
                                     .iter()
-                                    .filter(|table| {
-                                        (start.offset()..end.offset()).contains(&table.at)
-                                    })
-                                    .map(|table| (table.at, table.text.clone()))
-                                    .collect()
+                                    .filter(|table| within.contains(&table.at))
+                                    .map(|table| (table.at, table.text.clone(), true));
+                                let formulas = tab.shots.iter().filter_map(|shot| {
+                                    let Slot::Canvas(_, at) = &shot.slot else {
+                                        return None;
+                                    };
+                                    let source = brevier::math::bare(&shot.alt);
+                                    (matches!(shot.source, Source::Formula(_))
+                                        && within.contains(at)
+                                        && !source.is_empty())
+                                    .then(|| (*at, format!("${source}$"), false))
+                                });
+                                tables.chain(formulas).collect()
                             })
                     })
                     .unwrap_or_default();
+                objects.sort_by_key(|(at, ..)| *at);
                 let mut selected = String::new();
                 let mut from = start;
-                for (at, text) in &tables {
+                for (at, text, block) in &objects {
                     let object = buffer.iter_at_offset(*at);
                     selected.push_str(&buffer.text(&from, &object, false));
-                    if !selected.is_empty() && !selected.ends_with('\n') {
+                    if *block && !selected.is_empty() && !selected.ends_with('\n') {
                         selected.push('\n');
                     }
                     selected.push_str(text);
-                    selected.push('\n');
+                    if *block {
+                        selected.push('\n');
+                    }
                     from = buffer.iter_at_offset(at + 1);
                 }
                 selected.push_str(&buffer.text(&from, &end, false));
-                if !tables.is_empty() || brevier::typeset::marked(&selected) {
+                if !objects.is_empty() || brevier::typeset::marked(&selected) {
                     view.clipboard()
                         .set_text(&brevier::typeset::plain(&selected));
                 }
