@@ -87,7 +87,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionName = coreVersion
-        versionCode = 2500
+        versionCode = 2600
         check(versionCode == derivedVersionCode) {
             "versionCode is $versionCode, but version $coreVersion means $derivedVersionCode: update it in android/app/build.gradle.kts"
         }

@@ -1,0 +1,3 @@
+• A Mastodon post reads as a thread: the post, then every reply with its author and day, answers set in under what they answer. The page of a post is empty without JavaScript, so Brevier asks the post's own server for it.
+• A long post written as a chain of the author's own replies reads as one text.
+• A post that answers another shows itself first, then what it answers.

@@ -99,6 +99,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.26.0" date="2026-11-11" type="development">
+      <description>
+        <p>A Mastodon post reads as a thread: the post, then every reply with
+          its author and day, answers set in under what they answer. The page
+          of a post is empty without JavaScript, so Brevier asks the post's
+          own server for it, on any Mastodon server. A long post written as a
+          chain of the author's replies reads as one text. In the window a
+          drawn formula now copies as its TeX source instead of vanishing
+          from the copied text.</p>
+      </description>
+    </release>
     <release version="0.25.0" date="2026-11-10" type="development">
       <description>
         <p>Sizes go up to 64 pt, and on the phone the margins and indents
