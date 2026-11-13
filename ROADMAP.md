@@ -210,38 +210,18 @@ way. The window no longer knows less than the saved file.
 
 ### 10. The companion extension (#5)
 
-A WebExtension for Firefox and Chrome with one menu item, "Read in Brevier". It
-takes the page as the browser finally rendered it and hands it over native messaging
-to `brevier-ui --stdin <url>`, address included, for the links. JavaScript runs in
-the browser that already has it; Brevier still has no engine.
+Dropped, on 13 November 2026, before any of it was built. The plan was a WebExtension
+for Firefox and Chrome with one menu item, "Read in Brevier", handing Brevier the page
+as the browser had rendered it: a way in for pages built by scripts and pages behind a
+login, and a way for people to find Brevier from the browser they already use. But a
+reader who is in that browser already has a reading mode one click away — Chrome,
+Firefox and Safari each carry one — and a second reading mode inside the same browser
+is not something anyone is missing. What it would have cost — two extension stores, a
+native-messaging host on three platforms, browsers that live in sandboxes of their own —
+buys too little.
 
-The one menu item answers three things at once: SPA sites; pages behind a login —
-the browser is logged in, and Brevier never holds a cookie; and how people find
-Brevier in the first place — from the browser they already use, one page at a time,
-until the reading moves.
-
-Work items:
-
-- the extension itself, Manifest V3, submitted to both stores — after reading what
-  they say about code written with AI, as was done for Flathub and F-Droid
-- the native-messaging host: a small binary, its manifest installed by `install.sh`,
-  by the Windows installer (per user, in the registry, no UAC) and, for the Flatpak, a
-  wrapper script on the host that calls `flatpak run` — the browser wants an
-  executable outside the sandbox. A browser in a sandbox of its own — Ubuntu's Firefox
-  is a snap, Flathub's browsers are Flatpaks — is a cost to measure before promising
-- the same path from the command line, so `--stdin` and the extension are one code
-  path with two front doors. The cli has it; the window does not yet, and a page has
-  to reach the window already running, together with its address
-
-On the phone the front door exists already: "Open in Brevier" from the browser's menu
-or the share sheet. What the extension adds — pages built by scripts, pages behind a
-login — has no way in there: Firefox for Android takes extensions, but not native
-messaging.
-
-Habr's comments (#40) arrive only when Brevier fetches the page itself. A page handed
-over by the extension touches no network, so either that path asks for them too, or the
-reader is told. Later, perhaps: "always read this site in Brevier", for the sites a
-reader visits most.
+So a page built by scripts degrades honestly, with "Open in your browser", and a page
+behind a login is read in the browser. Brevier still holds no cookie.
 
 ### 11. Updates on Linux (#1)
 
@@ -516,8 +496,9 @@ verify.
 
 Recorded so that nobody rediscovers them in six months.
 
-- **Authenticated reading** goes through the companion extension. Brevier never
-  holds a cookie or any other credential.
+- **Authenticated reading** stays in the browser. Brevier never holds a cookie or any
+  other credential, and the companion extension that would have handed such pages over
+  was dropped (item 10).
 - **Platforms:** Linux first, updated from Brevier's own Flatpak repository (item 11);
   then Android, as a second front-end over
   the same core rather than another build of the same window — readers read on phones,

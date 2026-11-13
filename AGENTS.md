@@ -34,8 +34,8 @@ These are not open questions, and a patch that does any of them will not be merg
   module that the reader turns on, with what it produces marked as its own; whether and
   how is the maintainer's design decision, not a patch to start with. (Models in the
   workshop — to mark the corpus, to find where rules cut living text — are fine.)
-- **Hold a credential**: no cookies kept, no logins, no forms. Authenticated reading is the
-  companion extension's job.
+- **Hold a credential**: no cookies kept, no logins, no forms. A page behind a login is read
+  in the browser.
 - **Work around TLS.** Trust is the operating system's (`rustls-platform-verifier`);
   `danger_accept_invalid_certs` and bundled roots are out. `cargo tree | grep webpki-roots`
   stays empty.

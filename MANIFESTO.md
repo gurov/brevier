@@ -64,10 +64,9 @@ not fetch pages nobody asked to read.
 ## 8. Not a replacement for your browser
 
 The other half of the web stays where it is. `Ctrl+O` hands any page to the browser
-you already have; the companion extension hands one back, as that browser rendered
-it. The desktop entry does not make Brevier the default unless you ask it to. A
-reading instrument that tried to be a browser would be a worse browser and a worse
-instrument.
+you already have. The desktop entry does not make Brevier the default unless you ask
+it to. A reading instrument that tried to be a browser would be a worse browser and a
+worse instrument.
 
 ## The web we ask for
 
