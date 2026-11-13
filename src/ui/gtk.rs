@@ -638,6 +638,8 @@ enum Hit {
         from: usize,
         to: usize,
     },
+    /// Нарисованная формула (#16) — целиком; смещение её знака в буфере.
+    Formula(i32),
 }
 
 /// Таблица на странице: где её знак в буфере, её текст для буфера обмена
@@ -656,7 +658,7 @@ impl Hit {
     /// Ячейка стоит там, где знак её таблицы.
     fn at(&self, tables: &[TableCells]) -> i32 {
         match *self {
-            Hit::Text(from, _) => from,
+            Hit::Text(from, _) | Hit::Formula(from) => from,
             Hit::Cell { table, .. } => tables.get(table).map_or(0, |table| table.at),
         }
     }
@@ -7199,10 +7201,9 @@ fn load_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot) {
     }
 
     let source = shot.source.clone();
-    // Своя формула — текст, а не иллюстрация: цветом текста на его бумаге.
     let theme = state.borrow().theme();
     let (paper, ink) = match source {
-        Source::Formula(_) => (rgb(colors(theme).paper), rgb(colors(theme).ink)),
+        Source::Formula(_) => formula_colors(theme),
         _ => (picture_paper(theme), [0, 0, 0]),
     };
     let look = media::Look {
@@ -7332,6 +7333,13 @@ fn sink(buffer: &gtk::TextBuffer, canvas: &Formula, at: i32, depth: i32) {
     buffer.apply_tag(&tag, &from, &to);
 }
 
+/// Бумага и краска своей формулы: она текст, а не иллюстрация, — цветом
+/// текста на его бумаге. Холст потом снимает бумагу (`Formula::set_image`).
+fn formula_colors(theme: Theme) -> ([u8; 3], [u8; 3]) {
+    let colors = colors(theme);
+    (rgb(colors.paper), rgb(colors.ink))
+}
+
 /// Показать разобранную картинку с подписью.
 fn show_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, raster: Raster) {
     let view = view_of(state, id);
@@ -7353,7 +7361,9 @@ fn show_shot(ui: &Ui, state: &Rc<RefCell<State>>, id: u64, shot: &Shot, raster: 
 
     // Формула — холст в буфере: меняем в нём картинку, виджета тут нет вовсе.
     if let Slot::Canvas(canvas, at) = &shot.slot {
-        canvas.set_image(&image);
+        let lift = matches!(shot.source, Source::Formula(_))
+            .then(|| formula_colors(state.borrow().theme()));
+        canvas.set_image(&image, lift);
         let depth = (raster.depth as f32 / raster.density).round() as i32;
         if let Some(view) = view {
             sink(&view.buffer(), canvas, *at, depth);
@@ -8865,7 +8875,7 @@ fn find(ui: &Ui, state: &Rc<RefCell<State>>, needle: &str, restart: bool) {
     let hits = if needle.is_empty() {
         Vec::new()
     } else {
-        hits_of(&buffer, &tables, needle)
+        hits_of(&buffer, &tables, &current_formulas(ui, state), needle)
     };
     for hit in &hits {
         if let Hit::Text(from, to) = *hit {
@@ -8877,6 +8887,7 @@ fn find(ui: &Ui, state: &Rc<RefCell<State>>, needle: &str, restart: bool) {
         }
     }
     mark_cells(&tables, &hits, None);
+    mark_formulas(ui, state, &hits, None);
 
     let at = if restart {
         first_visible(&view, &tables, &hits)
@@ -8941,6 +8952,7 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
     let hits = state.borrow().search.hits.clone();
     let tables = current_tables(ui, state);
     mark_cells(&tables, &hits, Some(hit));
+    mark_formulas(ui, state, &hits, Some(hit));
     // Треть экрана сверху: совпадение нужно видеть в контексте, а не в самом
     // верху окна.
     match hit {
@@ -8952,6 +8964,7 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
             );
             scroll_to(view, from, 0.3);
         }
+        Hit::Formula(at) => scroll_to(view, at, 0.3),
         Hit::Cell { table, cell, .. } => {
             let Some(table) = tables.get(table) else {
                 return;
@@ -8964,10 +8977,17 @@ fn show_hit(ui: &Ui, state: &Rc<RefCell<State>>, view: &gtk::TextView) {
     }
 }
 
-/// Совпадения по порядку документа: в тексте буфера и в ячейках таблиц —
-/// ячейки там, где знак их таблицы. Знак объекта в поиске по тексту
-/// не участвует, поэтому с совпадением в тексте ячейка место не делит.
-fn hits_of(buffer: &gtk::TextBuffer, tables: &[TableCells], needle: &str) -> Vec<Hit> {
+/// Совпадения по порядку документа: в тексте буфера, в ячейках таблиц —
+/// ячейки там, где знак их таблицы, — и в нарисованных формулах (#16):
+/// формула находится по тому, что на ней видно (`math::seen`), и совпадение —
+/// её знак целиком. Знак объекта в поиске по тексту не участвует, поэтому
+/// с совпадением в тексте ни ячейка, ни формула место не делят.
+fn hits_of(
+    buffer: &gtk::TextBuffer,
+    tables: &[TableCells],
+    formulas: &[(i32, String)],
+    needle: &str,
+) -> Vec<Hit> {
     let (start, end) = buffer.bounds();
     // `slice`, а не `text`: `text` выкидывает знаки объектов, и после каждой
     // картинки или таблицы подсветка съезжала на знак влево. В срезе знак
@@ -8989,10 +9009,66 @@ fn hits_of(buffer: &gtk::TextBuffer, tables: &[TableCells], needle: &str) -> Vec
             }
         }
     }
+    for (at, seen) in formulas {
+        if !page::hits(seen, needle).is_empty() {
+            hits.push(Hit::Formula(*at));
+        }
+    }
     // Порядок внутри одной таблицы — порядок, в котором ячейки добавлены:
     // сортировка устойчивая.
     hits.sort_by_key(|hit| hit.at(tables));
     hits
+}
+
+/// Подсветить найденные формулы: холст красит находку сам (`Formula::set_mark`),
+/// фон тега под ним не виден.
+fn mark_formulas(ui: &Ui, state: &Rc<RefCell<State>>, hits: &[Hit], here: Option<Hit>) {
+    let Some(id) = current_id(ui, state) else {
+        return;
+    };
+    let canvases: Vec<(Formula, i32)> = {
+        let mut borrowed = state.borrow_mut();
+        let Some(tab) = borrowed.find(id) else {
+            return;
+        };
+        tab.shots
+            .iter()
+            .filter_map(|shot| match &shot.slot {
+                Slot::Canvas(canvas, at) => Some((canvas.clone(), *at)),
+                Slot::Frame(_) => None,
+            })
+            .collect()
+    };
+    for (canvas, at) in canvases {
+        let hit = Hit::Formula(at);
+        let mark = if here == Some(hit) {
+            Some(rgba(FOUND_HERE))
+        } else if hits.contains(&hit) {
+            Some(rgba(FOUND))
+        } else {
+            None
+        };
+        canvas.set_mark(mark);
+    }
+}
+
+/// Нарисованные формулы открытой вкладки: где их знак и что на них видно.
+fn current_formulas(ui: &Ui, state: &Rc<RefCell<State>>) -> Vec<(i32, String)> {
+    let Some(id) = current_id(ui, state) else {
+        return Vec::new();
+    };
+    let mut borrowed = state.borrow_mut();
+    let Some(tab) = borrowed.find(id) else {
+        return Vec::new();
+    };
+    tab.shots
+        .iter()
+        .filter(|shot| matches!(shot.source, Source::Formula(_)))
+        .filter_map(|shot| match &shot.slot {
+            Slot::Canvas(_, at) => Some((*at, brevier::math::seen(&shot.alt))),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Таблицы открытой вкладки.

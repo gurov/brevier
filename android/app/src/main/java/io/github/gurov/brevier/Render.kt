@@ -217,6 +217,15 @@ private fun shape(styles: List<String>, m: Metrics): Shape {
  */
 class Wash(val color: Int, val rule: Int = 0)
 
+/**
+ * Объект в строке, который находку поиска рисует сам (#16): нарисованная
+ * формула выше подложки находки — та лежит только под буквами.
+ */
+interface Findable {
+    /** Цвет находки поверх себя; 0 — не найден. */
+    var found: Int
+}
+
 /** Гарнитура, кегль, наклон, разрядка, подъём — одним спаном на участок. */
 class FaceSpan(
     private val face: Fonts.Face,

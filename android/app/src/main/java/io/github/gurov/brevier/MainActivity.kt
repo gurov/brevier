@@ -2495,16 +2495,21 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
-     * Совпадения по порядку документа: в тексте и в ячейках таблиц (#10) —
-     * ячейки там, где знак их таблицы. Ищет ядро, по тексту каждой ячейки
-     * так же, как по тексту страницы; сортировка устойчивая, и порядок
-     * внутри таблицы — порядок чтения.
+     * Совпадения по порядку документа: в тексте, в ячейках таблиц (#10) —
+     * ячейки там, где знак их таблицы, — и в нарисованных формулах (#16):
+     * формула находится по тому, что на ней видно (`Block.Image.find`),
+     * и совпадение — её знак целиком. Ищет ядро, по тексту каждой ячейки
+     * и формулы так же, как по тексту страницы; сортировка устойчивая,
+     * и порядок внутри таблицы — порядок чтения.
      */
     private fun hitsOf(page: Page, text: String): List<Hit> {
         val found = mutableListOf<Hit>()
         val flat = Core.search(page.text, text)
         for (index in 0 until flat.size / 2) found += Hit.Text(flat[index * 2], flat[index * 2 + 1])
         for (block in page.blocks) {
+            if (block is Block.Image && block.find.isNotEmpty() && Core.search(block.find, text).isNotEmpty()) {
+                found += Hit.Text(block.at, block.at + 1)
+            }
             if (block !is Block.Table) continue
             var number = 0
             for (row in block.rows) for (cell in row.cells) {

@@ -6,6 +6,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
@@ -1092,23 +1094,26 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
      * Исходник формулы из `alt`: MathJax заворачивает его в `{\displaystyle …}`,
      * и читателю эта обёртка не нужна (`page::formula` в ядре).
      */
-    private fun formulaText(alt: String): String {
-        var text = alt.trim()
-        if (text.startsWith("{") && text.endsWith("}")) {
-            text = text.substring(1, text.length - 1).trim().removePrefix("\\displaystyle").trim()
-        }
-        return text.ifEmpty { "formula" }
-    }
+    private fun formulaText(alt: String): String = bareFormula(alt).ifEmpty { "formula" }
 
     /** Формула в строке: исходник, пока картинки нет; картинка ростом с текст. */
-    inner class FormulaSpan(val block: Block.Image, private val fallback: String, private val ink: Int) : ReplacementSpan() {
+    inner class FormulaSpan(val block: Block.Image, private val fallback: String, private val ink: Int) : ReplacementSpan(), Findable {
         private var bitmap: Bitmap? = null
+        override var found = 0
+        private val marker = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val box = RectF()
+
+        /** Краска своей формулы без бумаги: ядро рисует её цветом текста на бумаге (`drawnLook`). */
+        private val inkOnly = Paint().apply { colorFilter = inkOnly(palette.paper, palette.ink) }
         private var depth = 0
         var busy = false
         val ready get() = bitmap != null
 
         /** Нарисована ядром (`math::drawn`), а не приехала из сети. */
         val drawn get() = block.source.startsWith("data:")
+
+        /** Исходник TeX нарисованной формулы — для копирования; нет его — `null`. */
+        val source: String? get() = if (block.formula) bareFormula(block.alt).ifEmpty { null } else null
 
         fun picture(bitmap: Bitmap, depth: Int, view: ProseView) {
             this.bitmap = bitmap
@@ -1148,9 +1153,29 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                 paint.color = ink
                 canvas.drawText(fallback, x, y.toFloat(), paint)
                 paint.color = was
-                return
+                box.set(x, y + paint.ascent(), x + paint.measureText(fallback), y + paint.descent())
+            } else {
+                val upper = (y + depth - picture.height).toFloat()
+                // Своя формула — одной краской, без бумаги: под ней видно
+                // выделение и отметку заметки, как под буквами рядом.
+                canvas.drawBitmap(picture, x, upper, if (block.formula) inkOnly else null)
+                box.set(x, upper, x + picture.width, upper + picture.height)
             }
-            canvas.drawBitmap(picture, x, (y + depth - picture.height).toFloat(), null)
+            if (found == 0) return
+            // Находка поиска (#16) — как маркером: цвет поверх, краска видна
+            // сквозь него, и рамка тем же цветом. Как холст формулы в окне.
+            marker.style = Paint.Style.FILL
+            marker.color = found
+            marker.alpha = FOUND_WASH
+            canvas.drawRect(box, marker)
+            val rule = FOUND_RULE * resources.displayMetrics.density
+            marker.style = Paint.Style.STROKE
+            marker.strokeWidth = rule
+            marker.alpha = 255
+            // Рамка — снаружи рисунка: формула обрезана впритык, и внутри
+            // рамка легла бы на краску.
+            box.inset(-rule / 2, -rule / 2)
+            canvas.drawRect(box, marker)
         }
     }
 
@@ -1567,13 +1592,28 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     layout.getPrimaryHorizontal(it.end - piece.start) >= lx - 1 }
         }
 
-        /** Копирование — чистым текстом: без мягких переносов и неразрывных пробелов. */
+        /**
+         * Копирование — чистым текстом: без мягких переносов и неразрывных
+         * пробелов, а нарисованная формула — исходником `$…$` (#16), как
+         * в окне и при сохранении: рисунок текстом не скопировать.
+         */
         override fun onTextContextMenuItem(id: Int): Boolean {
             if (id == android.R.id.copy || id == android.R.id.cut) {
                 val from = selectionStart
                 val to = selectionEnd
                 if (from in 0 until to) {
-                    val clean = plain(text.subSequence(from, to).toString())
+                    val spanned = text as Spanned
+                    val clean = plain(buildString {
+                        for (index in from until to) {
+                            val sign = spanned[index]
+                            if (sign != '\uFFFC') {
+                                append(sign)
+                                continue
+                            }
+                            val formula = spanned.getSpans(index, index + 1, FormulaSpan::class.java).firstOrNull()
+                            formula?.source?.let { append('$').append(it).append('$') }
+                        }
+                    })
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText(null, clean))
                     Selection.setSelection(text as Spannable, to)
@@ -1637,12 +1677,46 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         /** Кегль слов заметки под абзацем — доля кегля текста: это поля, а не текст. */
         const val NOTE_TYPE = 0.85f
 
+        /** Насколько сквозь цвет находки видна формула (0–255), и толщина её рамки в dp. */
+        const val FOUND_WASH = 102
+        const val FOUND_RULE = 1.5f
+
         /** Выше скольких строк текста картинка заметки не встаёт: крупно — по нажатию. */
         const val PICTURE_LINES = 18f
 
         /** Пункты меню выделения (#39): отметить и приписать. */
         private const val MARK = 0x4e01
         private const val NOTE = 0x4e02
+
+        /**
+         * Фильтр, оставляющий от рисунка «краска на бумаге» одну краску: доля
+         * краски в точке — насколько точка ушла от бумаги к краске (по сумме
+         * каналов), она и становится непрозрачностью.
+         */
+        fun inkOnly(paper: Int, ink: Int): ColorMatrixColorFilter {
+            val p = Color.red(paper) + Color.green(paper) + Color.blue(paper)
+            val i = Color.red(ink) + Color.green(ink) + Color.blue(ink)
+            val d = if (p == i) 1f else (p - i).toFloat()
+            val k = -255f / d
+            return ColorMatrixColorFilter(floatArrayOf(
+                0f, 0f, 0f, 0f, Color.red(ink).toFloat(),
+                0f, 0f, 0f, 0f, Color.green(ink).toFloat(),
+                0f, 0f, 0f, 0f, Color.blue(ink).toFloat(),
+                k, k, k, 0f, 255f * p / d,
+            ))
+        }
+
+        /**
+         * Исходник формулы из `alt` без обёртки `{\displaystyle …}` MathJax:
+         * читателю она не нужна (`math::bare` в ядре).
+         */
+        fun bareFormula(alt: String): String {
+            var text = alt.trim()
+            if (text.startsWith("{") && text.endsWith("}")) {
+                text = text.substring(1, text.length - 1).trim().removePrefix("\\displaystyle").trim()
+            }
+            return text
+        }
 
         /** Снять типографские знаки: в буфер обмена идёт чистый текст. */
         fun plain(text: String): String = buildString(text.length) {
@@ -1672,12 +1746,15 @@ open class Washed(context: Context) : TextView(context) {
     /** Снять подсветку поиска. Здесь, а не в куске текста: ячейки таблиц — тоже `Washed` (#10). */
     fun clearMarks() {
         val text = text as? Spannable ?: return
+        // Пометку формулы — до снятия спанов: снятие и перерисует её блок текста.
+        text.getSpans(0, text.length, Findable::class.java).forEach { it.found = 0 }
         found.forEach { text.removeSpan(it) }
         found.clear()
     }
 
     fun mark(from: Int, to: Int, background: Int, ink: Int) {
         val text = text as? Spannable ?: return
+        text.getSpans(from, to, Findable::class.java).forEach { it.found = background }
         val back = Wash(background)
         val fore = ForegroundColorSpan(ink)
         text.setSpan(back, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

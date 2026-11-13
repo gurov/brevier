@@ -523,6 +523,12 @@ impl Page {
                     json_string(&mut out, &source.display());
                     out.push_str(",\"alt\":");
                     json_string(&mut out, alt);
+                    // Нарисованную формулу поиск находит по тому, что на ней видно
+                    // (`math::seen`): в тексте страницы от неё только знак объекта.
+                    if matches!(source, Source::Formula(_)) {
+                        out.push_str(",\"find\":");
+                        json_string(&mut out, &crate::math::seen(alt));
+                    }
                     out.push_str(&format!(",\"inline\":{inline}}}"));
                 }
                 Block::Table(table) => {
@@ -2352,6 +2358,22 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_drawn_formula_tells_the_phone_what_find_sees_in_it() {
+        let drawn = Page::of(&doc(&format!(
+            "Area ![\\\\pi r^2]({}AAAA) of a circle.",
+            crate::math::DRAWN
+        )));
+        assert!(
+            drawn.to_json().contains(r#""find":"πr2""#),
+            "{}",
+            drawn.to_json()
+        );
+        // Картинка из сети — не формула: ей поиск ни к чему.
+        let picture = Page::of(&doc("![\\\\pi r^2](https://example.com/a.png)"));
+        assert!(!picture.to_json().contains("\"find\""));
     }
 
     #[test]

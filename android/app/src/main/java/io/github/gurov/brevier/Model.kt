@@ -17,8 +17,19 @@ class Link(val start: Int, val end: Int, val target: String)
 class Mark(val level: Int, val title: String, val at: Int, val heading: Boolean)
 
 sealed class Block(val at: Int) {
-    /** Картинка. `inline` — внутри строки (формула): роста с текст, без подписи. */
-    class Image(at: Int, val source: String, val alt: String, val inline: Boolean) : Block(at)
+    /**
+     * Картинка. `inline` — внутри строки (формула): роста с текст, без подписи.
+     * `find` — у нарисованной формулы (#16): что на ней видно, строкой для поиска
+     * (`math::seen` в ядре); у прочих пусто.
+     */
+    class Image(at: Int, val source: String, val alt: String, val inline: Boolean, val find: String = "") : Block(at) {
+        /** Нарисована ядром (`math::DRAWN`), а не приехала из сети. */
+        val formula get() = source.startsWith(FORMULA)
+
+        companion object {
+            const val FORMULA = "data:image/svg+xml;formula=1;"
+        }
+    }
 
     class Table(at: Int, val align: List<String>, val rows: List<Row>) : Block(at)
 }
@@ -78,7 +89,10 @@ class Page(
                         })
                     },
                 )
-                else -> Block.Image(at, json.getString("source"), json.getString("alt"), json.getBoolean("inline"))
+                else -> Block.Image(
+                    at, json.getString("source"), json.getString("alt"), json.getBoolean("inline"),
+                    json.optString("find", ""),
+                )
             }
         }
 

@@ -372,8 +372,10 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   their maths as MathML, so Brevier reads it and asks no server for a picture. Letters, numbers
   and indices stay text in your type, to be found and copied; a fraction, a root or a matrix is
   drawn, in your ink on your paper. In the terminal and in a saved file a drawn formula is its
-  TeX source, `$\frac{1}{2}$`, and so is one copied from the window. A page that sets its formulas with a script shows what the author
-  typed. Everywhere else, 10<sup>6</sup> and H<sub>2</sub>O keep their raised and lowered figures.
+  TeX source, `$\frac{1}{2}$`, and so is one copied in the window or on the phone; find on the
+  page finds it by what it shows, `θ` or `a2 + b2`. A page that sets its formulas with a script
+  shows what the author typed. Everywhere else, 10<sup>6</sup> and H<sub>2</sub>O keep their
+  raised and lowered figures.
 - **Tables of labels and values** — Wikipedia's infoboxes, MDN's summaries — keep their
   labels: each row becomes a line, **Developer:** The Rust Team.
 - **Repository folders can be listed:** end the address with a slash

@@ -16,11 +16,20 @@
 //! исходник формулы, пока её нет или пока картинки выключены. Второе — тоже
 //! не украшение: `{\displaystyle b}` читается плохо, но лучше пустого места
 //! посреди фразы.
+//!
+//! И третье — показать, что формулу нашёл поиск (#16): находку холст красит
+//! сам, поверх себя, с рамкой — фон тега лёг бы под краску, а она тонкая.
+//!
+//! Своя формула приходит от ядра краской на бумаге, а показывается одной
+//! краской (`set_image` с цветами): под ней видно выделение и отметку
+//! заметки, как под буквами рядом, а не карточку бумаги посреди них.
 
 use std::cell::{Cell, RefCell};
 
 use gtk::gdk;
 use gtk::glib;
+use gtk::graphene;
+use gtk::gsk;
 use gtk::pango;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -39,6 +48,10 @@ mod imp {
         /// контекста Pango.
         pub fallback: RefCell<Option<pango::Layout>>,
         pub ink: Cell<gdk::RGBA>,
+        /// Бумага и краска картинки, если от неё показывать одну краску.
+        pub lift: Cell<Option<([u8; 3], [u8; 3])>>,
+        /// Цвет находки поиска, если формула найдена.
+        pub mark: Cell<Option<gdk::RGBA>>,
     }
 
     impl Default for Formula {
@@ -49,6 +62,8 @@ mod imp {
                 // Настоящую краску холст получает вместе с исходником:
                 // она зависит от темы, а у `RGBA` умолчания нет.
                 ink: Cell::new(gdk::RGBA::new(0.1, 0.1, 0.1, 1.0)),
+                lift: Cell::new(None),
+                mark: Cell::new(None),
             }
         }
     }
@@ -93,19 +108,82 @@ mod imp {
 
         fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
             if let Some(image) = self.image.borrow().as_ref() {
-                image.snapshot(snapshot, width, height);
-                return;
+                match (self.lift.get(), snapshot.downcast_ref::<gtk::Snapshot>()) {
+                    (Some((paper, ink)), Some(own)) => {
+                        let (matrix, offset) = ink_only(paper, ink);
+                        own.push_color_matrix(&matrix, &offset);
+                        image.snapshot(snapshot, width, height);
+                        own.pop();
+                    }
+                    _ => image.snapshot(snapshot, width, height),
+                }
+            } else if let Some(layout) = self.fallback.borrow().clone()
+                && let Some(snapshot) = snapshot.downcast_ref::<gtk::Snapshot>()
+            {
+                snapshot.append_layout(&layout, &self.ink.get());
             }
-            let Some(layout) = self.fallback.borrow().clone() else {
+            // Находка — как маркером: цвет поверх, краска сквозь него видна,
+            // и рамка тем же цветом, чтобы найти глазом на тёмной бумаге.
+            let (Some(mark), Some(snapshot)) =
+                (self.mark.get(), snapshot.downcast_ref::<gtk::Snapshot>())
+            else {
                 return;
             };
-            let Some(snapshot) = snapshot.downcast_ref::<gtk::Snapshot>() else {
-                return;
-            };
-            snapshot.append_layout(&layout, &self.ink.get());
+            let bounds = graphene::Rect::new(0.0, 0.0, width as f32, height as f32);
+            let mut wash = mark;
+            wash.set_alpha(WASH);
+            snapshot.append_color(&wash, &bounds);
+            // Рамка — снаружи рисунка: формула обрезана впритык, и внутри
+            // рамка легла бы на краску.
+            let outside = graphene::Rect::new(
+                -RULE,
+                -RULE,
+                width as f32 + 2.0 * RULE,
+                height as f32 + 2.0 * RULE,
+            );
+            snapshot.append_border(
+                &gsk::RoundedRect::from_rect(outside, 0.0),
+                &[RULE; 4],
+                &[mark; 4],
+            );
         }
     }
 }
+
+/// Матрица, оставляющая от картинки «краска на бумаге» одну краску: доля
+/// краски в точке — насколько точка ушла от бумаги к краске (по сумме
+/// каналов), она и становится непрозрачностью; цвет — сама краска.
+/// GSK считает `transpose(matrix) * pixel + offset`, каналы 0…1.
+fn ink_only(paper: [u8; 3], ink: [u8; 3]) -> (graphene::Matrix, graphene::Vec4) {
+    let sum = |color: [u8; 3]| color.iter().map(|&c| f32::from(c)).sum::<f32>() / 255.0;
+    let (paper, ink_sum) = (sum(paper), sum(ink));
+    let span = if paper == ink_sum {
+        1.0
+    } else {
+        paper - ink_sum
+    };
+    let k = -1.0 / span;
+    #[rustfmt::skip]
+    let matrix = graphene::Matrix::from_float([
+        0.0, 0.0, 0.0, k,
+        0.0, 0.0, 0.0, k,
+        0.0, 0.0, 0.0, k,
+        0.0, 0.0, 0.0, 0.0,
+    ]);
+    let channel = |c: u8| f32::from(c) / 255.0;
+    let offset = graphene::Vec4::new(
+        channel(ink[0]),
+        channel(ink[1]),
+        channel(ink[2]),
+        paper / span,
+    );
+    (matrix, offset)
+}
+
+/// Насколько сквозь цвет находки видна формула.
+const WASH: f32 = 0.4;
+/// Толщина рамки находки, в точках.
+const RULE: f32 = 1.5;
 
 glib::wrapper! {
     pub struct Formula(ObjectSubclass<imp::Formula>) @implements gdk::Paintable;
@@ -123,11 +201,21 @@ impl Formula {
     }
 
     /// Картинка приехала. Меняются и содержимое, и размер: до этого холст
-    /// был размером с исходник формулы или с пиксель.
-    pub fn set_image(&self, image: &Sharp) {
+    /// был размером с исходник формулы или с пиксель. `lift` — бумага
+    /// и краска своей формулы: показать от неё одну краску.
+    pub fn set_image(&self, image: &Sharp, lift: Option<([u8; 3], [u8; 3])>) {
+        self.imp().lift.set(lift);
         self.imp().image.replace(Some(image.clone()));
         self.invalidate_size();
         self.invalidate_contents();
+    }
+
+    /// Нашёл ли формулу поиск: цвет находки или `None`.
+    pub fn set_mark(&self, mark: Option<gdk::RGBA>) {
+        if self.imp().mark.get() != mark {
+            self.imp().mark.set(mark);
+            self.invalidate_contents();
+        }
     }
 
     /// Чем показывать формулу, пока картинки нет. Раскладка приходит готовой:

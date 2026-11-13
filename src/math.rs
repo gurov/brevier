@@ -283,6 +283,344 @@ fn unescaped(alt: &str) -> String {
     out
 }
 
+/// Что видно на нарисованной формуле — строкой, для поиска по странице.
+/// От формулы остаётся только исходник TeX, а искать по нему как есть нельзя:
+/// «the» находило бы `\theta`, «a» — каждую `\frac`. Поэтому команды уходят,
+/// греческие буквы и знаки встают своими символами, имена функций — как
+/// набраны, а пробелы вокруг знаков — как у формулы текстом (`spelled`):
+/// нарисованная находится теми же словами, что нашли бы набранную, —
+/// «a2 + b2», «sin», «θ».
+pub fn seen(source: &str) -> String {
+    let mut seer = Seer::default();
+    let mut tokens = tex_tokens(bare(source)).into_iter().peekable();
+    seer.sequence(&mut tokens, false);
+    seer.out.trim().to_owned()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tex {
+    /// `\name` — буквы; или `\` и один знак: `\{`, `\,`, `\\`.
+    Command(String),
+    Open,
+    Close,
+    Up,
+    Down,
+    Sign(char),
+}
+
+fn tex_tokens(source: &str) -> Vec<Tex> {
+    let mut out = Vec::new();
+    let mut signs = source.chars().peekable();
+    while let Some(sign) = signs.next() {
+        match sign {
+            '\\' => {
+                let mut name = String::new();
+                while let Some(&next) = signs.peek() {
+                    if !next.is_ascii_alphabetic() {
+                        break;
+                    }
+                    name.push(next);
+                    signs.next();
+                }
+                if name.is_empty()
+                    && let Some(next) = signs.next()
+                {
+                    name.push(next);
+                }
+                out.push(Tex::Command(name));
+            }
+            '{' => out.push(Tex::Open),
+            '}' => out.push(Tex::Close),
+            '^' => out.push(Tex::Up),
+            '_' => out.push(Tex::Down),
+            // В формуле TeX пробелы не значат ничего.
+            _ if sign.is_whitespace() => {}
+            _ => out.push(Tex::Sign(sign)),
+        }
+    }
+    out
+}
+
+/// Чтение TeX в строку — с теми же правилами, что `Speller` для MathML.
+#[derive(Default)]
+struct Seer {
+    out: String,
+    before: Before,
+    script: bool,
+}
+
+type Tokens = std::iter::Peekable<std::vec::IntoIter<Tex>>;
+
+impl Seer {
+    /// До закрывающей скобки группы (`group`) или до конца.
+    fn sequence(&mut self, tokens: &mut Tokens, group: bool) {
+        while let Some(token) = tokens.next() {
+            if token == Tex::Close {
+                if group {
+                    return;
+                }
+                continue;
+            }
+            self.token(token, tokens);
+        }
+    }
+
+    fn token(&mut self, token: Tex, tokens: &mut Tokens) {
+        match token {
+            Tex::Open => self.sequence(tokens, true),
+            Tex::Close => {}
+            Tex::Up | Tex::Down => {
+                let outer = self.script;
+                self.script = true;
+                self.before = Before::Start;
+                if let Some(next) = tokens.next() {
+                    self.token(next, tokens);
+                }
+                self.script = outer;
+                self.before = Before::Operand;
+            }
+            Tex::Sign(sign) => self.sign(sign),
+            Tex::Command(name) => self.command(&name, tokens),
+        }
+    }
+
+    fn command(&mut self, name: &str, tokens: &mut Tokens) {
+        match name {
+            // Имя окружения, цвет, метка — не то, что видно.
+            "begin" | "end" | "color" | "textcolor" | "label" | "tag" | "hspace" | "vspace" => {
+                skip_group(tokens);
+            }
+            // Размер скобки — не скобка; `\left.` — пустая.
+            "left" | "right" | "big" | "Big" | "bigg" | "Bigg" | "bigl" | "bigr" | "Bigl"
+            | "Bigr" | "biggl" | "biggr" | "Biggl" | "Biggr" => {
+                if tokens.peek() == Some(&Tex::Sign('.')) {
+                    tokens.next();
+                }
+            }
+            "\\" | "quad" | "qquad" | " " => self.gap(),
+            "{" => self.sign('{'),
+            "}" => self.sign('}'),
+            "%" | "$" | "#" | "&" | "_" => self.operand(name),
+            "|" => self.operand("‖"),
+            _ if FUNCTIONS.contains(&name) => self.operand(name),
+            // Прочие команды — оформление: `\frac`, `\mathbf`, `\hat`, отбивки
+            // `\,` и `\;`; их группы читаются дальше как есть.
+            _ => {
+                if let Some(sign) = symbol(name) {
+                    self.sign(sign);
+                }
+            }
+        }
+    }
+
+    fn gap(&mut self) {
+        if !self.out.is_empty() && !self.out.ends_with(' ') {
+            self.out.push(' ');
+        }
+        self.before = Before::Start;
+    }
+
+    fn operand(&mut self, text: &str) {
+        self.out.push_str(text);
+        self.before = Before::Operand;
+    }
+
+    fn sign(&mut self, sign: char) {
+        let sign = match sign {
+            '-' => '−',
+            '\'' => '′',
+            _ => sign,
+        };
+        match sign {
+            '&' | '~' => self.gap(),
+            ',' | ';' => {
+                self.out.push(sign);
+                if !self.script {
+                    self.out.push(' ');
+                }
+                self.before = Before::Operator;
+            }
+            _ if OPENING.contains(sign) => {
+                self.out.push(sign);
+                self.before = Before::Start;
+            }
+            _ if CLOSING.contains(sign) => self.operand(&sign.to_string()),
+            _ if SPACED.contains(sign) => {
+                let unary = self.before != Before::Operand && UNARY.contains(sign);
+                if unary || self.script {
+                    self.out.push(sign);
+                } else {
+                    if !self.out.is_empty() && !self.out.ends_with(' ') {
+                        self.out.push(' ');
+                    }
+                    self.out.push(sign);
+                    self.out.push(' ');
+                }
+                self.before = Before::Operator;
+            }
+            _ => self.operand(&sign.to_string()),
+        }
+    }
+}
+
+/// Пропустить группу `{…}` целиком, если она следующая.
+fn skip_group(tokens: &mut Tokens) {
+    if tokens.peek() != Some(&Tex::Open) {
+        return;
+    }
+    tokens.next();
+    let mut depth = 1;
+    for token in tokens.by_ref() {
+        match token {
+            Tex::Open => depth += 1,
+            Tex::Close => {
+                depth -= 1;
+                if depth == 0 {
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Имена функций: на рисунке они набраны буквами.
+const FUNCTIONS: &[&str] = &[
+    "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+    "coth", "log", "ln", "lg", "exp", "lim", "limsup", "liminf", "max", "min", "sup", "inf", "det",
+    "dim", "ker", "deg", "gcd", "lcm", "arg", "hom", "mod", "bmod", "Pr",
+];
+
+/// Буква или знак команды TeX — так, как его рисует формула.
+fn symbol(name: &str) -> Option<char> {
+    const GREEK: &[(&str, char)] = &[
+        ("alpha", 'α'),
+        ("beta", 'β'),
+        ("gamma", 'γ'),
+        ("delta", 'δ'),
+        ("epsilon", 'ϵ'),
+        ("varepsilon", 'ε'),
+        ("zeta", 'ζ'),
+        ("eta", 'η'),
+        ("theta", 'θ'),
+        ("vartheta", 'ϑ'),
+        ("iota", 'ι'),
+        ("kappa", 'κ'),
+        ("lambda", 'λ'),
+        ("mu", 'μ'),
+        ("nu", 'ν'),
+        ("xi", 'ξ'),
+        ("pi", 'π'),
+        ("varpi", 'ϖ'),
+        ("rho", 'ρ'),
+        ("varrho", 'ϱ'),
+        ("sigma", 'σ'),
+        ("varsigma", 'ς'),
+        ("tau", 'τ'),
+        ("upsilon", 'υ'),
+        ("phi", 'ϕ'),
+        ("varphi", 'φ'),
+        ("chi", 'χ'),
+        ("psi", 'ψ'),
+        ("omega", 'ω'),
+        ("Gamma", 'Γ'),
+        ("Delta", 'Δ'),
+        ("Theta", 'Θ'),
+        ("Lambda", 'Λ'),
+        ("Xi", 'Ξ'),
+        ("Pi", 'Π'),
+        ("Sigma", 'Σ'),
+        ("Upsilon", 'Υ'),
+        ("Phi", 'Φ'),
+        ("Psi", 'Ψ'),
+        ("Omega", 'Ω'),
+    ];
+    const SIGNS: &[(&str, char)] = &[
+        ("cdot", '⋅'),
+        ("times", '×'),
+        ("div", '÷'),
+        ("pm", '±'),
+        ("mp", '∓'),
+        ("le", '≤'),
+        ("leq", '≤'),
+        ("ge", '≥'),
+        ("geq", '≥'),
+        ("ne", '≠'),
+        ("neq", '≠'),
+        ("approx", '≈'),
+        ("equiv", '≡'),
+        ("cong", '≅'),
+        ("sim", '∼'),
+        ("propto", '∝'),
+        ("ll", '≪'),
+        ("gg", '≫'),
+        ("to", '→'),
+        ("rightarrow", '→'),
+        ("leftarrow", '←'),
+        ("gets", '←'),
+        ("leftrightarrow", '↔'),
+        ("Rightarrow", '⇒'),
+        ("implies", '⇒'),
+        ("Leftarrow", '⇐'),
+        ("Leftrightarrow", '⇔'),
+        ("iff", '⇔'),
+        ("mapsto", '↦'),
+        ("in", '∈'),
+        ("notin", '∉'),
+        ("ni", '∋'),
+        ("subset", '⊂'),
+        ("supset", '⊃'),
+        ("subseteq", '⊆'),
+        ("supseteq", '⊇'),
+        ("cup", '∪'),
+        ("cap", '∩'),
+        ("land", '∧'),
+        ("wedge", '∧'),
+        ("lor", '∨'),
+        ("vee", '∨'),
+        ("circ", '∘'),
+        ("oplus", '⊕'),
+        ("otimes", '⊗'),
+        ("infty", '∞'),
+        ("partial", '∂'),
+        ("nabla", '∇'),
+        ("sum", '∑'),
+        ("prod", '∏'),
+        ("coprod", '∐'),
+        ("int", '∫'),
+        ("iint", '∬'),
+        ("iiint", '∭'),
+        ("oint", '∮'),
+        ("bigcup", '⋃'),
+        ("bigcap", '⋂'),
+        ("forall", '∀'),
+        ("exists", '∃'),
+        ("neg", '¬'),
+        ("lnot", '¬'),
+        ("emptyset", '∅'),
+        ("varnothing", '∅'),
+        ("ldots", '…'),
+        ("dots", '…'),
+        ("cdots", '⋯'),
+        ("sqrt", '√'),
+        ("langle", '⟨'),
+        ("rangle", '⟩'),
+        ("lfloor", '⌊'),
+        ("rfloor", '⌋'),
+        ("lceil", '⌈'),
+        ("rceil", '⌉'),
+        ("prime", '′'),
+        ("mid", '|'),
+        ("ell", 'ℓ'),
+        ("hbar", 'ℏ'),
+    ];
+    GREEK
+        .iter()
+        .chain(SIGNS)
+        .find(|(known, _)| *known == name)
+        .map(|(_, sign)| *sign)
+}
+
 #[cfg(feature = "images")]
 pub use drawing::{drawn, picture, tinted};
 
@@ -485,6 +823,44 @@ mod tests {
     }
 
     const POWER: &str = "<math><msup><mi>a</mi><mn>2</mn></msup><mo>+</mo><msup><mi>b</mi><mn>2</mn></msup><mo>=</mo><msup><mi>c</mi><mn>2</mn></msup></math>";
+
+    /// Текст формулы, набранной строкой, без разметки: то, по чему её находит поиск.
+    fn spelled_text(mathml: &str) -> String {
+        let html = spell(mathml).unwrap();
+        let doc = Document::from(format!("<html><body>{html}</body></html>"));
+        doc.select("body").text().to_string()
+    }
+
+    #[test]
+    fn a_drawn_formula_is_found_by_the_words_a_spelled_one_would_be() {
+        // Та же формула нарисованной и набранной — один и тот же текст для поиска.
+        assert_eq!(seen("a^2 + b^2 = c^2"), spelled_text(POWER));
+        assert_eq!(seen("{\\displaystyle a^{2}+b^{2}=c^{2}}"), "a2 + b2 = c2");
+    }
+
+    #[test]
+    fn tex_commands_are_not_searchable_words() {
+        // «the» не должно находить θ, «frac» — дробь, «pmatrix» — матрицу.
+        assert_eq!(seen("\\theta = \\frac{\\pi}{2}"), "θ = π2");
+        assert_eq!(
+            seen("\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}"),
+            "a b c d"
+        );
+        assert_eq!(seen("\\mathbf{x} \\cdot \\hat{y}"), "x ⋅ y");
+        assert_eq!(seen("\\color{red}{x}"), "x");
+    }
+
+    #[test]
+    fn functions_brackets_and_signs_read_as_drawn() {
+        assert_eq!(seen("\\sin x + \\log_2 n"), "sinx + log2n");
+        assert_eq!(seen("\\left( x \\right."), "(x");
+        assert_eq!(seen("\\left\\{ x \\right\\}"), "{x}");
+        assert_eq!(seen("-x - y"), "−x − y");
+        assert_eq!(seen("x_{i,j} \\le \\infty"), "xi,j ≤ ∞");
+        assert_eq!(seen("f'(x) \\to \\sqrt{2}"), "f′(x) → √2");
+        assert_eq!(seen("50\\% \\& \\$5"), "50%&$5");
+        assert_eq!(seen(""), "");
+    }
 
     #[test]
     fn powers_and_operators_read_as_text() {
