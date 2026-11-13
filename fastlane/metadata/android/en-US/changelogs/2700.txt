@@ -1,0 +1,3 @@
+• Tap to turn works as in e-book readers: the left third turns back, the middle shows the bar, anywhere else turns forward. A strip along each side edge does nothing.
+• A turn moves by a whole screen; no line is shown twice.
+• Find on the page finds a drawn formula; it copies as its TeX source, and a selection shows behind it.

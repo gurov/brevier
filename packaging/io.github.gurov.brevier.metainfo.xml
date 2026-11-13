@@ -99,6 +99,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.27.0" date="2026-11-13" type="development">
+      <description>
+        <p>The window prints a page in the reader's type: face, line length,
+          spacing and justification at book size, with the addresses of links
+          listed at the end and the reader's notes after the article. On the
+          phone, "Tap to turn" splits the page the way e-book readers do: one
+          side turns back, the middle shows the bar, and a turn moves by a
+          whole screen. Find on the page finds a drawn formula by what it
+          shows, and a selection shows behind it.</p>
+      </description>
+    </release>
     <release version="0.26.0" date="2026-11-11" type="development">
       <description>
         <p>A Mastodon post reads as a thread: the post, then every reply with
