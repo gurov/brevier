@@ -471,8 +471,10 @@ is the answer; on the other two it stops being an obvious instruction.
 
 ### Print
 
-`Ctrl+P`, in the reader's own type, through GTK's print dialog. A PDF falls out of
-it for free.
+Done, in the window: `Ctrl+P`, in the reader's own type, through the system's print
+dialog, and a PDF falls out of it for free. The sheet is set at book size; links become
+numbered addresses at the end, the reader's notes follow the article, and Settings turns
+each off. The phone does not print.
 
 ### Gemini
 
