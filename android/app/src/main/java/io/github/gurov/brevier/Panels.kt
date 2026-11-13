@@ -741,8 +741,8 @@ class SettingsPage(
         var turn = turning
         column.addView(section("Turning the page", palette))
         column.addView(row(
-            "Tap the edges",
-            "A tap on the text turns a screen forward; on the left third, back. The last line stays in sight. Links, pictures and notes work as before.",
+            "Tap to turn",
+            "A tap on the text turns a whole screen forward; on the left third, back. A tap in the middle shows the bar, and the very edges, where you hold the phone, do nothing. Links, pictures and notes work as before.",
             switch(palette, turning.taps) { on -> turn = turn.copy(taps = on); turned(turn) }, palette,
         ))
         column.addView(row(

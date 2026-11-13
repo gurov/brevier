@@ -70,8 +70,13 @@ class MainActivity : Activity(), ArticleHost {
     private var fullScreen = false
     /** Чем листать страницу (#55). */
     private var turning = Turning()
-    /** Касание краёв только что включили: показать зоны, как вернёмся к статье. */
+    /** Касание только что включили — или зоны поменялись (#66): показать их, как вернёмся к статье. */
     private var zonesPending = false
+    /**
+     * Шапку (и в полном экране — панели системы) подняло касание середины (#66):
+     * уйдут со следующим листанием, пальцем или вторым касанием середины.
+     */
+    private var called = false
     /** Своя строка User-Agent («For developers») и включена ли она. */
     private var ownAgent = false
     private var agent = ""
@@ -164,6 +169,8 @@ class MainActivity : Activity(), ArticleHost {
         slideBar = stored.optBoolean("slideBar", true)
         fullScreen = stored.optBoolean("fullScreen", false)
         turning = Turning.of(stored.optString("turn"))
+        // Касание включили до #66: середина больше не листает — показать зоны раз.
+        if (turning.taps && !turning.zonesSeen) zonesPending = true
         ownAgent = stored.optBoolean("ownUserAgent", false)
         agent = stored.optString("userAgent", "")
         paper = stored.optString("paper", "ivory")
@@ -482,7 +489,7 @@ class MainActivity : Activity(), ArticleHost {
         root.viewTreeObserver.addOnGlobalLayoutListener {
             fitSystemBars()
             refitHints()
-            if (zonesPending && readingOnly() && currentTab()?.view?.page != null) {
+            if (zonesPending && turning().taps && readingOnly() && currentTab()?.let { !it.loading && it.view?.page != null } == true) {
                 zonesPending = false
                 root.post { showZones() }
             }
@@ -2105,11 +2112,12 @@ class MainActivity : Activity(), ArticleHost {
     private fun saveSettings() =
         Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, paper, darkPaper, fullScreen, turning, ownAgent, agent)
 
-    /** Листание (#55): включили касание краёв — зоны покажутся над статьёй. */
+    /** Листание (#55): включили касание — зоны покажутся над статьёй. */
     private fun changeTurning(chosen: Turning) {
         if (chosen.taps && (!turning.taps || chosen.leftHand != turning.leftHand)) zonesPending = true
         if (!chosen.taps) zonesPending = false
-        turning = chosen
+        // Панель настроек собрана раньше, чем зоны показали, — пометку не теряем.
+        turning = chosen.copy(zonesSeen = chosen.zonesSeen || turning.zonesSeen)
         saveSettings()
     }
 
@@ -2146,30 +2154,90 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     /**
-     * Зоны касания (#55) — поверх статьи на полторы секунды, когда касание
-     * краёв только что включили: где «назад», где «вперёд».
+     * Зоны касания (#55, #66) — поверх статьи на полторы секунды, когда касание
+     * только что включили или зоны поменялись с обновлением: где «назад», где
+     * «вперёд», где шапка. Полосы у краёв пустые — там касание не листает.
+     * Раскладка — та же `tapZones`, что у касания, на месте статьи.
      */
     private fun showZones() {
-        val back = if (turning.leftHand) Gravity.END else Gravity.START
-        val zones = FrameLayout(this).apply {
+        val view = currentTab()?.view ?: return
+        val leftHand = turning.leftHand
+        // Середина зовёт шапку, только если ей есть куда уезжать; иначе — пусто.
+        val middle = !barPinned() || (fullScreen && !assisted)
+        val fill = (palette.chosen and 0xffffff) or 0xb0000000.toInt()
+        val faint = (palette.chosen and 0xffffff) or 0x60000000
+        val edge = dp(ArticleView.EDGE_DP).toFloat()
+        val seam = dp(1f).toFloat()
+        val shade = android.graphics.Paint()
+        val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = fonts.medium
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 18f, resources.displayMetrics)
+            color = palette.ink
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        val zones = object : View(this) {
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                val at = IntArray(2)
+                val own = IntArray(2)
+                view.getLocationInWindow(at)
+                getLocationInWindow(own)
+                canvas.translate((at[0] - own[0]).toFloat(), (at[1] - own[1]).toFloat())
+                var forwardSaid = false
+                for ((zone, rect) in tapZones(view.width.toFloat(), view.height.toFloat(), edge, leftHand)) {
+                    if (zone == TapZone.MIDDLE && !middle) continue
+                    shade.color = if (zone == TapZone.MIDDLE) faint else fill
+                    canvas.drawRect(rect.left + seam, rect.top + seam, rect.right - seam, rect.bottom - seam, shade)
+                    // «Forward» — один раз, на высокой полосе у края.
+                    val word = when (zone) {
+                        TapZone.BACK -> "Back"
+                        TapZone.MIDDLE -> "Menu"
+                        TapZone.FORWARD -> if (forwardSaid) null else "Forward".also { forwardSaid = true }
+                    } ?: continue
+                    canvas.drawText(word, rect.centerX(), rect.centerY() - (label.descent() + label.ascent()) / 2, label)
+                }
+            }
+        }.apply {
             isClickable = false
             alpha = 0f
         }
-        fun zone(label: String, gravity: Int, share: Float) = TextView(this).apply {
-            text = label
-            typeface = fonts.medium
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            setTextColor(palette.ink)
-            this.gravity = Gravity.CENTER
-            setBackgroundColor((palette.chosen and 0xffffff) or 0xb0000000.toInt())
-            layoutParams = FrameLayout.LayoutParams((root.width * share).toInt(), FrameLayout.LayoutParams.MATCH_PARENT, gravity)
-        }
-        zones.addView(zone("Back", back, 1f / 3))
-        zones.addView(zone("Forward", if (back == Gravity.START) Gravity.END else Gravity.START, 2f / 3 - 0.005f))
         root.addView(zones, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         zones.animate().alpha(1f).setDuration(150).withEndAction {
             zones.animate().alpha(0f).setStartDelay(1500).setDuration(300).withEndAction { root.removeView(zones) }
         }
+        if (!turning.zonesSeen) {
+            turning = turning.copy(zonesSeen = true)
+            saveSettings()
+        }
+    }
+
+    /**
+     * Касание середины (#66): шапку — показать или спрятать, в полном экране —
+     * вместе с панелями системы. Шапка закреплена и экран не полный — нечего.
+     */
+    override fun middle() {
+        val slides = !barPinned()
+        val bars = fullScreen && !assisted
+        if (!slides && !bars) return
+        if (called || (slides && hidden <= 0f && !bars)) {
+            called = false
+            if (slides) moveBar(bar.height.toFloat())
+        } else {
+            called = true
+            if (slides) moveBar(0f)
+        }
+        fitSystemBars()
+    }
+
+    /** Листают (#55): поднятое касанием середины уходит сразу, до расчёта шага. */
+    override fun aboutToTurn() {
+        if (!called) return
+        called = false
+        if (!barPinned()) {
+            barMotion?.cancel()
+            barMotion = null
+            placeBar(bar.height.toFloat())
+        }
+        fitSystemBars()
     }
 
     /** Полный экран (#60): включили — панели уходят, как только читатель вернётся к статье. */
@@ -2260,6 +2328,12 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     override fun dragged(dy: Int) {
+        // Палец повёл страницу — поднятые касанием середины панели уходят (#66);
+        // шапка дальше идёт за пальцем, как всегда.
+        if (called) {
+            called = false
+            fitSystemBars()
+        }
         if (barPinned()) {
             if (hidden > 0f) showBar()
             return
@@ -2346,7 +2420,9 @@ class MainActivity : Activity(), ArticleHost {
         // в фокусе, панели показывает сама система. А подсказка системы
         // «Viewing full screen» тоже окно — с проверкой фокуса панели
         // прятались и показывались по кругу, раз в полторы секунды.
-        val away = fullScreen && !assisted && readingOnly()
+        // Поверх статьи открылось своё — поднятое касанием середины (#66) забыто.
+        if (called && !readingOnly()) called = false
+        val away = fullScreen && !assisted && readingOnly() && !called
         if (away == barsAway) return
         barsAway = away
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

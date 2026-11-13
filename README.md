@@ -447,8 +447,9 @@ text — not in a WebView — with the same typography and colours as the window
 - **Full screen**, as a setting: while you read, the system's status and navigation bars
   go away too; a swipe from the edge brings them back for a moment.
 - **Turning the page**, three settings, all off until you want them: a tap on the text (the
-  left third goes back), a sideways swipe, or the volume keys. The last line stays in sight,
-  and **Left hand** swaps the sides for taps.
+  left third goes back, the middle shows the bar, the very edges do nothing), a sideways
+  swipe, or the volume keys. A turn moves by a whole screen and stops between lines, and
+  **Left hand** swaps the sides for taps.
 - With a keyboard attached, the window's shortcuts work, `Alt+←` / `Alt+→` included.
 
 The maintainer uses it every day. It hasn't been tested with TalkBack yet.

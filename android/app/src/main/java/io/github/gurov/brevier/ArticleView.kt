@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.text.Layout
@@ -92,7 +93,49 @@ interface ArticleHost {
 
     /** Листнули вперёд, а страница кончилась (#55): предложить следующую. */
     fun pageEnd()
+
+    /**
+     * Касание середины текста (#66): шапку показать или спрятать, в полном
+     * экране — вместе с панелями системы, как в читалках.
+     */
+    fun middle()
+
+    /**
+     * Страницу сейчас листнут (#55): поднятое касанием середины уходит (#66).
+     * Зовётся до расчёта шага: шапка, ушедшая потом, открыла бы над первой
+     * строкой уже прочитанное.
+     */
+    fun aboutToTurn()
 }
+
+/** Что делает касание текста при листании касанием (#55, #66). */
+enum class TapZone { BACK, FORWARD, MIDDLE }
+
+/**
+ * Зоны касания на статье `width`×`height` (#66), как у читалок: сетка три
+ * на три, средняя клетка зовёт шапку и не листает; треть у края — назад
+ * (у левши — у правого), остальное — вперёд. Полосы `edge` у боковых краёв
+ * не делают ничего: там лежит палец, что держит телефон. Одна раскладка —
+ * и для касания, и для подсказки поверх статьи (`MainActivity.showZones`).
+ */
+fun tapZones(width: Float, height: Float, edge: Float, leftHand: Boolean): List<Pair<TapZone, RectF>> {
+    val third = width / 3f
+    val left = RectF(edge, 0f, third, height)
+    val right = RectF(width - third, 0f, width - edge, height)
+    val top = height / 3f
+    val bottom = height - top
+    return listOf(
+        TapZone.BACK to if (leftHand) right else left,
+        TapZone.FORWARD to if (leftHand) left else right,
+        TapZone.FORWARD to RectF(third, 0f, width - third, top),
+        TapZone.MIDDLE to RectF(third, top, width - third, bottom),
+        TapZone.FORWARD to RectF(third, bottom, width - third, height),
+    )
+}
+
+/** Куда пришлось касание; `null` — полоса у края. */
+fun tapZone(x: Float, y: Float, width: Float, height: Float, edge: Float, leftHand: Boolean): TapZone? =
+    tapZones(width, height, edge, leftHand).firstOrNull { (_, rect) -> rect.contains(x, y) }?.first
 
 /**
  * Статья: прокрутка, в ней колонка в меру, в колонке куски текста
@@ -563,14 +606,17 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
         return Span(y, y, y)
     }
 
-    /** Высота строки текста: шаг, на который листание не доходит до экрана. */
+    /** Высота строки текста: мерка, где резаная строка, а где картинка выше неё. */
     private fun lineHeight(): Int = proses.firstOrNull()?.lineHeight?.takeIf { it > 0 } ?: (metrics.text * 1.5f).toInt()
 
     /**
-     * Перелистнуть (#55): на экран без строки, чтобы последняя строка
-     * осталась на виду ориентиром, и до границы строк, чтобы ни одна
-     * не резалась пополам. Назад — так же, вверх. Это пробел и Page Down
-     * окна. Шапку (#45) листание не двигает: это прыжок, а не палец.
+     * Перелистнуть (#55): на целый экран, как страницу книги (#66), —
+     * первой встаёт первая непрочитанная строка, и ни одна не повторяется;
+     * шаг — до границы строк, чтобы ни одна не резалась пополам сверху.
+     * Строка у нижнего края прочитана, если видна её базовая линия.
+     * Назад — так же, вверх, и шаг вперёд после него возвращает на то же
+     * место. Шапку (#45) листание не двигает: это прыжок,
+     * а не палец; поднятую касанием середины (#66) — убирает.
      */
     fun turn(forward: Boolean) {
         turnAnimation?.let {
@@ -582,24 +628,29 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             return
         }
         if (!forward && !canScrollVertically(-1)) return
+        host.aboutToTurn()
         val view = visibleHeight()
         val top = visibleTop()
         val line = lineHeight()
         var next = if (forward) {
             val bottom = top + view
             val cut = lineSpan(bottom - 1)
-            // Последняя целая строка становится первой.
-            if (cut.ink <= bottom) cut.top else lineSpan(cut.top - 1).top
+            // Прочитанная строка у края — новый экран со следующей, резаная — с неё.
+            if (cut.ink <= bottom) cut.bottom else cut.top
         } else {
+            // Верхняя строка резана — не прочитана: прежний экран кончится ею.
             val first = lineSpan(top)
-            // Первая целая строка становится последней; верхняя — не резаная.
-            val firstEnd = if (first.top >= top) first.ink else lineSpan(first.bottom).ink
-            val raw = firstEnd - view
+            val end = if (first.top >= top) top else first.bottom
+            val raw = end - view
             val at = lineSpan(raw)
+            // Строку, резанную сверху, оставить прежнему экрану — сдвиг вниз
+            // до её конца: снизу покажется краешек строки, с которой листали,
+            // и шаг вперёд вернёт ровно туда же. Картинку выше пары строк —
+            // режем, как есть.
             if (at.top < raw && at.bottom - raw <= 2 * line) at.bottom else raw
         }
-        // Картинка выше экрана или пустота — шаг на экран без строки как есть.
-        if (abs(next - top) < view / 2) next = if (forward) top + view - line else top - view + line
+        // Картинка выше экрана или пустота — шаг на экран как есть.
+        if (abs(next - top) < view / 2) next = if (forward) top + view else top - view
         val max = max(0, column.height + paddingTop - height)
         val target = (next + paddingTop - covered).coerceIn(0, max)
         if (target == scrollY) return
@@ -716,10 +767,15 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
                     event.eventTime - gestureAt < ViewConfiguration.getLongPressTimeout()
                 if (tap && quietAt(event.x, event.y)) {
                     // Назад — треть у края, вперёд — остальное (как у Kindle
-                    // и Play Books: вперёд листают чаще, промах назад досаднее).
-                    val third = width / 3f
-                    val back = if (turning.leftHand) event.x > width - third else event.x < third
-                    post { turn(forward = !back) }
+                    // и Play Books: вперёд листают чаще, промах назад досаднее);
+                    // середина и полосы у краёв не листают (#66).
+                    val edge = context.dp(EDGE_DP).toFloat()
+                    when (tapZone(event.x, event.y, width.toFloat(), height.toFloat(), edge, turning.leftHand)) {
+                        TapZone.BACK -> post { turn(forward = false) }
+                        TapZone.FORWARD -> post { turn(forward = true) }
+                        TapZone.MIDDLE -> post { host.middle() }
+                        null -> {}
+                    }
                 }
             }
             MotionEvent.ACTION_CANCEL -> swiping = false
@@ -906,6 +962,20 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             return true
         }
     })
+
+    /**
+     * Касание куска текста даёт ему фокус (выделение), и `ScrollView` сам
+     * докручивает к куску (`scrollToDescendant`): страница вздрагивала
+     * от касания, а первое листание касанием (#55) уезжало на пару строк
+     * дальше — шаг считался уже от сдвинутого места (#66). От пальца место
+     * не двигаем; фокус с клавиатуры по-прежнему показывает свой кусок.
+     */
+    override fun requestChildFocus(child: View?, focused: View?) {
+        if (!isInTouchMode) return super.requestChildFocus(child, focused)
+        val y = scrollY
+        super.requestChildFocus(child, focused)
+        if (scrollY != y) jump { scrollTo(scrollX, y) }
+    }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         scaler.onTouchEvent(event)
@@ -1554,6 +1624,12 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
 
         /** Свайп короче этого — дрожь пальца, а не просьба листать. */
         const val SWIPE_DP = 48f
+
+        /**
+         * Полоса у бокового края, где касание не листает (#66): туда ложится
+         * палец, что держит телефон. Догадка — проверить на телефоне.
+         */
+        const val EDGE_DP = 16f
 
         /** Сколько знаков кладём в колонку сразу: первый экран с запасом. */
         const val FIRST_CHARS = 2 * CHUNK_CHARS

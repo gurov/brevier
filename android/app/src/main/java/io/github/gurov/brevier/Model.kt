@@ -202,15 +202,17 @@ class Loaded(
 fun <T> JSONArray.map(transform: (Any) -> T): List<T> = (0 until length()).map { transform(get(it)) }
 
 /**
- * Чем листать страницу (#55): касанием края, свайпом вбок, клавишами
+ * Чем листать страницу (#55): касанием текста, свайпом вбок, клавишами
  * громкости; `leftHand` меняет стороны касания. В `settings.tsv` —
- * строкой `turn` с перечнем включённого.
+ * строкой `turn` с перечнем включённого. `zonesSeen` — зоны касания
+ * с серединой и краями (#66) уже показаны (`store::Turning`).
  */
 data class Turning(
     val taps: Boolean = false,
     val swipes: Boolean = false,
     val keys: Boolean = false,
     val leftHand: Boolean = false,
+    val zonesSeen: Boolean = false,
 ) {
     val any: Boolean get() = taps || swipes || keys
 
@@ -220,12 +222,13 @@ data class Turning(
         "swipes".takeIf { swipes },
         "keys".takeIf { keys },
         "left-hand".takeIf { leftHand },
+        "zones-seen".takeIf { zonesSeen },
     ).joinToString(",").ifEmpty { "off" }
 
     companion object {
         fun of(words: String): Turning {
             val on = words.split(',').map { it.trim() }.toSet()
-            return Turning("taps" in on, "swipes" in on, "keys" in on, "left-hand" in on)
+            return Turning("taps" in on, "swipes" in on, "keys" in on, "left-hand" in on, "zones-seen" in on)
         }
     }
 }

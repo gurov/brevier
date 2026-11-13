@@ -755,6 +755,10 @@ pub struct Turning {
     pub keys: bool,
     /// Для левой руки: стороны касания меняются местами.
     pub left_hand: bool,
+    /// Зоны касания с центром и краями (#66) читателю уже показаны. Касание
+    /// включили до них — центр перестал листать под пальцем, и зоны
+    /// показываются один раз после обновления.
+    pub zones_seen: bool,
 }
 
 impl Turning {
@@ -765,6 +769,7 @@ impl Turning {
             (self.swipes, "swipes"),
             (self.keys, "keys"),
             (self.left_hand, "left-hand"),
+            (self.zones_seen, "zones-seen"),
         ]
         .into_iter()
         .filter_map(|(on, word)| on.then_some(word))
@@ -778,6 +783,7 @@ impl Turning {
             swipes: has("swipes"),
             keys: has("keys"),
             left_hand: has("left-hand"),
+            zones_seen: has("zones-seen"),
         }
     }
 }
@@ -1957,6 +1963,7 @@ mod tests {
                 swipes: false,
                 keys: true,
                 left_hand: true,
+                zones_seen: true,
             },
             user_agent: "Mozilla/5.0 (Android 9; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
                 .to_owned(),
