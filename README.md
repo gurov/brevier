@@ -250,6 +250,7 @@ The reports go to the job summary; the lowest score is the step's `score` output
 | `Ctrl+Shift+M` | show or hide notes beside the text |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0`, `Ctrl`+wheel | zoom in / out / reset |
 | `Ctrl+S` | save the article |
+| `Ctrl+P` | print the page, in your type |
 | `Ctrl+O` | open the page in your other browser |
 
 With the mouse: `Ctrl`+click or middle-click opens a link in a new tab, middle-click on a
@@ -313,6 +314,13 @@ where it goes. Settings, history and bookmarks are in the menu at the top right.
   the menu, writes each quote with a link straight to its place on the page, your words
   and your pictures — Markdown that Obsidian and similar tools read as it is: a `.zip`,
   or a `.md` with an `images/` folder beside it.
+- **Printing in your type.** `Ctrl+P`, the menu, or a right click in the text sends the
+  page to paper or to a PDF in your face, line length, spacing and justification, at a
+  book size: the 16.5 pt screen text prints at 11 pt, a larger size larger. Links get
+  small numbers, with their addresses listed at the end; your highlights stay and your
+  notes follow the article; the first page names the address and the day, and every
+  page is numbered. **Settings → Printing** turns each of the three off. Right-click a
+  selection to print only that. The paper is always light, with no page background.
 - **Next page.** A page that names the one after it — a series, a book chapter, a thread's
   next page — ends with a **Next:** line, and `Space` at the very end goes there.
 - **A new tab shows the five pages you read last**, and its last line names your

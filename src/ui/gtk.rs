@@ -23,6 +23,7 @@ mod article;
 mod drawing;
 mod formula;
 mod margin;
+mod paper;
 mod sharp;
 mod timing;
 // Коллекция шрифтов нужна только Windows; тест — везде.
@@ -53,7 +54,7 @@ use brevier::page::{self, Block};
 use brevier::palette::{FOUND, FOUND_HERE, FOUND_INK, Paper, Theme, colors, picture_paper, rgb};
 use brevier::reading::{self, Progress, Readings};
 use brevier::save;
-use brevier::store::{self, HINTS, Hint, Marks, Settings, Store};
+use brevier::store::{self, HINTS, Hint, Marks, Printing, Settings, Store};
 use brevier::{Document, History, UserAgent};
 
 const APP_ID: &str = "io.github.gurov.brevier";
@@ -148,8 +149,9 @@ Options:
   -V, --version  version
 
 Keys: Ctrl+L the address bar, Ctrl+T new tab, Ctrl+W close it, Ctrl+H what you
-      have read, Ctrl+F find on page, Ctrl+S save the article, Ctrl+O hand the
-      page to your system browser, Ctrl+plus/minus/0 zoom the page.
+      have read, Ctrl+F find on page, Ctrl+S save the article, Ctrl+P print it,
+      Ctrl+O hand the page to your system browser, Ctrl+plus/minus/0 zoom the
+      page.
 
 Pages you read are remembered: the address bar suggests them as you type, and
 `brevier:history` lists them by day. The list is a plain text file under
@@ -582,6 +584,12 @@ struct State {
     /// Показывать ли заметки рядом с текстом (#42): поле справа или под
     /// абзацем. Выключено — только подложка.
     show_notes: bool,
+    /// Что печатать вместе со статьёй (раздел «Printing»).
+    print: Printing,
+    /// Принтер и лист последней печати: вторая печать за запуск начинается
+    /// с них. На диск не едут — это забота системы печати.
+    printer: Option<gtk::PrintSettings>,
+    page_setup: Option<gtk::PageSetup>,
     /// Когда читатель последний раз что-то делал со страницей: листал,
     /// нажимал, водил мышью. Время чтения идёт, только пока это было
     /// недавно (`PRESENT`) и окно активно.
@@ -989,6 +997,9 @@ fn build(app: &Application, start: Vec<String>) {
         readings: Readings::open(),
         notes: Notes::open(),
         show_notes: settings.notes,
+        print: settings.print,
+        printer: None,
+        page_setup: None,
         last_input: Instant::now(),
         bars: Vec::new(),
         inner: None,
@@ -1820,6 +1831,7 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
     ));
     page.append(&rows);
     type_settings(ui, state, &page);
+    printing_settings(ui, state, &page);
 
     let kept = gtk::Label::builder().label("History").xalign(0.0).build();
     kept.add_css_class("shelf-title");
@@ -1867,6 +1879,58 @@ fn settings_page(ui: &Ui, state: &Rc<RefCell<State>>) -> gtk::Box {
 
     developer_settings(ui, state, &page);
     page
+}
+
+/// Что идёт на бумагу вместе со статьёй. Каждое — своим переключателем,
+/// всё включено: конспекту нужны заметки, но не адреса; чистовику —
+/// ни то ни другое.
+fn printing_settings(ui: &Ui, state: &Rc<RefCell<State>>, page: &gtk::Box) {
+    let title = gtk::Label::builder().label("Printing").xalign(0.0).build();
+    title.add_css_class("shelf-title");
+    page.append(&title);
+    let rows = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    rows.add_css_class("rich-list");
+    let chosen = state.borrow().print;
+    type Choice = (&'static str, &'static str, bool, fn(&mut Printing, bool));
+    let choices: [Choice; 3] = [
+        (
+            "Link addresses at the end",
+            "On paper there is nothing to click: a link gets a small number, \
+             and its address is listed under the article.",
+            chosen.links,
+            |print, on| print.links = on,
+        ),
+        (
+            "Your notes and highlights",
+            "Highlights stay where they are, and your notes follow the article \
+             in a section of their own.",
+            chosen.notes,
+            |print, on| print.notes = on,
+        ),
+        (
+            "Address, date and page numbers",
+            "The first page names the address and the day, the others carry \
+             the title, and every page is numbered at the bottom.",
+            chosen.running,
+            |print, on| print.running = on,
+        ),
+    ];
+    for (name, why, on, set) in choices {
+        let switch = gtk::Switch::builder()
+            .valign(gtk::Align::Center)
+            .active(on)
+            .build();
+        let ui = ui.clone();
+        let state = state.clone();
+        switch.connect_active_notify(move |switch| {
+            set(&mut state.borrow_mut().print, switch.is_active());
+            remember_settings(&ui, &state);
+        });
+        rows.append(&setting_row(name, why, &switch));
+    }
+    page.append(&rows);
 }
 
 /// Своя строка User-Agent — в самом низу, «для разработчиков» (мейнтейнер,
@@ -2542,6 +2606,7 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
     // Между ними — заметки (#42): показать рядом с текстом и выгрузить.
     let page = gio::Menu::new();
     page.append(Some("Reload"), Some("app.reload"));
+    page.append(Some("Print…"), Some("app.print"));
     page.append(Some("Check this page"), Some("app.check"));
     let noting = gio::Menu::new();
     noting.append(Some("Show notes beside the text"), Some("app.show-notes"));
@@ -2612,6 +2677,15 @@ fn keyboard(ui: &Ui, state: &Rc<RefCell<State>>, app: &Application) {
         save.connect_activate(move |_, _| ask_where_to_save(&ui, &state));
     }
     add("save", &["<Control>s"], save);
+
+    // Печать: статья на бумаге набором читателя (`paper.rs`).
+    let print = gio::SimpleAction::new("print", None);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        print.connect_activate(move |_, _| print_current(&ui, &state, false));
+    }
+    add("print", &["<Control>p"], print);
 }
 
 /// Загрузить открытую страницу заново, из сети, на том же месте.
@@ -2886,9 +2960,18 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         action.connect_activate(move |_, _| mark_selection(&ui, &state, id, write));
         note_actions.add_action(&action);
     }
+    // Напечатать только выделенное — из того же меню (`run_print`).
+    let print_selection = gio::SimpleAction::new("print-selection", None);
+    print_selection.set_enabled(false);
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        print_selection.connect_activate(move |_, _| print_current(&ui, &state, true));
+    }
+    note_actions.add_action(&print_selection);
     view.insert_action_group("note", Some(&note_actions));
     view.buffer().connect_has_selection_notify(move |buffer| {
-        for name in ["mark", "write"] {
+        for name in ["mark", "write", "print-selection"] {
             if let Some(action) = note_actions
                 .lookup_action(name)
                 .and_downcast::<gio::SimpleAction>()
@@ -2900,6 +2983,12 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
     let extra = gio::Menu::new();
     extra.append(Some("Highlight"), Some("note.mark"));
     extra.append(Some("Note…"), Some("note.write"));
+    // Печать — и из меню правой кнопки: в браузере она там же; с выделением —
+    // и только его.
+    let printing = gio::Menu::new();
+    printing.append(Some("Print…"), Some("app.print"));
+    printing.append(Some("Print selection…"), Some("note.print-selection"));
+    extra.append_section(None, &printing);
     view.set_extra_menu(Some(&extra));
 
     // Курсор над ссылкой — палец, как в любом браузере. `GtkTextView` ставит
@@ -3436,6 +3525,7 @@ fn remember_settings(ui: &Ui, state: &Rc<RefCell<State>>) {
         typography: borrowed.typography,
         paper: borrowed.paper,
         dark_paper: borrowed.dark_paper,
+        print: borrowed.print,
     }
     .save();
 }
@@ -4539,7 +4629,7 @@ fn reveal(pane: &gtk::ScrolledWindow, row: &gtk::ListBoxRow) {
 fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
     let theme = state.borrow().theme();
     if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_application_prefer_dark_theme(theme.dark);
+        set_color_scheme(&settings, theme.dark);
     }
     ui.paint.load_from_data(&page_css(theme));
     for tab in &state.borrow().tabs {
@@ -4553,6 +4643,26 @@ fn apply_theme(ui: &Ui, state: &Rc<RefCell<State>>) {
     // вкладку перерисовываем сразу, фоновые — при показе.
     rezoom_current(ui, state);
     lay_current_notes(ui, state);
+}
+
+/// Светлые или тёмные виджеты GTK — под тему читателя, а не системы.
+///
+/// С GTK 4.20 это `gtk-interface-color-scheme`. Прежний
+/// `gtk-application-prefer-dark-theme` там устарел и обратно не работает:
+/// включённый, он делает виджеты тёмными, а выключенный не возвращает
+/// светлые (4.20.4, рантайм GNOME 49, — шапка, вкладки и настройки
+/// оставались тёмными на светлой бумаге, и текст образца белым по сепии).
+/// Свойство ищем по имени: окно обещает GTK 4.10, где его ещё нет.
+fn set_color_scheme(settings: &gtk::Settings, dark: bool) {
+    const SCHEME: &str = "gtk-interface-color-scheme";
+    let value = settings
+        .find_property(SCHEME)
+        .and_then(|spec| glib::EnumClass::with_type(spec.value_type()))
+        .and_then(|class| class.to_value_by_nick(if dark { "dark" } else { "light" }));
+    match value {
+        Some(value) => settings.set_property_from_value(SCHEME, &value),
+        None => settings.set_gtk_application_prefer_dark_theme(dark),
+    }
 }
 
 /// Высокий контраст, о котором просит система (#44): пока читатель сам
@@ -6308,6 +6418,23 @@ fn grid(table: &page::Table, cells: &mut Vec<gtk::Label>) -> gtk::Grid {
 /// поэтому держим стопку открытых и закрываем только то, что кончилось, —
 /// курсив вокруг ссылки остаётся одним `<i>`, а не рвётся на три.
 fn markup_of(cell: &page::Cell) -> String {
+    cell_markup(
+        cell,
+        &|href| format!("<a href=\"{}\">", glib::markup_escape_text(href)),
+        "</a>",
+        &|_| String::new(),
+    )
+}
+
+/// Ячейка разметкой Pango: ссылку открывает `open_link(адрес)` и закрывает
+/// `close_link`, а за ссылкой номер `n` в ячейке ставится `after_link(n)`
+/// (бумага ставит туда номер сноски, `paper.rs`).
+fn cell_markup(
+    cell: &page::Cell,
+    open_link: &dyn Fn(&str) -> String,
+    close_link: &str,
+    after_link: &dyn Fn(usize) -> String,
+) -> String {
     // Ссылка опознаётся номером, а не адресом: две соседние ссылки
     // на одно место — всё равно две ссылки.
     let link_at = |offset: usize| {
@@ -6317,16 +6444,25 @@ fn markup_of(cell: &page::Cell) -> String {
     };
     let mut out = String::new();
     let mut open: Vec<(page::Style, Option<usize>)> = Vec::new();
-    let close = |out: &mut String, (style, _): &(page::Style, Option<usize>)| {
+    // Где закрываем: номер за ссылкой — только там, где она кончилась,
+    // а не там, где её разорвал курсив внутри.
+    let at = Cell::new(0usize);
+    let close = |out: &mut String, (style, link): &(page::Style, Option<usize>)| {
         out.push_str(match style {
             page::Style::Em => "</i>",
             page::Style::Strong => "</b>",
             page::Style::Code => "</tt>",
-            page::Style::Link => "</a>",
+            page::Style::Link => close_link,
             _ => "",
         });
+        if let (page::Style::Link, Some(index)) = (style, link)
+            && at.get() >= cell.links[*index].end
+        {
+            out.push_str(&after_link(*index));
+        }
     };
     for run in &cell.runs {
+        at.set(run.start);
         let wanted: Vec<(page::Style, Option<usize>)> = run
             .styles
             .iter()
@@ -6349,7 +6485,7 @@ fn markup_of(cell: &page::Cell) -> String {
                 page::Style::Code => out.push_str("<tt>"),
                 page::Style::Link => {
                     let href = link.map_or("", |index| cell.links[index].target.as_str());
-                    out.push_str(&format!("<a href=\"{}\">", glib::markup_escape_text(href)));
+                    out.push_str(&open_link(href));
                 }
                 _ => {}
             }
@@ -6363,6 +6499,7 @@ fn markup_of(cell: &page::Cell) -> String {
             .collect();
         out.push_str(&glib::markup_escape_text(&text));
     }
+    at.set(usize::MAX);
     while let Some(last) = open.pop() {
         close(&mut out, &last);
     }
@@ -7410,6 +7547,170 @@ fn save_to(ui: &Ui, path: std::path::PathBuf, document: Document, attached: Vec<
             Err(_) => notice(&ui, "Not saved: the write was interrupted"),
         }
     });
+}
+
+/// Напечатать открытую страницу (Ctrl+P). Картинки для бумаги разбираются
+/// заново, в печатной плотности, и до диалога: экранные мелки для бумаги,
+/// а в обработчиках печати ждать некогда.
+fn print_current(ui: &Ui, state: &Rc<RefCell<State>>, only_selection: bool) {
+    let Some(index) = ui.notebook.current_page() else {
+        return;
+    };
+    let gathered = {
+        let borrowed = state.borrow();
+        let Some(tab) = borrowed.tabs.get(index as usize) else {
+            return;
+        };
+        match (&tab.document, tab.settings || tab.loading) {
+            (Some(document), false) => {
+                let page = page::Page::guarded(document);
+                // Выделенное — смещениями буфера, а они и есть смещения модели.
+                let selection = tab
+                    .view
+                    .buffer()
+                    .selection_bounds()
+                    .map(|(from, to)| (from.offset() as usize, to.offset() as usize));
+                let notes: Vec<notes::Note> = tab
+                    .progress
+                    .as_ref()
+                    .map(|progress| {
+                        borrowed
+                            .notes
+                            .of(&progress.address)
+                            .into_iter()
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let places = paper::places(&page, &notes);
+                let job = paper::Job {
+                    document: document.clone(),
+                    page,
+                    notes,
+                    places,
+                    selection,
+                    options: borrowed.print,
+                    typography: borrowed.typography,
+                    high: borrowed.theme().high,
+                    date: paper::today(),
+                    note_pictures: borrowed.notes.pictures_dir(),
+                };
+                let wanted = paper::wanted(&job, borrowed.images, |url| tab.blobs.get(url));
+                Some((job, wanted))
+            }
+            _ => None,
+        }
+    };
+    let Some((job, wanted)) = gathered else {
+        notice(ui, "Nothing to print yet");
+        return;
+    };
+    if !wanted.is_empty() {
+        notice(ui, "Getting the pictures ready for paper…");
+    }
+    let (address, measure, typography, high) = (
+        job.document.address.clone(),
+        job.measure(),
+        job.typography,
+        job.high,
+    );
+    let ui = ui.clone();
+    let state = state.clone();
+    glib::spawn_future_local(async move {
+        let decoded = if wanted.is_empty() {
+            Vec::new()
+        } else {
+            off_main(move || paper::decode(wanted, address, measure, typography, high))
+                .await
+                .unwrap_or_default()
+        };
+        notice(&ui, "");
+        let has_selection = job.selection.is_some();
+        let sheet = paper::Sheet::new(job, paper::pictures(decoded));
+        run_print(
+            &ui,
+            &state,
+            sheet,
+            has_selection,
+            only_selection && has_selection,
+        );
+    });
+}
+
+/// Диалог печати и сама печать. Принтер и лист запоминаются до конца
+/// запуска.
+///
+/// Диалог — системный: GTK отдаёт печать порталу, где он есть (Flatpak,
+/// а с GTK 4.22 и вне его — KDE рисует свой), на Windows — диалог Windows.
+/// Поэтому своей вкладки в нём нет (портал её не принимает) и «только
+/// выделенное» — своим пунктом меню (`only_selection`): выбор диапазона
+/// «выделение» умеет не всякий диалог.
+fn run_print(
+    ui: &Ui,
+    state: &Rc<RefCell<State>>,
+    sheet: paper::Sheet,
+    has_selection: bool,
+    only_selection: bool,
+) {
+    let operation = gtk::PrintOperation::new();
+    operation.set_job_name(sheet.title());
+    // Пункты — в них же мерит бумага; лист целиком, поля ставит она сама:
+    // поля принтера по умолчанию — 6 мм, колонтитулу там тесно.
+    operation.set_unit(gtk::Unit::Points);
+    operation.set_use_full_page(true);
+    operation.set_embed_page_setup(true);
+    operation.set_allow_async(true);
+    operation.set_support_selection(true);
+    operation.set_has_selection(has_selection);
+    {
+        let borrowed = state.borrow();
+        if let Some(printer) = &borrowed.printer {
+            operation.set_print_settings(Some(printer));
+        }
+        if let Some(setup) = &borrowed.page_setup {
+            operation.set_default_page_setup(Some(setup));
+        }
+    }
+    let sheet = Rc::new(RefCell::new(sheet));
+    {
+        let sheet = sheet.clone();
+        let state = state.clone();
+        operation.connect_begin_print(move |operation, context| {
+            let selection = only_selection
+                || operation
+                    .print_settings()
+                    .is_some_and(|settings| settings.print_pages() == gtk::PrintPages::Selection);
+            let pages = sheet.borrow_mut().lay(context, selection);
+            operation.set_n_pages(pages as i32);
+            state.borrow_mut().page_setup = Some(context.page_setup());
+        });
+    }
+    {
+        let sheet = sheet.clone();
+        operation.connect_draw_page(move |_, context, number| {
+            sheet.borrow().draw(context, number.max(0) as usize);
+        });
+    }
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        operation.connect_done(move |operation, result| match result {
+            gtk::PrintOperationResult::Apply => {
+                state.borrow_mut().printer = operation.print_settings();
+            }
+            gtk::PrintOperationResult::Error => {
+                let why = operation.error().map_or_else(
+                    || "the printer refused".to_owned(),
+                    |error| error.to_string(),
+                );
+                notice(&ui, &format!("Not printed: {why}"));
+            }
+            _ => {}
+        });
+    }
+    if let Err(error) = operation.run(gtk::PrintOperationAction::PrintDialog, Some(&ui.window)) {
+        notice(ui, &format!("Not printed: {error}"));
+    }
 }
 
 fn count(how_many: usize, one: &str, many: &str) -> String {

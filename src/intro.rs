@@ -83,7 +83,7 @@ and the site's own design, so every site looks the same.
 
 **Ctrl+L**\u{a0}address · **Ctrl+T**\u{a0}new\u{a0}tab · **Ctrl+F**\u{a0}find
 · **Ctrl+D**\u{a0}bookmark · **Ctrl+H**\u{a0}history · **Ctrl+S**\u{a0}save
-· **Tab**\u{a0}next\u{a0}link
+· **Ctrl+P**\u{a0}print · **Tab**\u{a0}next\u{a0}link
 ";
 
 /// Та же страница для сенсорного экрана. Клавиш на телефоне нет, а путь

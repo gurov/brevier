@@ -50,7 +50,7 @@ name = "lay"
 required-features = ["typeset", "images"]
 
 [features]
-ui = ["dep:gtk", "dep:pango", "typeset", "images", "save"]
+ui = ["dep:gtk", "dep:pango", "dep:pangocairo", "typeset", "images", "save"]
 # Типографика окна: переносы по языку. Отдельной фичей — cli и корпус
 # в ней не нуждаются, а паттерны переносов лишний вес в их бинарнике.
 typeset = ["dep:hyphenation"]
@@ -76,6 +76,9 @@ encoding_rs = "0.8"
 # кнопками, которое ещё и доступность потеряет.
 gtk = { version = "0.11.4", package = "gtk4", features = ["v4_10"], optional = true }
 htmd = "0.5.5"
+# Печать: текст на лист кладёт Pango через cairo контекста печати GTK —
+# так печатает сам GTK. Привязки той же семьи и версии, что `gtk`.
+pangocairo = { version = "0.22.9", optional = true }
 # Архив прочитанного (#8): LZ4 стандартным кадром, чтобы копию открывал
 # обычный `lz4 -d`. Чистый Rust и без `unsafe` (`safe-*`) — по той же
 # причине, по которой нет SQLite.

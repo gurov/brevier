@@ -678,6 +678,10 @@ pub struct Settings {
     /// со строкой до конца строки (в ней пробелы) и `own-user-agent on`.
     pub user_agent: String,
     pub own_user_agent: bool,
+    /// Что идёт на бумагу вместе со статьёй (раздел «Printing»). Телефон
+    /// не печатает и строку не трогает. Всё включено; в файл — только
+    /// отличие: `print` и перечень включённого.
+    pub print: Printing,
 }
 
 impl Settings {
@@ -685,6 +689,57 @@ impl Settings {
     pub fn readers_agent(&self) -> Option<&str> {
         let agent = self.user_agent.trim();
         (self.own_user_agent && !agent.is_empty()).then_some(agent)
+    }
+}
+
+/// Что печатается вместе со статьёй. Каждое — своим переключателем:
+/// конспекту нужны заметки, но не адреса; чистовику — ни то ни другое.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Printing {
+    /// Адреса ссылок — сносками в конце: в тексте номер, в конце адрес.
+    pub links: bool,
+    /// Выделения на своих местах и заметки разделом в конце.
+    pub notes: bool,
+    /// Колонтитулы: адрес и дата на первом листе, заголовок на остальных,
+    /// номера листов внизу.
+    pub running: bool,
+}
+
+impl Default for Printing {
+    fn default() -> Self {
+        Self {
+            links: true,
+            notes: true,
+            running: true,
+        }
+    }
+}
+
+impl Printing {
+    /// Слова строки `print`: что включено; `none` — ничего.
+    pub fn words(self) -> String {
+        let on: Vec<&str> = [
+            (self.links, "links"),
+            (self.notes, "notes"),
+            (self.running, "running"),
+        ]
+        .into_iter()
+        .filter_map(|(on, word)| on.then_some(word))
+        .collect();
+        if on.is_empty() {
+            "none".to_owned()
+        } else {
+            on.join(",")
+        }
+    }
+
+    pub fn from_words(value: &str) -> Self {
+        let has = |word| value.split(',').any(|part| part.trim() == word);
+        Self {
+            links: has("links"),
+            notes: has("notes"),
+            running: has("running"),
+        }
     }
 }
 
@@ -751,6 +806,7 @@ impl Default for Settings {
             turn: Turning::default(),
             user_agent: String::new(),
             own_user_agent: false,
+            print: Printing::default(),
         }
     }
 }
@@ -809,6 +865,7 @@ impl Settings {
                 "notes" => settings.notes = value != "hidden",
                 "turn" => settings.turn = Turning::from_words(value),
                 "own-user-agent" => settings.own_user_agent = value == "on",
+                "print" => settings.print = Printing::from_words(value),
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
                         settings.typography.face = face;
@@ -903,6 +960,9 @@ impl Settings {
         }
         if self.own_user_agent {
             text.push_str("own-user-agent\ton\n");
+        }
+        if self.print != Printing::default() {
+            text.push_str(&format!("print\t{}\n", self.print.words()));
         }
         if self.paper != Paper::Usual {
             text.push_str(&format!("paper\t{}\n", self.paper.name(false)));
@@ -1901,6 +1961,11 @@ mod tests {
             user_agent: "Mozilla/5.0 (Android 9; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
                 .to_owned(),
             own_user_agent: true,
+            print: Printing {
+                links: false,
+                notes: true,
+                running: false,
+            },
         };
         chosen.save_at(&path);
         assert_eq!(Settings::at(&path), chosen);
@@ -1909,6 +1974,19 @@ mod tests {
                 .unwrap()
                 .contains("paragraphs\tindent")
         );
+        let nothing = Settings {
+            print: Printing {
+                links: false,
+                notes: false,
+                running: false,
+            },
+            ..Settings::default()
+        };
+        nothing.save_at(&path);
+        assert_eq!(Settings::at(&path), nothing);
+        assert!(fs::read_to_string(&path).unwrap().contains("print\tnone"));
+        Settings::default().save_at(&path);
+        assert!(!fs::read_to_string(&path).unwrap().contains("print"));
     }
 
     /// Воздух между абзацами (#59): числом или красной строкой; вне пределов —
