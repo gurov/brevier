@@ -3197,66 +3197,15 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
             "copy-clipboard",
             true,
             glib::closure_local!(move |view: gtk::TextView| {
-                let buffer = view.buffer();
-                let Some((start, end)) = buffer.selection_bounds() else {
-                    return;
-                };
-                // Обработчик зовётся изнутри GTK — состояние может быть занято.
-                // Объект выделения: место, текст и стоит ли он своей строкой.
-                // Нарисованная формула (#16) — исходником `$…$`, как при
-                // сохранении: рисунок в буфер обмена текстом не положить.
-                let within = start.offset()..end.offset();
-                let mut objects: Vec<(i32, String, bool)> = state
-                    .try_borrow()
-                    .ok()
-                    .and_then(|borrowed| {
-                        borrowed
-                            .tabs
-                            .iter()
-                            .find(|tab| tab.view == view)
-                            .map(|tab| {
-                                let tables = tab
-                                    .tables
-                                    .iter()
-                                    .filter(|table| within.contains(&table.at))
-                                    .map(|table| (table.at, table.text.clone(), true));
-                                let formulas = tab.shots.iter().filter_map(|shot| {
-                                    let Slot::Canvas(_, at) = &shot.slot else {
-                                        return None;
-                                    };
-                                    let source = brevier::math::bare(&shot.alt);
-                                    (matches!(shot.source, Source::Formula(_))
-                                        && within.contains(at)
-                                        && !source.is_empty())
-                                    .then(|| (*at, format!("${source}$"), false))
-                                });
-                                tables.chain(formulas).collect()
-                            })
-                    })
-                    .unwrap_or_default();
-                objects.sort_by_key(|(at, ..)| *at);
-                let mut selected = String::new();
-                let mut from = start;
-                for (at, text, block) in &objects {
-                    let object = buffer.iter_at_offset(*at);
-                    selected.push_str(&buffer.text(&from, &object, false));
-                    if *block && !selected.is_empty() && !selected.ends_with('\n') {
-                        selected.push('\n');
-                    }
-                    selected.push_str(text);
-                    if *block {
-                        selected.push('\n');
-                    }
-                    from = buffer.iter_at_offset(at + 1);
-                }
-                selected.push_str(&buffer.text(&from, &end, false));
-                if !objects.is_empty() || brevier::typeset::marked(&selected) {
-                    view.clipboard()
-                        .set_text(&brevier::typeset::plain(&selected));
+                if let Some((text, changed)) = selected_text(&state, &view)
+                    && changed
+                {
+                    view.clipboard().set_text(&text);
                 }
             }),
         );
     }
+    keep_selection_from_primary(state, &view);
 
     if let Some(address) = address {
         open(ui, state, id, address, true);
@@ -3267,6 +3216,116 @@ fn add_tab(ui: &Ui, state: &Rc<RefCell<State>>, address: Option<Address>, histor
         ui.entry.grab_focus();
     }
 }
+
+/// Выделенное в статье — текстом для буфера обмена: таблица в выделении —
+/// своим текстом на месте своего знака (#10), нарисованная формула —
+/// исходником `$…$` (#16), типографские знаки сняты. Второе — отличается ли
+/// это от того, что положил бы GTK сам.
+fn selected_text(state: &Rc<RefCell<State>>, view: &gtk::TextView) -> Option<(String, bool)> {
+    let buffer = view.buffer();
+    let (start, end) = buffer.selection_bounds()?;
+    // Обработчик зовётся изнутри GTK — состояние может быть занято.
+    // Объект выделения: место, текст и стоит ли он своей строкой.
+    let within = start.offset()..end.offset();
+    let mut objects: Vec<(i32, String, bool)> = state
+        .try_borrow()
+        .ok()
+        .and_then(|borrowed| {
+            borrowed
+                .tabs
+                .iter()
+                .find(|tab| &tab.view == view)
+                .map(|tab| {
+                    let tables = tab
+                        .tables
+                        .iter()
+                        .filter(|table| within.contains(&table.at))
+                        .map(|table| (table.at, table.text.clone(), true));
+                    let formulas = tab.shots.iter().filter_map(|shot| {
+                        let Slot::Canvas(_, at) = &shot.slot else {
+                            return None;
+                        };
+                        let source = brevier::math::bare(&shot.alt);
+                        (matches!(shot.source, Source::Formula(_))
+                            && within.contains(at)
+                            && !source.is_empty())
+                        .then(|| (*at, format!("${source}$"), false))
+                    });
+                    tables.chain(formulas).collect()
+                })
+        })
+        .unwrap_or_default();
+    objects.sort_by_key(|(at, ..)| *at);
+    let mut selected = String::new();
+    let mut from = start;
+    for (at, text, block) in &objects {
+        let object = buffer.iter_at_offset(*at);
+        selected.push_str(&buffer.text(&from, &object, false));
+        if *block && !selected.is_empty() && !selected.ends_with('\n') {
+            selected.push('\n');
+        }
+        selected.push_str(text);
+        if *block {
+            selected.push('\n');
+        }
+        from = buffer.iter_at_offset(at + 1);
+    }
+    selected.push_str(&buffer.text(&from, &end, false));
+    let changed = !objects.is_empty() || brevier::typeset::marked(&selected);
+    Some((brevier::typeset::plain(&selected), changed))
+}
+
+/// Выделение статьи не зависит от того, кто владеет PRIMARY. GTK отдаёт
+/// выделенное в PRIMARY (вставка средней кнопкой) из самого буфера и, когда
+/// PRIMARY забирает другая программа, снимает выделение в буфере. Klipper
+/// с синхронизацией выделения и буфера обмена забирает его на каждый шаг
+/// протаскивания — выделенное мелькало и пропадало (13 ноября 2026). Поэтому
+/// буфер в PRIMARY не участвует, а текст туда кладём сами, когда выделение
+/// замерло: чужой хозяин PRIMARY выделения больше не трогает, вставка
+/// средней кнопкой работает — и вставляет чистый текст, как Ctrl+C.
+fn keep_selection_from_primary(state: &Rc<RefCell<State>>, view: &gtk::TextView) {
+    // `GtkTextView` подключает буфер к PRIMARY при `realize` и отключает при
+    // `unrealize`; счёт подключений у буфера — свой. Отключаем после его
+    // подключения и подключаем обратно до его отключения: счёт сходится.
+    view.connect_realize(|view| {
+        view.buffer()
+            .remove_selection_clipboard(&view.primary_clipboard());
+    });
+    view.connect_unrealize(|view| {
+        view.buffer()
+            .add_selection_clipboard(&view.primary_clipboard());
+    });
+    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
+    let state = state.clone();
+    let weak = view.downgrade();
+    view.buffer().connect_mark_set(move |buffer, _, mark| {
+        let selection = buffer.selection_bound();
+        if mark != &buffer.get_insert() && mark != &selection {
+            return;
+        }
+        if let Some(waiting) = pending.borrow_mut().take() {
+            waiting.remove();
+        }
+        if !buffer.has_selection() {
+            return;
+        }
+        let state = state.clone();
+        let weak = weak.clone();
+        let pending_inner = pending.clone();
+        let id = glib::timeout_add_local_once(PRIMARY_SETTLE, move || {
+            pending_inner.borrow_mut().take();
+            let Some(view) = weak.upgrade() else { return };
+            if let Some((text, _)) = selected_text(&state, &view) {
+                view.primary_clipboard().set_text(&text);
+            }
+        });
+        *pending.borrow_mut() = Some(id);
+    });
+}
+
+/// Сколько выделение должно простоять, чтобы уйти в PRIMARY: протаскивание
+/// шлёт шаг на каждый пиксель, и текст на каждый шаг — лишняя работа.
+const PRIMARY_SETTLE: Duration = Duration::from_millis(150);
 
 fn close_tab(ui: &Ui, state: &Rc<RefCell<State>>, index: usize) {
     if index >= state.borrow().tabs.len() {
